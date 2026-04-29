@@ -49,11 +49,16 @@ def collect(agent: BaseAgent) -> StatusSnapshot:
 class WindowView:
     last_call: CallSnapshot | None
     max_tokens: int
+    displayed_input_tokens: int | None
 
 
 def collect_window(agent: BaseAgent) -> WindowView:
     stm = agent.context.short_term_memory
-    return WindowView(last_call=stm.last_call, max_tokens=stm.max_tokens)
+    return WindowView(
+        last_call=stm.last_call,
+        max_tokens=stm.max_tokens,
+        displayed_input_tokens=stm.displayed_input_tokens,
+    )
 
 
 @dataclass(frozen=True)

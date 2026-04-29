@@ -218,18 +218,20 @@ def _render_section_rows(sections: dict[str, int], total_input: int) -> Group:
 
 
 def render_context_panel(view: WindowView) -> RenderableType:
-    if view.last_call is None:
+    if view.last_call is None or view.displayed_input_tokens is None:
         return info("Context window — No consume yet")
 
     last = view.last_call
+    displayed = view.displayed_input_tokens
     sections = _calibrate(last.section_weights, last.input_tokens)
-    pct = _hit_rate(last.input_tokens, view.max_tokens)
+    sections["history"] += displayed - last.input_tokens
+    pct = _hit_rate(displayed, view.max_tokens)
 
     summary_rows: list[RenderableType] = [
         _row("Model", last.model),
         _row(
             "Tokens",
-            f"{last.input_tokens:,} / {view.max_tokens:,} ({pct:.0f}%)",
+            f"{displayed:,} / {view.max_tokens:,} ({pct:.0f}%)",
         ),
         _row("Cache", _format_cache_value(
             last.cache_read, last.cache_creation, last.input_tokens,
@@ -241,34 +243,48 @@ def render_context_panel(view: WindowView) -> RenderableType:
         Text(""),
         *summary_rows,
         Text(""),
-        _render_fill_bar(last.input_tokens, view.max_tokens),
+        _render_fill_bar(displayed, view.max_tokens),
         Text(""),
-        _render_section_rows(sections, last.input_tokens),
+        _render_section_rows(sections, displayed),
     )
 
 
 # ── /usage panel ─────────────────────────────────────────────────────
 
+def _bucket_col_widths(
+    *bucket_groups: dict[str, BucketView],
+) -> tuple[int, int, int]:
+    """Compute (name_w, in_w, out_w) across all bucket groups so multiple
+    sections render with the same column boundaries."""
+    all_buckets = [b for group in bucket_groups for b in group.values()]
+    all_keys = [k for group in bucket_groups for k in group]
+    name_w = max((len(k) for k in all_keys), default=0)
+    in_w = max(
+        (len(f"{b.usage.prompt_tokens:,}") for b in all_buckets), default=0,
+    )
+    out_w = max(
+        (len(f"{b.usage.completion_tokens:,}") for b in all_buckets), default=0,
+    )
+    return name_w, in_w, out_w
+
+
 def _render_buckets(
-    buckets: dict[str, BucketView], heading: str, total_input: int,
+    buckets: dict[str, BucketView],
+    heading: str,
+    total_input: int,
+    *,
+    name_w: int,
+    in_w: int,
+    out_w: int,
 ) -> Group:
     rows: list[RenderableType] = [_bar_heading(heading)]
     sorted_items = sorted(
         buckets.items(), key=lambda kv: -kv[1].usage.prompt_tokens,
     )
-    name_w = max((len(k) for k in buckets), default=0)
-    in_w = max(
-        (len(f"{b.usage.prompt_tokens:,}") for b in buckets.values()),
-        default=0,
-    )
-    out_w = max(
-        (len(f"{b.usage.completion_tokens:,}") for b in buckets.values()),
-        default=0,
-    )
     for key, bucket in sorted_items:
         pct = _hit_rate(bucket.usage.prompt_tokens, total_input)
         call_word = "call" if bucket.calls == 1 else "calls"
-        line = Text("    ")
+        line = Text("  ")
         line.append(key.ljust(name_w + 2))
         line.append(f"{pct:>3.0f}% ", style="muted")
         line.append(_inline_bar(pct))
@@ -303,12 +319,19 @@ def render_usage_panel(view: UsageView) -> RenderableType:
         )),
     ]
 
+    name_w, in_w, out_w = _bucket_col_widths(view.by_model, view.by_source)
     return Group(
         info("Session usage"),
         Text(""),
         *summary_rows,
         Text(""),
-        _render_buckets(view.by_model, "By model", view.total.prompt_tokens),
+        _render_buckets(
+            view.by_model, "By model", view.total.prompt_tokens,
+            name_w=name_w, in_w=in_w, out_w=out_w,
+        ),
         Text(""),
-        _render_buckets(view.by_source, "By source", view.total.prompt_tokens),
+        _render_buckets(
+            view.by_source, "By source", view.total.prompt_tokens,
+            name_w=name_w, in_w=in_w, out_w=out_w,
+        ),
     )
