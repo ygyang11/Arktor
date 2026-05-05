@@ -37,7 +37,7 @@ _THINKING_WORDS: tuple[str, ...] = (
     "Musing", "Mulling", "Noodling", "Wandering", "Daydreaming",
     "Weaving", "Untangling", "Unfurling"
     "Wrestling", "Puzzling", "Grappling", "Wading",
-    "Digesting", "Whatchamacalliting"
+    "Digesting", "Whatchamacalliting", "Philosophising"
 )
 
 
