@@ -88,34 +88,18 @@ class OpenAIProvider(BaseLLM):
         )
 
         tc_buffer: dict[int, dict[str, str]] = {}
+        # OpenAI stream usage is a request-total snapshot, not a chunk delta.
+        # Keep the last snapshot and emit it once so upstream adders stay safe.
+        final_usage: Usage | None = None
 
         try:
             stream = await self._client.chat.completions.create(**request_kwargs)
 
             async for chunk in stream:
-                chunk_usage: Usage | None = None
                 if hasattr(chunk, "usage") and chunk.usage:
-                    prompt_details = getattr(chunk.usage, "prompt_tokens_details", None)
-                    cached = getattr(prompt_details, "cached_tokens", 0) or 0
-                    completion_details = getattr(
-                        chunk.usage, "completion_tokens_details", None,
-                    )
-                    reasoning = getattr(completion_details, "reasoning_tokens", 0) or 0
-                    chunk_usage = Usage(
-                        prompt_tokens=chunk.usage.prompt_tokens or 0,
-                        completion_tokens=chunk.usage.completion_tokens or 0,
-                        total_tokens=chunk.usage.total_tokens or 0,
-                        cache_read_tokens=cached,
-                        cache_creation_tokens=0,
-                        reasoning_tokens=reasoning,
-                    )
+                    final_usage = self._parse_usage(chunk.usage)
 
                 if not chunk.choices:
-                    if chunk_usage:
-                        yield StreamDelta(
-                            chunk=MessageChunk(),
-                            usage=chunk_usage,
-                        )
                     continue
                 choice = chunk.choices[0]
                 delta = choice.delta
@@ -156,6 +140,9 @@ class OpenAIProvider(BaseLLM):
                     ),
                     finish_reason=finish_reason,
                 )
+
+            if final_usage is not None:
+                yield StreamDelta(chunk=MessageChunk(), usage=final_usage)
 
         except openai.RateLimitError as e:
             raise LLMRateLimitError(str(e)) from e
@@ -264,23 +251,7 @@ class OpenAIProvider(BaseLLM):
             tool_calls=tool_calls,
         )
 
-        if response.usage:
-            prompt_details = getattr(response.usage, "prompt_tokens_details", None)
-            cached = getattr(prompt_details, "cached_tokens", 0) or 0
-            completion_details = getattr(
-                response.usage, "completion_tokens_details", None,
-            )
-            reasoning = getattr(completion_details, "reasoning_tokens", 0) or 0
-            usage = Usage(
-                prompt_tokens=response.usage.prompt_tokens or 0,
-                completion_tokens=response.usage.completion_tokens or 0,
-                total_tokens=response.usage.total_tokens or 0,
-                cache_read_tokens=cached,
-                cache_creation_tokens=0,
-                reasoning_tokens=reasoning,
-            )
-        else:
-            usage = Usage()
+        usage = OpenAIProvider._parse_usage(response.usage)
 
         return LLMResponse(
             message=message,
@@ -288,6 +259,23 @@ class OpenAIProvider(BaseLLM):
             finish_reason=_map_finish_reason(choice.finish_reason),
             model=response.model,
             raw_response=response,
+        )
+
+    @staticmethod
+    def _parse_usage(raw_usage: Any) -> Usage:
+        if not raw_usage:
+            return Usage()
+        prompt_details = getattr(raw_usage, "prompt_tokens_details", None)
+        cached = getattr(prompt_details, "cached_tokens", 0) or 0
+        completion_details = getattr(raw_usage, "completion_tokens_details", None)
+        reasoning = getattr(completion_details, "reasoning_tokens", 0) or 0
+        return Usage(
+            prompt_tokens=raw_usage.prompt_tokens or 0,
+            completion_tokens=raw_usage.completion_tokens or 0,
+            total_tokens=raw_usage.total_tokens or 0,
+            cache_read_tokens=cached,
+            cache_creation_tokens=0,
+            reasoning_tokens=reasoning,
         )
 
 
