@@ -38,7 +38,9 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
     for m in messages:
         if m.role == Role.USER:
             if m.content:
-                line = Text(f"{PROMPT} ", style="primary")
+                line = Text()
+                line.append(PROMPT, style="primary")
+                line.append(" ")
                 line.append(m.content)
                 console.print(line)
                 console.print()
@@ -52,13 +54,21 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
                 console.print()
 
 
+def _hard_clear(console: Console) -> None:
+    # Rich Console.clear emits \x1b[2J\x1b[H but skips scrollback and is gated
+    # on is_terminal; bypass both with a raw write so the user actually sees a
+    # clean screen on /resume / /new.
+    console.file.write("\x1b[2J\x1b[3J\x1b[H")
+    console.file.flush()
+
+
 def render_post_switch(
     agent: BaseAgent,
     console: Console,
     theme: CliTheme,
     new_id: str,
 ) -> None:
-    console.clear()
+    _hard_clear(console)
     msgs = get_messages(agent)
     if msgs:
         replay(console, theme, slice_last_turns(msgs, 5))

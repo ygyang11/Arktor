@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from rich.console import Console
 
 from agent_cli.render.replay import (
+    _hard_clear,
     _index_results,
     render_post_switch,
     replay,
@@ -100,6 +101,28 @@ def test_replay_user_message_uses_prompt_glyph() -> None:
     assert f"{PROMPT} hello" in out
 
 
+def test_replay_user_content_not_styled_as_primary() -> None:
+    buf = StringIO()
+    console = Console(
+        file=buf, force_terminal=True, color_system="truecolor",
+        width=200, theme=DEFAULT_THEME.rich,
+    )
+    replay(console, DEFAULT_THEME, [Message.user("hello world content")])
+    out = buf.getvalue()
+    # primary color in DEFAULT_THEME (flexoki-dark) is #DA702C — its truecolor
+    # escape is \x1b[38;2;218;112;44m. The PROMPT glyph must carry that span;
+    # the content body must NOT, otherwise the whole user line shows primary.
+    primary_open = "\x1b[38;2;218;112;44m"
+    primary_segments = out.split(primary_open)
+    assert len(primary_segments) >= 2, "PROMPT glyph should carry primary style"
+    # Each opened primary span must close before "hello world content" begins.
+    span_after_first_open = primary_segments[1]
+    reset_pos = span_after_first_open.find("\x1b[0m")
+    content_pos = span_after_first_open.find("hello world content")
+    assert reset_pos != -1 and reset_pos < content_pos, \
+        "primary span must close before user content body"
+
+
 def test_replay_user_skips_empty_content() -> None:
     out = _render(Message.user(""))
     assert out == ""
@@ -165,6 +188,19 @@ def _post_switch(messages: list[Message]) -> str:
     agent.context.short_term_memory._messages = messages
     render_post_switch(agent, console, DEFAULT_THEME, "abc123")
     return buf.getvalue()
+
+
+def test_hard_clear_writes_viewport_and_scrollback_sequences() -> None:
+    buf = StringIO()
+    console = Console(
+        file=buf, force_terminal=False, color_system=None,
+        width=200, theme=DEFAULT_THEME.rich,
+    )
+    _hard_clear(console)
+    raw = buf.getvalue()
+    assert "\x1b[2J" in raw
+    assert "\x1b[3J" in raw
+    assert "\x1b[H" in raw
 
 
 def test_render_post_switch_empty_session_shows_new_marker() -> None:
