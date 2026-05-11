@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from agent_cli.commands.base import Command, CommandContext, CommandResult
-from agent_cli.commands.ui import err, ok, render_session_list, soft
+from agent_cli.commands.ui import err, render_session_list, soft
 
 
 async def _handler(ctx: CommandContext, args: str) -> CommandResult:
@@ -13,10 +13,7 @@ async def _handler(ctx: CommandContext, args: str) -> CommandResult:
             return CommandResult(output=err(
                 ("No session found: ", ""), (target, "warning"),
             ))
-        return CommandResult(
-            output=ok(("Resumed session → ", ""), (target, "primary")),
-            new_session_id=target,
-        )
+        return CommandResult(new_session_id=target)
 
     metas = [m for m in await backend.list_states() if m.session_id != ctx.session_id]
     if not metas:

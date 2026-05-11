@@ -203,6 +203,7 @@ async def test_handle_line_cancelled_keeps_repl_alive() -> None:
         pt_session,
         MagicMock(),
         MagicMock(),
+        MagicMock(),
     )
 
     assert should_exit is False
@@ -246,6 +247,7 @@ async def test_handle_line_shell_lane_dispatches_to_exec_shell(
         pt_session,
         MagicMock(),
         MagicMock(),
+        MagicMock(),
     )
 
     assert should_exit is False
@@ -274,6 +276,7 @@ async def test_handle_line_bare_bang_is_noop() -> None:
         MagicMock(),
         ShellState(),
         pt_session,
+        MagicMock(),
         MagicMock(),
         MagicMock(),
     )
@@ -310,6 +313,7 @@ async def test_handle_line_shell_cancellation_renders_message(
         MagicMock(),
         ShellState(),
         pt_session,
+        MagicMock(),
         MagicMock(),
         MagicMock(),
     )
@@ -373,6 +377,7 @@ async def test_handle_line_shell_cancel_drains_pending_writes_before_banner(
             MagicMock(),
             ShellState(),
             pt_session,
+            MagicMock(),
             MagicMock(),
             MagicMock(),
         )
@@ -471,6 +476,7 @@ async def _drive_run_repl(mocks: dict[str, object]) -> None:
         mocks["pt_session"],
         ShellState(),
         cli_hooks,
+        MagicMock(),
     )
 
 

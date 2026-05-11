@@ -122,3 +122,33 @@ class MarkdownStream:
             (self._first_line_prefix if i == 0 else _CONT_LINE_PREFIX) + line
             for i, line in enumerate(raw)
         ]
+
+
+def render_markdown_block(
+    console: Console, text: str, theme: CliTheme,
+) -> None:
+    if not text:
+        return
+    prefix_buf = io.StringIO()
+    Console(
+        file=prefix_buf,
+        force_terminal=True,
+        color_system="truecolor",
+        theme=theme.rich,
+        width=10,
+    ).print(Text(f"{TOOL_DONE} ", style="primary"), end="")
+    first_prefix = "\x1b[0m" + prefix_buf.getvalue()
+
+    body_buf = io.StringIO()
+    Console(
+        file=body_buf,
+        force_terminal=True,
+        color_system="truecolor",
+        width=max(console.width - _INDENT_COLS, 20),
+    ).print(Markdown(text))
+    raw = body_buf.getvalue().splitlines(keepends=True)
+    out = "".join(
+        (first_prefix if i == 0 else _CONT_LINE_PREFIX) + line
+        for i, line in enumerate(raw)
+    )
+    console.print(Text.from_ansi(out), end="")

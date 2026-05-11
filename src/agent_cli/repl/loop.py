@@ -40,7 +40,8 @@ from agent_cli.runtime.session import (
 )
 from agent_cli.runtime.shell import ShellState
 from agent_cli.runtime.sigint import bind_work
-from agent_cli.theme import APPROVAL, COMPRESSION, PROMPT
+from agent_cli.render.replay import render_post_switch
+from agent_cli.theme import APPROVAL, COMPRESSION, PROMPT, CliTheme
 from agent_harness.agent.base import BaseAgent
 from agent_harness.core.message import Message, Role
 from agent_harness.session.base import BaseSession
@@ -138,6 +139,7 @@ async def run_repl(
     pt_session: PromptSession[str],
     shell_state: ShellState,
     cli_hooks: CliHooks,
+    theme: CliTheme,
 ) -> None:
     paste_store = PasteStore()
     paste_processors: list[Processor] = [PastePlaceholderProcessor()]
@@ -216,7 +218,7 @@ async def run_repl(
                 if raw.strip():
                     if await _handle_line(
                         raw, agent, console, registry, session_id, save, adapter, handler,
-                        shell_state, pt_session, cli_hooks, session_backend,
+                        shell_state, pt_session, cli_hooks, session_backend, theme,
                     ):
                         break
                 continue
@@ -289,6 +291,7 @@ async def _handle_line(
     pt_session: PromptSession[str],
     cli_hooks: CliHooks,
     session_backend: BaseSession,
+    theme: CliTheme,
 ) -> bool:
     console.print()
 
@@ -348,6 +351,9 @@ async def _handle_line(
         if result.new_session_id is not None:
             await switch_session(
                 agent, session_backend, handler, save, result.new_session_id,
+            )
+            render_post_switch(
+                agent, console, theme, session_backend.session_id,
             )
         if result.should_exit:
             return True

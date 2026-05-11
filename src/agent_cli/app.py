@@ -106,6 +106,7 @@ async def _async_main() -> int:
             pt_session,
             shell_state,
             hooks,
+            theme,
         )
     finally:
         shell_state.cleanup()

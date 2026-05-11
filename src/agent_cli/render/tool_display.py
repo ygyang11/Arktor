@@ -323,6 +323,30 @@ def _format_result_line(row: _ToolRow) -> Text | None:
     return line
 
 
+def render_completed_call(
+    tc: ToolCall, tr: ToolResult | None,
+) -> RenderableType:
+    if tr is None:
+        status: RowStatus = "running"
+    elif _is_error_result(tr):
+        status = "error"
+    else:
+        status = "done"
+    row = _ToolRow(
+        id=tc.id,
+        name=tc.name,
+        args_preview=_args_preview(tc.name, tc.arguments),
+        status=status,
+        tool_call=tc,
+        result=tr,
+    )
+    parts: list[RenderableType] = [_format_call_line(row)]
+    line = _format_result_line(row)
+    if line is not None:
+        parts.append(line)
+    return Group(*parts)
+
+
 def format_attachment_line(tc: ToolCall, tr: ToolResult) -> Text:
     """Body Text for one attachment row."""
     target = (
