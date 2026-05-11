@@ -47,7 +47,7 @@ CMD = Command(
     name="/compact",
     description=(
         "Compact conversation history and keep a summary in context"
-        "(accepts optional extra instructions)"
+        " (accepts optional extra instructions)"
     ),
     handler=handle,
 )

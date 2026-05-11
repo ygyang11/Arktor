@@ -214,7 +214,7 @@ def render_permissions_panel(policy: ApprovalPolicy) -> RenderableType:
 _RESUME_LIMIT = 10
 
 
-def _relative_time(dt: datetime) -> str:
+def relative_time(dt: datetime) -> str:
     now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
     delta = now - dt
     secs = delta.total_seconds()
@@ -238,7 +238,7 @@ def render_session_list(metas: list[SessionMeta]) -> RenderableType:
         line = Text("  ")
         line.append(m.session_id, style="primary")
         line.append("  ")
-        line.append(_relative_time(m.updated_at).rjust(10), style="muted")
+        line.append(relative_time(m.updated_at).rjust(10), style="muted")
         line.append("  ")
         line.append(f"{m.message_count} msg".rjust(7), style="muted")
         line.append("  ")
