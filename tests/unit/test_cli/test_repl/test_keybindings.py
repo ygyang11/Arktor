@@ -11,7 +11,13 @@ from agent_cli.repl.paste import CHAR_THRESHOLD, PasteStore
 
 
 def _kb():
-    return build_keybindings(paste_store=PasteStore())
+    return build_keybindings(paste_store=PasteStore(), agent=_stub_agent())
+
+
+def _stub_agent() -> MagicMock:
+    agent = MagicMock()
+    agent._approval.mode = "auto"
+    return agent
 
 
 def _find_handler(kb: object, key: str | Keys):
@@ -91,7 +97,7 @@ def _bp_event(data: str, buf: Buffer) -> SimpleNamespace:
 
 def test_bracketed_paste_below_threshold_inserts_verbatim() -> None:
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
@@ -103,7 +109,7 @@ def test_bracketed_paste_below_threshold_inserts_verbatim() -> None:
 
 def test_bracketed_paste_above_char_threshold_inserts_placeholder() -> None:
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
     big = "x" * (CHAR_THRESHOLD + 1)
@@ -116,7 +122,7 @@ def test_bracketed_paste_above_char_threshold_inserts_placeholder() -> None:
 
 def test_bracketed_paste_above_line_threshold_inserts_placeholder() -> None:
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
     text = "a\nb\nc\nd"
@@ -129,7 +135,7 @@ def test_bracketed_paste_above_line_threshold_inserts_placeholder() -> None:
 
 def test_bracketed_paste_normalizes_crlf() -> None:
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
@@ -141,7 +147,7 @@ def test_bracketed_paste_normalizes_crlf() -> None:
 
 def test_bracketed_paste_normalizes_lone_cr() -> None:
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
@@ -153,7 +159,7 @@ def test_bracketed_paste_normalizes_lone_cr() -> None:
 def test_bracketed_paste_registers_normalized_for_threshold() -> None:
     # "\r\n" * 4 → 4 visual lines after normalization → triggers
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
@@ -165,7 +171,7 @@ def test_bracketed_paste_registers_normalized_for_threshold() -> None:
 
 def test_bracketed_paste_empty_data_no_op() -> None:
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
@@ -177,7 +183,7 @@ def test_bracketed_paste_empty_data_no_op() -> None:
 
 def test_bracketed_paste_none_data_no_op() -> None:
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
@@ -201,7 +207,7 @@ def _backspace_handlers(kb) -> list:
 
 
 def test_backspace_bound_to_both_canonical_and_c_h() -> None:
-    kb = build_keybindings(paste_store=PasteStore())
+    kb = build_keybindings(paste_store=PasteStore(), agent=_stub_agent())
     # Both spellings should be registered (defensive against terminal/version
     # divergence). Even though Keys.Backspace.value == 'c-h' today, we count
     # 2 bindings for documentation + future compatibility.
@@ -211,7 +217,7 @@ def test_backspace_bound_to_both_canonical_and_c_h() -> None:
 
 def test_backspace_filter_excludes_selection() -> None:
     # Default has_selection backspace must continue to handle selection cuts.
-    kb = build_keybindings(paste_store=PasteStore())
+    kb = build_keybindings(paste_store=PasteStore(), agent=_stub_agent())
     bindings = _backspace_handlers(kb)
     for b in bindings:
         # Filter is `~has_selection`; calling it with True (selection present)
@@ -222,7 +228,7 @@ def test_backspace_filter_excludes_selection() -> None:
 def test_backspace_atomic_delete_when_trailing_placeholder() -> None:
     store = PasteStore()
     store._contents[1] = "ORIGINAL"
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _backspace_handlers(kb)[0].handler
 
     text = "see [Pasted text #1 +2 lines]"
@@ -238,7 +244,7 @@ def test_backspace_atomic_delete_when_trailing_placeholder() -> None:
 
 def test_backspace_normal_text_deletes_one_char() -> None:
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _backspace_handlers(kb)[0].handler
 
     buf = Buffer(document=Document("hello", cursor_position=5))
@@ -252,7 +258,7 @@ def test_backspace_placeholder_in_middle_deletes_one_char() -> None:
     # cursor not at end of placeholder; should fall back to char delete
     store = PasteStore()
     store._contents[1] = "x"
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _backspace_handlers(kb)[0].handler
 
     text = "[Pasted text #1] trailing"
@@ -268,7 +274,7 @@ def test_backspace_multiple_placeholders_deletes_only_trailing() -> None:
     store = PasteStore()
     store._contents[1] = "AAA"
     store._contents[2] = "BBB"
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _backspace_handlers(kb)[0].handler
 
     text = "[Pasted text #1] mid [Pasted text #2]"
@@ -283,7 +289,7 @@ def test_backspace_multiple_placeholders_deletes_only_trailing() -> None:
 
 def test_backspace_at_buffer_start_no_crash() -> None:
     store = PasteStore()
-    kb = build_keybindings(paste_store=store)
+    kb = build_keybindings(paste_store=store, agent=_stub_agent())
     handler = _backspace_handlers(kb)[0].handler
 
     buf = Buffer()

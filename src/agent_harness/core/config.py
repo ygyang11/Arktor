@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -226,7 +226,7 @@ class SubAgentConfig(BaseModel):
 class ApprovalConfig(BaseModel):
     """Configuration for the approval system."""
 
-    mode: str = "never"  # "never" | "auto" | "always"
+    mode: Literal["never", "ask", "auto"] = "never"
     always_allow: list[str] = Field(default_factory=list)
     always_deny: list[str] = Field(default_factory=list)
 

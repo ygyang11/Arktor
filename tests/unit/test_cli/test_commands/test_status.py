@@ -9,7 +9,7 @@ async def test_status_prints_three_sections() -> None:
     console = MagicMock()
     agent = MagicMock()
     agent.llm.model_name = "gpt-4o"
-    agent.context.config.approval.mode = "auto"
+    agent._approval.mode = "auto"
     stm = MagicMock()
     stm._messages = [1, 2, 3]
     stm.displayed_input_tokens = 12_345

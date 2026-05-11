@@ -9,6 +9,8 @@ from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
 from rich.text import Text
 
+from agent_cli.commands.ui import MODE_INFO
+from agent_cli.runtime.session import current_mode_key
 from agent_cli.theme import SEP_DOT
 from agent_harness.agent.base import BaseAgent
 
@@ -95,17 +97,25 @@ def shorten_home(cwd: str) -> str:
 
 
 def make_status_bar_text(agent: BaseAgent) -> Callable[[], HTML]:
-    """Snapshot once; return closure that right-aligns against terminal width."""
+    """Return a closure that re-collects every render so mode/tokens stay live."""
     from agent_cli.runtime.status import collect as collect_status
 
-    snap = collect_status(agent)
-    cur_str = _fmt(snap.input_tokens) if snap.input_tokens is not None else "—"
-    content = f"{snap.model} · {cur_str}/{_fmt(snap.max_tokens)} "
-
     def _render() -> HTML:
+        snap = collect_status(agent)
+        cur = _fmt(snap.input_tokens) if snap.input_tokens is not None else "—"
+        info = MODE_INFO[current_mode_key(agent)]
+
+        hint = "(shift+tab to cycle)"
+        right = f"{snap.model} · {cur}/{_fmt(snap.max_tokens)}"
+        left_plain = f" {info.label} mode {hint}"
+        right_plain = f"{right} "
         width = get_app().output.get_size().columns
-        pad = max(0, width - len(content))
-        return HTML(" " * pad + content)
+        pad = max(1, width - len(left_plain) - len(right_plain))
+
+        return HTML(
+            f' <{info.style}>{info.label}</{info.style}> mode <muted>{hint}</muted>'
+            f'{" " * pad}{right} '
+        )
 
     return _render
 

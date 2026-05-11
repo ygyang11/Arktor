@@ -1,6 +1,7 @@
 """Command output formatting helpers — line builders + panel renderers."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.console import Group, RenderableType
@@ -11,6 +12,8 @@ from agent_cli.runtime.status import (
     BucketView, StatusSnapshot, UsageView, WindowView,
 )
 from agent_cli.theme import APPROVAL, BAR_EMPTY, BAR_FILLED, SEP_DOT, TOOL_DONE
+from agent_harness.approval.policy import ApprovalPolicy
+from agent_harness.approval.rules import PermissionRule
 from agent_harness.memory.short_term import SectionWeights
 
 _FILL_BAR_WIDTH = 60
@@ -127,6 +130,81 @@ def err(*parts: _Segment) -> Text:
 def soft(*parts: _Segment) -> Text:
     """Soft no-op notice — mid-dot in muted colour."""
     return _build(SEP_DOT, "muted", parts)
+
+
+# ── mode info + /permissions panel ───────────────────────────────────
+
+@dataclass(frozen=True)
+class _ModeInfo:
+    label: str
+    style: str
+    desc: str = ""
+    short: str = ""
+
+
+MODE_INFO: dict[str, _ModeInfo] = {
+    "auto":  _ModeInfo("Auto",  "success",
+                       "Trusted commands run automatically",
+                       "trusted commands auto-allowed"),
+    "ask":   _ModeInfo("Ask",   "warning",
+                       "Approve every tool call individually",
+                       "every call needs approval"),
+    "never": _ModeInfo("Yolo",  "primary",
+                       "Runs anything without asking",
+                       "all calls auto-allowed"),
+    "plan":  _ModeInfo("Plan",  "accent"),
+}
+
+
+def _format_rule(r: PermissionRule) -> str:
+    return f"{r.tool_name}({r.pattern})" if r.pattern else r.tool_name
+
+
+def _render_rule_list(rules: list[PermissionRule]) -> list[Text]:
+    if not rules:
+        return [_row(" ", "—", key_width=1)]
+    sorted_rules = sorted(rules, key=lambda r: (r.tool_name, r.pattern or ""))
+    return [_row(" ", _format_rule(r), key_width=1) for r in sorted_rules]
+
+
+def _render_grants(grants: dict[str, list[list[str]] | None]) -> list[Text]:
+    if not grants:
+        return [_row(" ", "—", key_width=1)]
+    out: list[Text] = []
+    for tool, items in sorted(grants.items()):
+        if items is None:
+            out.append(_row(tool, "(any)"))
+            continue
+        for prefix, kind in items:
+            out.append(_row(tool, f"{kind}: {prefix}"))
+    return out
+
+
+def render_permissions_panel(policy: ApprovalPolicy) -> RenderableType:
+    cur = policy.mode
+    items: list[RenderableType] = [_section_label("Mode")]
+    for internal in ("auto", "ask", "never"):
+        info = MODE_INFO[internal]
+        is_cur = internal == cur
+        line = Text("  ")
+        line.append("▌" if is_cur else " ", style=info.style)
+        line.append(" ")
+        line.append(info.label.ljust(6), style="primary" if is_cur else "muted")
+        line.append(info.desc, style="muted")
+        items.append(line)
+    items += [
+        Text(""), _section_label("Always allow"),
+        *_render_rule_list(policy._allow_rules),
+        Text(""), _section_label("Always deny"),
+        *_render_rule_list(policy._deny_rules),
+        Text(""), _section_label("Session grants"),
+        *_render_grants(policy.export_session_grants()),
+    ]
+    return Panel(
+        Group(*items),
+        title="Permissions", title_align="left",
+        border_style="muted", padding=(0, 1), expand=False,
+    )
 
 
 # ── /status panel ────────────────────────────────────────────────────

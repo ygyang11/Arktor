@@ -125,9 +125,7 @@ class BaseAgent(ABC, EventEmitter):
 
         # Approval setup
         self._approval = resolve_approval(approval, self.context.config)
-        self._approval_handler: ApprovalHandler | None = (
-            resolve_approval_handler(approval_handler) if self._approval is not None else None
-        )
+        self._approval_handler: ApprovalHandler = resolve_approval_handler(approval_handler)
 
         # Set up tool registry and executor
         from agent_harness.tool.base import AgentAware
@@ -373,8 +371,7 @@ class BaseAgent(ABC, EventEmitter):
                     self.name,
                 )
 
-                if self._approval:
-                    self._approval.import_session_grants(state.metadata.get("_approval_grants", {}))
+                self._approval.import_session_grants(state.metadata.get("_approval_grants", {}))
 
         # Normalize input
         if isinstance(input, str):
@@ -448,10 +445,9 @@ class BaseAgent(ABC, EventEmitter):
                 tool_states = self.tool_registry.save_states()
                 if tool_states:
                     ss.metadata["_tool_states"] = tool_states
-                if self._approval:
-                    grants = self._approval.export_session_grants()
-                    if grants:
-                        ss.metadata["_approval_grants"] = grants
+                grants = self._approval.export_session_grants()
+                if grants:
+                    ss.metadata["_approval_grants"] = grants
                 await resolved_session.save_state(ss)
 
         messages = await self.context.short_term_memory.get_context_messages()
@@ -479,8 +475,7 @@ class BaseAgent(ABC, EventEmitter):
 
         from agent_harness.utils.input_mux import mux_input
 
-        if self._approval is not None:
-            self._approval.reset_session()
+        self._approval.reset_session()
 
         input_task: _asyncio.Task[str] | None = None
 
@@ -694,11 +689,6 @@ class BaseAgent(ABC, EventEmitter):
         denied_results: list[ToolResult] = []
 
         for tc in tool_calls:
-            if self._approval is None:
-                await self.hooks.on_tool_call(self.name, tc)
-                approved.append(tc)
-                continue
-
             # Resource extraction
             tool_obj = (
                 self.tool_executor.registry.get(tc.name)
@@ -744,7 +734,6 @@ class BaseAgent(ABC, EventEmitter):
                 )
 
             else:  # ApprovalAction.ASK
-                assert self._approval_handler is not None
                 request = ApprovalRequest(
                     tool_call=tc,
                     agent_name=self.name,

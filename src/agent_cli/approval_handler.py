@@ -17,10 +17,15 @@ from rich.text import Text
 
 from agent_cli.render.tool_display import _display_name
 from agent_cli.runtime import background
+from agent_cli.runtime import session as sess_rt
 from agent_cli.theme import APPROVAL, SEP_DOT
 from agent_harness.agent.base import BaseAgent
 from agent_harness.approval.handler import ApprovalHandler
-from agent_harness.approval.policy import _UNSAFE_SHELL_RE, derive_session_prefix
+from agent_harness.approval.policy import (
+    ApprovalPolicy,
+    _UNSAFE_SHELL_RE,
+    derive_session_prefix,
+)
 from agent_harness.approval.types import ApprovalDecision, ApprovalRequest, ApprovalResult
 
 if TYPE_CHECKING:
@@ -149,7 +154,10 @@ class CliApprovalHandler(ApprovalHandler):
                     f"[bold]{rich_escape(display)}[/bold]"
                 )
 
-            can_always = self._can_grant_session(request)
+            assert self._agent_ref is not None
+            can_always = self._can_grant_session(
+                request, sess_rt.get_policy(self._agent_ref),
+            )
             if can_always:
                 always_sentence = rich_escape(self._always_label(request))
                 panel_body = Text.from_markup(
@@ -200,13 +208,18 @@ class CliApprovalHandler(ApprovalHandler):
             return self._parse_answer(raw, request, allow_session=can_always)
 
     @staticmethod
-    def _can_grant_session(request: ApprovalRequest) -> bool:
+    def _can_grant_session(
+        request: ApprovalRequest, policy: ApprovalPolicy,
+    ) -> bool:
         """False when policy will not honor a prefix grant for this resource.
 
         Mirrors policy._check_command's unsafe-shell fallback: heredocs,
         redirects, backticks, newlines etc. force per-call ASK regardless
-        of session grants — so offering [A]lways would be a lie.
+        of session grants — so offering [A]lways would be a lie. Also
+        false outside `auto` mode where session grants are disabled.
         """
+        if not policy.allows_session_grants():
+            return False
         if request.resource_kind == "command" and request.resource:
             return not _UNSAFE_SHELL_RE.search(request.resource)
         return True

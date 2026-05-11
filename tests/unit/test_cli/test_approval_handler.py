@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent_cli.approval_handler import CliApprovalHandler
+from agent_harness.approval.policy import ApprovalPolicy
 from agent_harness.approval.types import ApprovalDecision, ApprovalRequest
 from agent_harness.core.message import ToolCall
 
@@ -280,37 +281,52 @@ def test_parse_answer_a_falls_back_to_allow_once_when_session_disallowed() -> No
 
 
 def test_can_grant_session_unsafe_shell_returns_false() -> None:
+    policy = ApprovalPolicy(mode="auto")
     req = ApprovalRequest(
         tool_call=ToolCall(id="t1", name="terminal_tool", arguments={}),
         agent_name="cli",
         resource="python - <<'PY'\nprint(1)\nPY",
         resource_kind="command",
     )
-    assert CliApprovalHandler._can_grant_session(req) is False
+    assert CliApprovalHandler._can_grant_session(req, policy) is False
 
 
 def test_can_grant_session_safe_shell_returns_true() -> None:
+    policy = ApprovalPolicy(mode="auto")
     req = ApprovalRequest(
         tool_call=ToolCall(id="t1", name="terminal_tool", arguments={}),
         agent_name="cli",
         resource="python script.py",
         resource_kind="command",
     )
-    assert CliApprovalHandler._can_grant_session(req) is True
+    assert CliApprovalHandler._can_grant_session(req, policy) is True
 
 
 def test_can_grant_session_non_command_resource_returns_true() -> None:
-    """path / url / no-resource cases unchanged."""
+    """path / url / no-resource cases unchanged in auto mode."""
+    policy = ApprovalPolicy(mode="auto")
     req = ApprovalRequest(
         tool_call=ToolCall(id="t1", name="edit_file", arguments={}),
         agent_name="cli",
         resource="src/auth.py",
         resource_kind="path",
     )
-    assert CliApprovalHandler._can_grant_session(req) is True
+    assert CliApprovalHandler._can_grant_session(req, policy) is True
 
     req2 = _request()
-    assert CliApprovalHandler._can_grant_session(req2) is True
+    assert CliApprovalHandler._can_grant_session(req2, policy) is True
+
+
+def test_can_grant_session_returns_false_outside_auto_mode() -> None:
+    """ask / never modes disable session grants entirely."""
+    req = ApprovalRequest(
+        tool_call=ToolCall(id="t1", name="edit_file", arguments={}),
+        agent_name="cli",
+        resource="src/auth.py",
+        resource_kind="path",
+    )
+    assert CliApprovalHandler._can_grant_session(req, ApprovalPolicy(mode="ask")) is False
+    assert CliApprovalHandler._can_grant_session(req, ApprovalPolicy(mode="never")) is False
 
 
 async def test_ctrl_c_during_approval_raises_cancelled_error() -> None:

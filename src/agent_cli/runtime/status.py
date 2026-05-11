@@ -28,12 +28,11 @@ class StatusSnapshot:
 
 
 def collect(agent: BaseAgent) -> StatusSnapshot:
-    cfg = agent.context.config
     stm = agent.context.short_term_memory
     bg_all = background.get_all(agent)
     return StatusSnapshot(
         model=agent.llm.model_name,
-        approval_mode=cfg.approval.mode,
+        approval_mode=agent._approval.mode,
         tool_count=len(agent.tools),
         skill_count=_skill_count(agent),
         message_count=len(stm._messages),

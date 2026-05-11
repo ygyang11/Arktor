@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 from agent_harness.approval.rules import (
@@ -11,6 +11,8 @@ from agent_harness.approval.rules import (
     has_tool_level_rule,
     parse_rules,
 )
+
+ApprovalMode = Literal["never", "ask", "auto"]
 from agent_harness.approval.types import ApprovalAction
 from agent_harness.core.message import ToolCall
 
@@ -56,14 +58,26 @@ class ApprovalPolicy:
     def __init__(
         self,
         *,
-        mode: str = "auto",
+        mode: ApprovalMode = "auto",
         always_allow: set[str] | None = None,
         always_deny: set[str] | None = None,
     ) -> None:
-        self._mode = mode
+        self._mode: ApprovalMode = mode
         self._deny_rules = parse_rules(always_deny or set())
         self._allow_rules = parse_rules(always_allow or set())
         self._session_grants: dict[str, None | set[tuple[str, str]]] = {}
+
+    @property
+    def mode(self) -> ApprovalMode:
+        return self._mode
+
+    def set_mode(self, mode: str) -> None:
+        if mode not in ("never", "ask", "auto"):
+            raise ValueError(f"unknown approval mode: {mode}")
+        self._mode = cast(ApprovalMode, mode)
+
+    def allows_session_grants(self) -> bool:
+        return self._mode == "auto"
 
     def check(
         self,
@@ -76,6 +90,11 @@ class ApprovalPolicy:
             return ApprovalAction.EXECUTE
 
         name = tool_call.name
+
+        if self._mode == "ask":
+            if self._deny_matches(name, resource, kind):
+                return ApprovalAction.DENY
+            return ApprovalAction.ASK
 
         if kind == "command" and resource is not None:
             return self._check_command(name, resource)
@@ -137,9 +156,29 @@ class ApprovalPolicy:
 
     # ── internal ──
 
+    def _deny_matches(
+        self, name: str, resource: str | None, kind: str | None,
+    ) -> bool:
+        """Segment-aware deny check shared by ask / auto modes.
+
+        Mirrors `_check_command`'s split: unsafe-shell commands match against
+        the whole string; safe chained commands match each segment so that
+        `terminal_tool(rm *)` still blocks `git status && rm -rf .`.
+        """
+        if kind == "command" and resource is not None:
+            if _UNSAFE_SHELL_RE.search(resource):
+                return any_rule_matches(self._deny_rules, name, resource)
+            segments = [s.strip() for s in _CHAIN_RE.split(resource) if s.strip()]
+            if not segments:
+                return False
+            return any(
+                any_rule_matches(self._deny_rules, name, seg) for seg in segments
+            )
+        return any_rule_matches(self._deny_rules, name, resource)
+
     def _check_generic(self, name: str, resource: str | None) -> ApprovalAction:
         """deny > allow > session > ASK."""
-        if any_rule_matches(self._deny_rules, name, resource):
+        if self._deny_matches(name, resource, None):
             return ApprovalAction.DENY
         if any_rule_matches(self._allow_rules, name, resource):
             return ApprovalAction.EXECUTE
@@ -153,18 +192,15 @@ class ApprovalPolicy:
         Unsafe shell patterns fall back to tool-level, but deny rules are
         still checked against the full command string first.
         """
+        if self._deny_matches(name, command, "command"):
+            return ApprovalAction.DENY
+
         if _UNSAFE_SHELL_RE.search(command):
-            if any_rule_matches(self._deny_rules, name, command):
-                return ApprovalAction.DENY
             return self._check_generic(name, None)
 
         segments = [s.strip() for s in _CHAIN_RE.split(command) if s.strip()]
         if not segments:
             return self._check_generic(name, None)
-
-        for seg in segments:
-            if any_rule_matches(self._deny_rules, name, seg):
-                return ApprovalAction.DENY
 
         if has_tool_level_rule(self._allow_rules, name):
             return ApprovalAction.EXECUTE

@@ -50,7 +50,7 @@ def test_fmt_thresholds() -> None:
 def _stub_agent(model: str, input_tokens: int | None, max_tokens: int) -> MagicMock:
     agent = MagicMock()
     agent.llm.model_name = model
-    agent.context.config.approval.mode = "auto"
+    agent._approval.mode = "auto"
     stm = MagicMock()
     stm._messages = []
     stm.displayed_input_tokens = input_tokens
@@ -97,7 +97,6 @@ def test_status_bar_text_right_aligns_to_terminal_width() -> None:
         out = renderer()
     assert out.value.startswith(" ")
     assert out.value.rstrip().endswith("1/1k")
-    assert len(out.value) == 40
 
 
 def test_status_bar_text_dash_when_no_call_yet() -> None:

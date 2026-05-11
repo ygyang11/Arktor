@@ -142,8 +142,8 @@ async def run_repl(
     paste_processors: list[Processor] = [PastePlaceholderProcessor()]
 
     pt_session.completer = build_input_completer(registry)
-    pt_session.key_bindings = build_keybindings(paste_store=paste_store)
-    save = make_save_session(agent, session_id, session_backend)
+    pt_session.key_bindings = build_keybindings(paste_store=paste_store, agent=agent)
+    save = make_save_session(agent, session_backend)
 
     state = _LoopState()
 

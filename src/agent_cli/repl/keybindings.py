@@ -10,6 +10,8 @@ from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.keys import Keys
 
 from agent_cli.repl.paste import PasteStore, trailing_placeholder_length
+from agent_cli.runtime import plan_mode, session as sess_rt
+from agent_harness.agent.base import BaseAgent
 
 _CTRL_C_DOUBLE_WINDOW_S = 2.0
 
@@ -24,7 +26,9 @@ def reset_ctrl_c_state() -> None:
     _ctrl_c_state[0] = 0.0
 
 
-def build_keybindings(*, paste_store: PasteStore) -> KeyBindings:
+def build_keybindings(
+    *, paste_store: PasteStore, agent: BaseAgent,
+) -> KeyBindings:
     kb = KeyBindings()
 
     @kb.add(Keys.BracketedPaste)
@@ -93,5 +97,14 @@ def build_keybindings(*, paste_store: PasteStore) -> KeyBindings:
     @kb.add("escape", "enter")
     def _(event: KeyPressEvent) -> None:
         event.current_buffer.insert_text("\n")
+
+    @kb.add("s-tab")
+    def _cycle_mode(event: KeyPressEvent) -> None:
+        cur = sess_rt.current_mode_key(agent)
+        next_mode = sess_rt.cycle_next_mode(cur)
+        if cur == "plan" and next_mode != "plan":
+            plan_mode.exit(agent)
+        sess_rt.apply_mode(agent, next_mode)
+        event.app.invalidate()
 
     return kb

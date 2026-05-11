@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from agent_cli.runtime import plan_mode
 from agent_harness.agent.base import BaseAgent
+from agent_harness.approval.policy import ApprovalPolicy
 from agent_harness.core.message import Message, Role
 from agent_harness.llm import BaseLLM
 from agent_harness.session.base import BaseSession
@@ -16,6 +18,31 @@ from agent_harness.session.base import BaseSession
 logger = logging.getLogger(__name__)
 
 SaveSession = Callable[[], Awaitable[None]]
+
+_MODE_CYCLE: tuple[str, ...] = ("auto", "ask", "never", "plan")
+
+
+def current_mode_key(agent: BaseAgent) -> str:
+    if plan_mode.is_active(agent):
+        return "plan"
+    return agent._approval.mode
+
+
+def apply_mode(agent: BaseAgent, target: str) -> None:
+    if target == "plan":
+        plan_mode.enter(agent)
+        return
+    agent._approval.set_mode(target)
+
+
+def cycle_next_mode(current: str) -> str:
+    if current not in _MODE_CYCLE:
+        return _MODE_CYCLE[0]
+    return _MODE_CYCLE[(_MODE_CYCLE.index(current) + 1) % len(_MODE_CYCLE)]
+
+
+def get_policy(agent: BaseAgent) -> ApprovalPolicy:
+    return agent._approval
 
 
 def reset_approval(agent: BaseAgent) -> None:
@@ -56,17 +83,18 @@ def session_created_at(agent: BaseAgent) -> datetime | None:
 
 
 def make_save_session(
-    agent: BaseAgent, session_id: str, backend: BaseSession,
+    agent: BaseAgent, backend: BaseSession,
 ) -> SaveSession:
     """Build a no-arg async closure that snapshots + persists the current session."""
     async def _save() -> None:
         now = datetime.now()
-        ss = agent.context.to_session_state(session_id, agent_name=agent.name)
+        ss = agent.context.to_session_state(backend.session_id, agent_name=agent.name)
         ss.created_at = session_created_at(agent) or now
         ss.updated_at = now
         tool_states = agent.tool_registry.save_states()
         if tool_states:
             ss.metadata["_tool_states"] = tool_states
+        ss.metadata["_approval_mode"] = agent._approval.mode
         grants = export_approval_grants(agent)
         if grants:
             ss.metadata["_approval_grants"] = grants
