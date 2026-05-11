@@ -11,7 +11,7 @@ from typing import Any, AsyncIterator, Callable, Coroutine, TypeVar
 from agent_harness.core.config import LLMConfig
 from agent_harness.core.errors import LLMConnectionError, LLMError, LLMRateLimitError
 from agent_harness.core.event import EventEmitter
-from agent_harness.core.message import Message, ToolCall
+from agent_harness.core.message import Message, Role, ToolCall
 from agent_harness.llm.types import (
     FinishReason,
     LLMResponse,
@@ -213,6 +213,7 @@ class BaseLLM(ABC, EventEmitter):
         for attempt in range(max_retries + 1):
             content_parts: list[str] = []
             tool_calls: list[ToolCall] | None = None
+            provider_metadata: dict[str, dict[str, Any]] = {}
             total_usage = Usage()
             finish_reason = FinishReason.STOP
 
@@ -225,15 +226,18 @@ class BaseLLM(ABC, EventEmitter):
                         content_parts.append(delta.chunk.delta_content)
                     if delta.chunk.delta_tool_calls:
                         tool_calls = delta.chunk.delta_tool_calls
+                    delta.chunk.merge_provider_metadata_into(provider_metadata)
                     if delta.usage:
                         total_usage = total_usage + delta.usage
                     if delta.finish_reason:
                         finish_reason = delta.finish_reason
 
                 return LLMResponse(
-                    message=Message.assistant(
-                        "".join(content_parts) or None,
+                    message=Message(
+                        role=Role.ASSISTANT,
+                        content="".join(content_parts) or None,
                         tool_calls=tool_calls,
+                        provider_metadata=provider_metadata,
                     ),
                     usage=total_usage,
                     finish_reason=finish_reason,

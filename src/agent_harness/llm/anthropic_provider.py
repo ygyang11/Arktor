@@ -23,6 +23,8 @@ from agent_harness.tool.base import ToolSchema
 
 logger = logging.getLogger(__name__)
 
+_PROTOCOL_KEY = "anthropic"
+
 
 class AnthropicProvider(BaseLLM):
     """Anthropic API provider (Claude 3.5, Claude 4, etc.).
@@ -86,6 +88,8 @@ class AnthropicProvider(BaseLLM):
         )
 
         tc_buffer: dict[int, dict[str, str]] = {}
+        thinking_buffer: dict[int, dict[str, Any]] = {}
+        completed_thinking: list[dict[str, Any]] = []
         last_cum_output = 0
 
         try:
@@ -95,29 +99,74 @@ class AnthropicProvider(BaseLLM):
 
                     if event_type == "content_block_start":
                         block = getattr(event, "content_block", None)
-                        if block and getattr(block, "type", None) == "tool_use":
-                            idx: int = getattr(event, "index", 0)
-                            tc_buffer[idx] = {
+                        btype = getattr(block, "type", None) if block else None
+                        idx_start: int = getattr(event, "index", 0)
+                        if btype == "tool_use":
+                            tc_buffer[idx_start] = {
                                 "id": getattr(block, "id", ""),
                                 "name": getattr(block, "name", ""),
                                 "input_json": "",
                             }
+                        elif btype == "thinking":
+                            thinking_buffer[idx_start] = {
+                                "type": "thinking",
+                                "thinking": "",
+                                "signature": "",
+                            }
+                        elif btype == "redacted_thinking":
+                            completed_thinking.append({
+                                "type": "redacted_thinking",
+                                "data": getattr(block, "data", ""),
+                            })
+                            yield StreamDelta(
+                                chunk=MessageChunk(
+                                    delta_provider_metadata={
+                                        _PROTOCOL_KEY: {"thinking_blocks": list(completed_thinking)},
+                                    },
+                                ),
+                            )
                         continue
 
                     if event_type == "content_block_delta":
                         delta = getattr(event, "delta", None)
-                        if delta and getattr(delta, "type", None) == "input_json_delta":
-                            idx = getattr(event, "index", 0)
-                            if idx in tc_buffer:
-                                tc_buffer[idx]["input_json"] += getattr(
+                        dtype = getattr(delta, "type", None) if delta else None
+                        idx_d = getattr(event, "index", 0)
+                        if dtype == "input_json_delta":
+                            if idx_d in tc_buffer:
+                                tc_buffer[idx_d]["input_json"] += getattr(
                                     delta, "partial_json", ""
                                 )
                             continue
-                        if delta and getattr(delta, "type", None) == "text_delta":
+                        if dtype == "text_delta":
                             yield StreamDelta(
                                 chunk=MessageChunk(delta_content=delta.text),
                             )
                             continue
+                        if dtype == "thinking_delta":
+                            if idx_d in thinking_buffer:
+                                thinking_buffer[idx_d]["thinking"] += getattr(
+                                    delta, "thinking", ""
+                                )
+                            continue
+                        if dtype == "signature_delta":
+                            if idx_d in thinking_buffer:
+                                thinking_buffer[idx_d]["signature"] += getattr(
+                                    delta, "signature", ""
+                                )
+                            continue
+
+                    if event_type == "content_block_stop":
+                        idx_stop = getattr(event, "index", 0)
+                        if idx_stop in thinking_buffer:
+                            completed_thinking.append(thinking_buffer.pop(idx_stop))
+                            yield StreamDelta(
+                                chunk=MessageChunk(
+                                    delta_provider_metadata={
+                                        _PROTOCOL_KEY: {"thinking_blocks": list(completed_thinking)},
+                                    },
+                                ),
+                            )
+                        continue
 
                     if event_type == "message_start":
                         msg = getattr(event, "message", None)
@@ -225,7 +274,7 @@ class AnthropicProvider(BaseLLM):
                     request["tool_choice"] = {"type": "tool", "name": tool_choice}
 
         if self.config.reasoning_effort:
-            request["thinking"] = {"type": "adaptive"}
+            request["thinking"] = {"type": "adaptive", "display": "summarized"}
             request["output_config"] = {"effort": self.config.reasoning_effort}
 
         request.update(kwargs)
@@ -260,25 +309,28 @@ class AnthropicProvider(BaseLLM):
                 })
                 continue
 
-            if msg.role == Role.ASSISTANT and msg.tool_calls:
-                # Anthropic: tool calls are content blocks in assistant message
+            if msg.role == Role.ASSISTANT:
+                sidecar = msg.provider_metadata.get(_PROTOCOL_KEY, {})
                 content_blocks: list[dict[str, Any]] = []
+                for tb in sidecar.get("thinking_blocks", []):
+                    content_blocks.append(tb)
                 if msg.content:
                     content_blocks.append({"type": "text", "text": msg.content})
-                for tc in msg.tool_calls:
+                for tc in (msg.tool_calls or []):
                     content_blocks.append({
                         "type": "tool_use",
                         "id": tc.id,
                         "name": tc.name,
                         "input": tc.arguments,
                     })
+                if not content_blocks:
+                    content_blocks.append({"type": "text", "text": ""})
                 api_messages.append({
                     "role": "assistant",
                     "content": content_blocks,
                 })
                 continue
 
-            # Regular message
             api_messages.append({
                 "role": msg.role.value,
                 "content": msg.content or "",
@@ -297,6 +349,7 @@ class AnthropicProvider(BaseLLM):
         """Convert Anthropic response to LLMResponse."""
         content_text: str | None = None
         tool_calls: list[ToolCall] = []
+        thinking_blocks: list[dict[str, Any]] = []
 
         for block in response.content:
             if block.type == "text":
@@ -307,11 +360,27 @@ class AnthropicProvider(BaseLLM):
                     name=block.name,
                     arguments=block.input if isinstance(block.input, dict) else {},
                 ))
+            elif block.type == "thinking":
+                thinking_blocks.append({
+                    "type": "thinking",
+                    "thinking": block.thinking,
+                    "signature": block.signature,
+                })
+            elif block.type == "redacted_thinking":
+                thinking_blocks.append({
+                    "type": "redacted_thinking",
+                    "data": block.data,
+                })
+
+        provider_metadata: dict[str, dict[str, Any]] = {}
+        if thinking_blocks:
+            provider_metadata[_PROTOCOL_KEY] = {"thinking_blocks": thinking_blocks}
 
         message = Message(
             role=Role.ASSISTANT,
             content=content_text,
             tool_calls=tool_calls if tool_calls else None,
+            provider_metadata=provider_metadata,
         )
 
         if response.usage:

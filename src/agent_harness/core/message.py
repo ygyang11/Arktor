@@ -75,6 +75,7 @@ class Message(BaseModel):
     tool_calls: list[ToolCall] | None = None
     tool_result: ToolResult | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    provider_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now())
 
     # Convenience factory methods
@@ -136,4 +137,16 @@ class MessageChunk(BaseModel):
     """
     delta_content: str | None = None
     delta_tool_calls: list[ToolCall] | None = None
+    delta_provider_metadata: dict[str, dict[str, Any]] | None = None
     finish_reason: str | None = None
+
+    def merge_provider_metadata_into(self, target: dict[str, dict[str, Any]]) -> None:
+        if not self.delta_provider_metadata:
+            return
+        for proto_key, fields in self.delta_provider_metadata.items():
+            bucket = target.setdefault(proto_key, {})
+            for fname, value in fields.items():
+                if isinstance(value, str) and isinstance(bucket.get(fname), str):
+                    bucket[fname] = bucket[fname] + value
+                else:
+                    bucket[fname] = value

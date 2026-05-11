@@ -24,6 +24,9 @@ from agent_harness.tool.base import ToolSchema
 
 logger = logging.getLogger(__name__)
 
+_PROTOCOL_KEY = "openai_chat"
+_REASONING_FIELDS = ("reasoning_content", "reasoning_details")
+
 
 class OpenAIProvider(BaseLLM):
     """OpenAI API provider (GPT-4o, o1, etc.).
@@ -132,10 +135,20 @@ class OpenAIProvider(BaseLLM):
                                 ToolCall(id=buf["id"], name=buf["name"], arguments=args)
                             )
 
+                delta_sidecar: dict[str, Any] = {}
+                for fname in _REASONING_FIELDS:
+                    val = getattr(delta, fname, None)
+                    if val is not None:
+                        delta_sidecar[fname] = val
+                delta_pm: dict[str, dict[str, Any]] | None = (
+                    {_PROTOCOL_KEY: delta_sidecar} if delta_sidecar else None
+                )
+
                 yield StreamDelta(
                     chunk=MessageChunk(
                         delta_content=delta.content,
                         delta_tool_calls=delta_tool_calls,
+                        delta_provider_metadata=delta_pm,
                         finish_reason=choice.finish_reason,
                     ),
                     finish_reason=finish_reason,
@@ -217,6 +230,12 @@ class OpenAIProvider(BaseLLM):
                 for tc in msg.tool_calls
             ]
 
+        if msg.role == Role.ASSISTANT:
+            sidecar = msg.provider_metadata.get(_PROTOCOL_KEY, {})
+            for fname in _REASONING_FIELDS:
+                if fname in sidecar:
+                    result[fname] = sidecar[fname]
+
         if msg.name:
             result["name"] = msg.name
 
@@ -233,7 +252,6 @@ class OpenAIProvider(BaseLLM):
         choice = response.choices[0]
         msg = choice.message
 
-        # Parse tool calls
         tool_calls = None
         if msg.tool_calls:
             tool_calls = [
@@ -245,10 +263,18 @@ class OpenAIProvider(BaseLLM):
                 for tc in msg.tool_calls
             ]
 
+        sidecar: dict[str, Any] = {}
+        for fname in _REASONING_FIELDS:
+            val = getattr(msg, fname, None)
+            if val is not None:
+                sidecar[fname] = val
+        provider_metadata: dict[str, dict[str, Any]] = {_PROTOCOL_KEY: sidecar} if sidecar else {}
+
         message = Message(
             role=Role.ASSISTANT,
             content=msg.content,
             tool_calls=tool_calls,
+            provider_metadata=provider_metadata,
         )
 
         usage = OpenAIProvider._parse_usage(response.usage)

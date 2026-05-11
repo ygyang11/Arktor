@@ -295,3 +295,82 @@ class TestForgetImportanceScore:
         msgs = await mem.get_context_messages()
         assert len(msgs) == 1
         assert msgs[0].content == "high"
+
+
+class TestDisplayedInputTokensWithSidecar:
+
+    @staticmethod
+    def _stm_with_call(
+        *,
+        total_tokens: int,
+        reasoning_tokens: int,
+        last_msg: Message,
+    ) -> ShortTermMemory:
+        stm = ShortTermMemory(model="gpt-4o")
+        stm._messages.append(last_msg)
+        stm.last_call = CallSnapshot(
+            input_tokens=0,
+            completion_tokens=0,
+            total_tokens=total_tokens,
+            cache_read=0,
+            cache_creation=0,
+            reasoning_tokens=reasoning_tokens,
+            model="gpt-4o",
+            message_count=1,
+            section_weights=SectionWeights(
+                system_prompt=0, tools_schema=0, dynamic_system=0, history=0
+            ),
+        )
+        return stm
+
+    def test_subtracts_reasoning_when_sidecar_empty(self) -> None:
+        stm = self._stm_with_call(
+            total_tokens=180,
+            reasoning_tokens=50,
+            last_msg=Message(role=Role.ASSISTANT, content="answer"),
+        )
+        assert stm.displayed_input_tokens == 130
+
+    def test_keeps_reasoning_when_sidecar_has_content(self) -> None:
+        stm = self._stm_with_call(
+            total_tokens=180,
+            reasoning_tokens=50,
+            last_msg=Message(
+                role=Role.ASSISTANT,
+                content="answer",
+                provider_metadata={"openai_chat": {"reasoning_content": "the reasoning"}},
+            ),
+        )
+        assert stm.displayed_input_tokens == 180
+
+    def test_subtracts_when_list_holds_empty_dicts(self) -> None:
+        stm = self._stm_with_call(
+            total_tokens=180,
+            reasoning_tokens=50,
+            last_msg=Message(
+                role=Role.ASSISTANT,
+                content="answer",
+                provider_metadata={"openai_chat": {"reasoning_details": [{}]}},
+            ),
+        )
+        assert stm.displayed_input_tokens == 130
+
+    def test_keeps_when_list_holds_real_content(self) -> None:
+        stm = self._stm_with_call(
+            total_tokens=180,
+            reasoning_tokens=50,
+            last_msg=Message(
+                role=Role.ASSISTANT,
+                content="answer",
+                provider_metadata={"openai_chat": {"reasoning_details": [{"text": "step 1"}]}},
+            ),
+        )
+        assert stm.displayed_input_tokens == 180
+
+    def test_no_reasoning_tokens_means_no_subtraction(self) -> None:
+        stm = self._stm_with_call(
+            total_tokens=180,
+            reasoning_tokens=0,
+            last_msg=Message(role=Role.ASSISTANT, content="answer"),
+        )
+        assert stm.displayed_input_tokens == 180

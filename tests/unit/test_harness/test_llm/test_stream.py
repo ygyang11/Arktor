@@ -5,18 +5,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_harness.core.message import Message
+from agent_harness.core.message import Message, Role, ToolCall
 from agent_harness.llm.types import FinishReason, StreamDelta, Usage
 
 
 def _make_openai_chunk(
     *,
     content: str | None = None,
+    reasoning_content: str | None = None,
+    reasoning_details: list[dict[str, object]] | None = None,
     tool_calls: list[SimpleNamespace] | None = None,
     finish_reason: str | None = None,
     usage: SimpleNamespace | None = None,
 ) -> SimpleNamespace:
-    delta = SimpleNamespace(content=content, tool_calls=tool_calls)
+    delta = SimpleNamespace(
+        content=content,
+        reasoning_content=reasoning_content,
+        reasoning_details=reasoning_details,
+        tool_calls=tool_calls,
+    )
     choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
     return SimpleNamespace(choices=[choice], usage=usage)
 
@@ -238,3 +245,93 @@ def _make_provider(chunks: list[SimpleNamespace]) -> object:
 
 def _usages(deltas: list[StreamDelta]) -> list[Usage]:
     return [d.usage for d in deltas if d.usage is not None]
+
+
+class TestProviderMetadataRoundTrip:
+
+    @pytest.mark.asyncio
+    async def test_streamed_reasoning_content_accumulates(self) -> None:
+        chunks = [
+            _make_openai_chunk(reasoning_content="Let me "),
+            _make_openai_chunk(reasoning_content="think..."),
+            _make_openai_chunk(content="Hello"),
+            _make_openai_chunk(finish_reason="stop"),
+        ]
+        provider = _make_provider(chunks)
+        response = await provider.stream_with_events([Message.user("hi")])
+
+        assert response.message.content == "Hello"
+        assert response.message.provider_metadata == {
+            "openai_chat": {"reasoning_content": "Let me think..."},
+        }
+
+    @pytest.mark.asyncio
+    async def test_streamed_reasoning_details_last_write_wins(self) -> None:
+        chunks = [
+            _make_openai_chunk(reasoning_details=[{"text": "step 1"}]),
+            _make_openai_chunk(reasoning_details=[{"text": "step 1"}, {"text": "step 2"}]),
+            _make_openai_chunk(content="ok"),
+            _make_openai_chunk(finish_reason="stop"),
+        ]
+        provider = _make_provider(chunks)
+        response = await provider.stream_with_events([Message.user("hi")])
+
+        assert response.message.provider_metadata == {
+            "openai_chat": {"reasoning_details": [{"text": "step 1"}, {"text": "step 2"}]},
+        }
+
+    def test_format_message_replays_captured_reasoning_content(self) -> None:
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        msg = Message(
+            role=Role.ASSISTANT,
+            content="answer",
+            tool_calls=[ToolCall(id="x", name="Glob", arguments={})],
+            provider_metadata={"openai_chat": {"reasoning_content": "thinking..."}},
+        )
+        wire = OpenAIProvider._format_message(msg)
+        assert wire["reasoning_content"] == "thinking..."
+        assert "reasoning_details" not in wire
+
+    def test_format_message_replays_captured_reasoning_details(self) -> None:
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        msg = Message(
+            role=Role.ASSISTANT,
+            content="answer",
+            provider_metadata={"openai_chat": {"reasoning_details": [{"text": "x"}]}},
+        )
+        wire = OpenAIProvider._format_message(msg)
+        assert wire["reasoning_details"] == [{"text": "x"}]
+        assert "reasoning_content" not in wire
+
+    def test_format_message_preserves_empty_string(self) -> None:
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        msg = Message(
+            role=Role.ASSISTANT,
+            content="answer",
+            provider_metadata={"openai_chat": {"reasoning_content": ""}},
+        )
+        wire = OpenAIProvider._format_message(msg)
+        assert wire["reasoning_content"] == ""
+
+    def test_format_message_omits_field_when_no_sidecar(self) -> None:
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        msg = Message(role=Role.ASSISTANT, content="hi")
+        wire = OpenAIProvider._format_message(msg)
+        assert "reasoning_content" not in wire
+        assert "reasoning_details" not in wire
+
+    def test_format_message_ignores_foreign_namespace(self) -> None:
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        msg = Message(
+            role=Role.ASSISTANT,
+            content="hi",
+            provider_metadata={"anthropic": {"thinking_blocks": [{"type": "thinking", "thinking": "x", "signature": "s"}]}},
+        )
+        wire = OpenAIProvider._format_message(msg)
+        assert "thinking_blocks" not in wire
+        assert "reasoning_content" not in wire

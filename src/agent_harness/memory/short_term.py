@@ -108,11 +108,29 @@ class ShortTermMemory(BaseMemory):
     def displayed_input_tokens(self) -> int | None:
         if self.last_call is None:
             return None
-        # OpenAI reasoning_tokens are billed-but-ephemeral: counted in
-        # completion_tokens for billing yet never persisted as message content,
-        # so they don't occupy buffer space. Anthropic thinking is persisted
-        # (reasoning_tokens stays 0 there) and stays counted via total_tokens.
-        base = self.last_call.total_tokens - self.last_call.reasoning_tokens
+
+        base = self.last_call.total_tokens
+        if self.last_call.reasoning_tokens > 0:
+            last_idx = self.last_call.message_count - 1
+            last_msg = (
+                self._messages[last_idx]
+                if 0 <= last_idx < len(self._messages)
+                else None
+            )
+            persisted = (
+                last_msg is not None
+                and last_msg.role == Role.ASSISTANT
+                and any(
+                    any(any(item.values()) for item in v if isinstance(item, dict))
+                    if isinstance(v, list)
+                    else v
+                    for ns in last_msg.provider_metadata.values()
+                    for v in ns.values()
+                )
+            )
+            if not persisted:
+                base -= self.last_call.reasoning_tokens
+
         delta = self._messages[self.last_call.message_count:]
         if not delta:
             return base

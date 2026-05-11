@@ -150,7 +150,7 @@ def truncate_text_by_tokens(
 
 def count_messages_tokens(messages: list[Message], model: str = "gpt-4o") -> int:
     """Count total tokens for a list of messages.
-    
+
     Accounts for message structure overhead (role, separators).
     """
     total = 0
@@ -166,6 +166,17 @@ def count_messages_tokens(messages: list[Message], model: str = "gpt-4o") -> int
                 total += count_tokens(str(tc.arguments), model)
         if msg.tool_result:
             total += count_tokens(msg.tool_result.content, model)
+        if msg.provider_metadata:
+            for ns_fields in msg.provider_metadata.values():
+                for v in ns_fields.values():
+                    if isinstance(v, str):
+                        total += count_tokens(v, model)
+                    elif isinstance(v, list):
+                        for item in v:
+                            if isinstance(item, dict):
+                                for fval in item.values():
+                                    if isinstance(fval, str):
+                                        total += count_tokens(fval, model)
 
     total += 3  # assistant reply priming
     return total
