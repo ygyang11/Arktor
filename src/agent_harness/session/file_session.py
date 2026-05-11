@@ -6,7 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from agent_harness.session.base import BaseSession, SessionState
+from agent_harness.session.base import BaseSession, SessionMeta, SessionState
 
 logger = logging.getLogger(__name__)
 
@@ -50,3 +50,18 @@ class FileSession(BaseSession):
     async def clear(self) -> None:
         if self._file_path.exists():
             self._file_path.unlink()
+
+    async def has_session(self, session_id: str) -> bool:
+        if not self._is_valid_id(session_id):
+            return False
+        return (self._dir / f"{session_id}.json").exists()
+
+    async def list_states(self) -> list[SessionMeta]:
+        metas: list[SessionMeta] = []
+        for fp in self._dir.glob("*.json"):
+            try:
+                state = SessionState.model_validate_json(fp.read_text(encoding="utf-8"))
+                metas.append(SessionMeta.from_state(state))
+            except Exception:
+                logger.debug("Skip corrupted session file: %s", fp)
+        return sorted(metas, key=lambda m: m.updated_at, reverse=True)

@@ -8,9 +8,16 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agent_harness.core.message import Message
+from agent_harness.core.message import Message, Role
 
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
+
+
+def _first_user_preview(messages: list[Message], limit: int = 60) -> str:
+    for m in messages:
+        if m.role == Role.USER and m.content:
+            return m.content.strip()[:limit]
+    return ""
 
 
 class SessionState(BaseModel):
@@ -28,15 +35,46 @@ class SessionState(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
 
 
+class SessionMeta(BaseModel):
+    """Lightweight session descriptor for listing without loading full state."""
+
+    session_id: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int
+    first_user_preview: str = ""
+
+    @classmethod
+    def from_state(cls, state: SessionState) -> SessionMeta:
+        return cls(
+            session_id=state.session_id,
+            created_at=state.created_at,
+            updated_at=state.updated_at,
+            message_count=len(state.messages),
+            first_user_preview=_first_user_preview(state.messages),
+        )
+
+
 class BaseSession(ABC):
     """Abstract base for session persistence backends."""
 
+    @staticmethod
+    def _is_valid_id(session_id: str) -> bool:
+        return bool(_SAFE_ID_PATTERN.match(session_id))
+
     def __init__(self, session_id: str) -> None:
-        if not _SAFE_ID_PATTERN.match(session_id):
+        if not self._is_valid_id(session_id):
             raise ValueError(
                 f"session_id must match [a-zA-Z0-9_-], got: {session_id!r}"
             )
         self.session_id = session_id
+
+    def set_session_id(self, new_id: str) -> None:
+        if not self._is_valid_id(new_id):
+            raise ValueError(
+                f"session_id must match [a-zA-Z0-9_-], got: {new_id!r}"
+            )
+        self.session_id = new_id
 
     @abstractmethod
     async def load_state(self) -> SessionState | None: ...
@@ -46,6 +84,12 @@ class BaseSession(ABC):
 
     @abstractmethod
     async def clear(self) -> None: ...
+
+    @abstractmethod
+    async def has_session(self, session_id: str) -> bool: ...
+
+    @abstractmethod
+    async def list_states(self) -> list[SessionMeta]: ...
 
 
 def resolve_session(session: str | BaseSession | None) -> BaseSession | None:

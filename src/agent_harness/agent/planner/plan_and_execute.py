@@ -67,21 +67,16 @@ class PlanAndExecuteAgent(BaseAgent):
         from agent_harness.session.base import resolve_session
 
         resolved_session: BaseSession | None = resolve_session(session)
-        compressor = self.context.short_term_memory.compressor
-        if resolved_session and compressor:
-            compressor.bind_session(resolved_session.session_id)
 
         if self.context.state.is_terminal:
             self.context.state.reset()
 
-        if resolved_session and not await self.context.short_term_memory.get_context_messages():
-            state = await resolved_session.load_state()
-            if state:
-                await self.context.restore_from_state(state, self.system_prompt)
-                self._session_created_at = state.created_at
-                restored_compressor = self.context.short_term_memory.compressor
-                if restored_compressor:
-                    restored_compressor.restore_runtime_state(state.messages)
+        if resolved_session:
+            self._bind_session_id(resolved_session.session_id)
+            if not await self.context.short_term_memory.get_context_messages():
+                state = await resolved_session.load_state()
+                if state:
+                    await self.apply_session_state(state)
 
         if isinstance(input, str):
             input_msg = Message.user(input)

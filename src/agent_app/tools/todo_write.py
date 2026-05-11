@@ -206,6 +206,9 @@ class TodoWriteTool(BaseTool):
     def restore_state(self, state: dict[str, Any]) -> None:
         self._todos = [TodoItem(**t) for t in state.get("todos", [])]
 
+    def reset_state(self) -> None:
+        self._todos.clear()
+
     async def notify_state(self, hooks: DefaultHooks, agent_name: str) -> None:
         await hooks.on_todo_update(
             agent_name,

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from agent_harness.background import BackgroundTask
     from agent_harness.prompt.system_builder import SystemPromptBuilder
     from agent_harness.sandbox.backend import SandboxBackend
-    from agent_harness.session.base import BaseSession
+    from agent_harness.session.base import BaseSession, SessionState
 
 from pydantic import BaseModel, Field
 
@@ -319,6 +319,46 @@ class BaseAgent(ABC, EventEmitter):
         schemas: list[ToolSchema] = self.tool_registry.get_schemas()
         return schemas
 
+    def _bind_session_id(self, session_id: str) -> None:
+        compressor = self.context.short_term_memory.compressor
+        if compressor:
+            compressor.bind_session(session_id)
+        self._bg_manager.bind_session(session_id)
+
+    def _reset_stateful_tools(self) -> None:
+        for tool in self.tool_registry.list_tools():
+            tool.reset_state()
+
+    async def apply_session_state(self, state: SessionState) -> None:
+        self._bind_session_id(state.session_id)
+        await self.context.restore_from_state(state, self.system_prompt)
+        self._session_created_at = state.created_at
+        compressor = self.context.short_term_memory.compressor
+        if compressor:
+            compressor.restore_runtime_state(state.messages)
+        self._reset_stateful_tools()
+        await self.tool_registry.restore_states(
+            state.metadata.get("_tool_states", {}), self.hooks, self.name,
+        )
+        self._approval.import_session_grants(state.metadata.get("_approval_grants", {}))
+        if "_approval_mode" in state.metadata:
+            self._approval.set_mode(state.metadata["_approval_mode"])
+
+    async def reset_session_state(self, new_id: str) -> None:
+        await self.context.short_term_memory.clear()
+        await self.context.working_memory.clear()
+        self.context.variables._agent_store.clear()
+        self.context.variables._global_store.clear()
+        self._reset_stateful_tools()
+        self._approval.reset_session()
+        self.context.state.reset()
+        compressor = self.context.short_term_memory.compressor
+        if compressor:
+            compressor.restore_runtime_state([])
+        self._bind_session_id(new_id)
+        self._run_usage = Usage()
+        self._session_created_at = None
+
     async def run(
         self,
         input: str | Message,
@@ -344,34 +384,15 @@ class BaseAgent(ABC, EventEmitter):
 
         resolved_session: BaseSession | None = resolve_session(session)
 
-        # Propagate session_id to compressor and background manager
-        if resolved_session:
-            if self.context.short_term_memory.compressor:
-                self.context.short_term_memory.compressor.bind_session(resolved_session.session_id)
-            self._bg_manager.bind_session(resolved_session.session_id)
-
-        # Reset state for agent reuse (e.g., team orchestration, pipelines)
         if self.context.state.is_terminal:
             self.context.state.reset()
 
-        # Session, Compressor, Tool restore: only when context is empty (first call or cross-process)
-        if resolved_session and not await self.context.short_term_memory.get_context_messages():
-            state = await resolved_session.load_state()
-            if state:
-                await self.context.restore_from_state(state, self.system_prompt)
-                self._session_created_at = state.created_at
-
-                compressor = self.context.short_term_memory.compressor
-                if compressor:
-                    compressor.restore_runtime_state(state.messages)
-
-                await self.tool_registry.restore_states(
-                    state.metadata.get("_tool_states", {}),
-                    self.hooks,
-                    self.name,
-                )
-
-                self._approval.import_session_grants(state.metadata.get("_approval_grants", {}))
+        if resolved_session:
+            self._bind_session_id(resolved_session.session_id)
+            if not await self.context.short_term_memory.get_context_messages():
+                state = await resolved_session.load_state()
+                if state:
+                    await self.apply_session_state(state)
 
         # Normalize input
         if isinstance(input, str):
@@ -445,6 +466,7 @@ class BaseAgent(ABC, EventEmitter):
                 tool_states = self.tool_registry.save_states()
                 if tool_states:
                     ss.metadata["_tool_states"] = tool_states
+                ss.metadata["_approval_mode"] = self._approval.mode
                 grants = self._approval.export_session_grants()
                 if grants:
                     ss.metadata["_approval_grants"] = grants

@@ -35,6 +35,7 @@ from agent_cli.runtime.session import (
     make_save_session,
     rollback,
     should_rollback,
+    switch_session,
     take_snapshot,
 )
 from agent_cli.runtime.shell import ShellState
@@ -321,10 +322,11 @@ async def _handle_line(
 
     ctx = CommandContext(
         agent=agent,
-        session_id=session_id,
+        session_id=session_backend.session_id,
         registry=registry,
         save_session=save,
         approval_handler=handler,
+        session_backend=session_backend,
     )
     task = asyncio.create_task(registry.dispatch(line, ctx))
     try:
@@ -343,12 +345,16 @@ async def _handle_line(
         if result.output is not None:
             console.print(result.output)
             console.print()
+        if result.new_session_id is not None:
+            await switch_session(
+                agent, session_backend, handler, save, result.new_session_id,
+            )
         if result.should_exit:
             return True
         if result.agent_input:
             await _run(
-                agent, result.agent_input, session_id, console, adapter,
-                cli_hooks, session_backend, save,
+                agent, result.agent_input, session_backend.session_id,
+                console, adapter, cli_hooks, session_backend, save,
             )
         return False
 

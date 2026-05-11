@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from agent_cli.approval_handler import CliApprovalHandler
     from agent_cli.commands.registry import CommandRegistry
     from agent_harness.agent.base import BaseAgent
+    from agent_harness.session.base import BaseSession
 
 
 @dataclass
@@ -22,6 +23,7 @@ class CommandContext:
     registry: CommandRegistry
     save_session: SaveSession
     approval_handler: CliApprovalHandler
+    session_backend: BaseSession
 
 
 @dataclass

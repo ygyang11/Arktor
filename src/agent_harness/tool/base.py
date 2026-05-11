@@ -131,6 +131,9 @@ class BaseTool(ABC):
     def restore_state(self, state: dict[str, Any]) -> None:
         """Restore intermediate state from session data."""
 
+    def reset_state(self) -> None:
+        """Clear intermediate state. Stateful tools override."""
+
     async def notify_state(self, hooks: DefaultHooks, agent_name: str) -> None:
         """Notify hooks after state change. Stateful tools override."""
 

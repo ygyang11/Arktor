@@ -6,14 +6,17 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from agent_cli.runtime import plan_mode
+from agent_cli.runtime import background, plan_mode
 from agent_harness.agent.base import BaseAgent
 from agent_harness.approval.policy import ApprovalPolicy
 from agent_harness.core.message import Message, Role
 from agent_harness.llm import BaseLLM
 from agent_harness.session.base import BaseSession
+
+if TYPE_CHECKING:
+    from agent_cli.approval_handler import CliApprovalHandler
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,10 @@ def get_policy(agent: BaseAgent) -> ApprovalPolicy:
 def reset_approval(agent: BaseAgent) -> None:
     if agent._approval is not None:
         agent._approval.reset_session()
+
+
+def reset_stateful_tools(agent: BaseAgent) -> None:
+    agent._reset_stateful_tools()
 
 
 def export_approval_grants(agent: BaseAgent) -> dict[str, Any] | None:
@@ -101,6 +108,32 @@ def make_save_session(
         await backend.save_state(ss)
 
     return _save
+
+
+async def switch_session(
+    agent: BaseAgent,
+    backend: BaseSession,
+    handler: CliApprovalHandler,
+    save: SaveSession,
+    new_id: str,
+) -> None:
+    handler.cancel_pending()
+    # Drain freshly-completed bg results into current-session transcript and
+    # persist before tear-down, so results that landed between turns are
+    # not silently dropped when the user switches.
+    collected = await agent._collect_background_results()
+    if collected:
+        await save()
+    await background.shutdown(agent)
+    background.clear_tasks(agent)
+    await stop_sandbox(agent)
+
+    backend.set_session_id(new_id)
+    state = await backend.load_state()
+    if state is not None:
+        await agent.apply_session_state(state)
+    else:
+        await agent.reset_session_state(new_id)
 
 
 # ── Turn lifecycle (cancel-rollback) ──

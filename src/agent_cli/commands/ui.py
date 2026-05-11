@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from rich.console import Group, RenderableType
@@ -15,6 +16,7 @@ from agent_cli.theme import APPROVAL, BAR_EMPTY, BAR_FILLED, SEP_DOT, TOOL_DONE
 from agent_harness.approval.policy import ApprovalPolicy
 from agent_harness.approval.rules import PermissionRule
 from agent_harness.memory.short_term import SectionWeights
+from agent_harness.session.base import SessionMeta
 
 _FILL_BAR_WIDTH = 60
 
@@ -205,6 +207,49 @@ def render_permissions_panel(policy: ApprovalPolicy) -> RenderableType:
         title="Permissions", title_align="left",
         border_style="muted", padding=(0, 1), expand=False,
     )
+
+
+# ── /resume session list ─────────────────────────────────────────────
+
+_RESUME_LIMIT = 10
+
+
+def _relative_time(dt: datetime) -> str:
+    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+    delta = now - dt
+    secs = delta.total_seconds()
+    if secs < 60:
+        return "just now"
+    if secs < 3600:
+        return f"{int(secs // 60)}m ago"
+    if secs < 86400:
+        return f"{int(secs // 3600)}h ago"
+    if delta.days < 7:
+        return f"{delta.days}d ago"
+    return dt.strftime("%b %d")
+
+
+def render_session_list(metas: list[SessionMeta]) -> RenderableType:
+    visible = metas[:_RESUME_LIMIT]
+    truncated = len(metas) - len(visible)
+
+    rows: list[RenderableType] = [info("Recent sessions"), Text("")]
+    for m in visible:
+        line = Text("  ")
+        line.append(m.session_id, style="primary")
+        line.append("  ")
+        line.append(_relative_time(m.updated_at).rjust(10), style="muted")
+        line.append("  ")
+        line.append(f"{m.message_count} msg".rjust(7), style="muted")
+        line.append("  ")
+        preview = m.first_user_preview or "(no user input)"
+        line.append(preview)
+        rows.append(line)
+
+    if truncated > 0:
+        rows.append(Text(""))
+        rows.append(soft((f"… and {truncated} more", "")))
+    return Group(*rows)
 
 
 # ── /status panel ────────────────────────────────────────────────────

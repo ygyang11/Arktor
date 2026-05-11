@@ -27,14 +27,7 @@ async def handle(ctx: CommandContext, args: str) -> CommandResult:
     agent.context.variables._agent_store.clear()
     agent.context.variables._global_store.clear()
 
-    for tool in agent.tool_registry.list_tools():
-        reset = getattr(tool, "reset_state", None)
-        if callable(reset):
-            reset()
-            continue
-        todos = getattr(tool, "_todos", None)
-        if isinstance(todos, list):
-            todos.clear()
+    sess.reset_stateful_tools(agent)
 
     sess.reset_approval(agent)
     # Ctrl+C can leave state stuck in non-terminal; next run()'s

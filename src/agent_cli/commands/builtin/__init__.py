@@ -9,7 +9,9 @@ from agent_cli.commands.builtin import (
     exit,
     help,
     model,
+    new,
     permissions,
+    resume,
     status,
     theme,
     usage,
@@ -20,6 +22,6 @@ from agent_cli.commands.registry import CommandRegistry
 def register_builtin(registry: CommandRegistry) -> None:
     for module in (
         help, exit, clear, compact, context, debug, model, permissions,
-        status, theme, usage,
+        resume, new, status, theme, usage,
     ):
         registry.register_command(module.CMD)

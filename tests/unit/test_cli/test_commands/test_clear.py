@@ -15,10 +15,10 @@ async def test_clear_resets_all_runtime_state() -> None:
     agent.context.short_term_memory.clear = AsyncMock()
     agent.context.working_memory.clear = AsyncMock()
 
-    reset_tool = MagicMock(spec=["reset_state"])
-    todo_tool = MagicMock(spec=["_todos"])
-    todo_tool._todos = [{"id": 1, "content": "stale"}]
-    agent.tool_registry.list_tools = MagicMock(return_value=[reset_tool, todo_tool])
+    tool_a = MagicMock(spec=["reset_state"])
+    tool_b = MagicMock(spec=["reset_state"])
+    agent.tool_registry.list_tools = MagicMock(return_value=[tool_a, tool_b])
+    agent._reset_stateful_tools = lambda: [t.reset_state() for t in agent.tool_registry.list_tools()]
 
     agent._approval = MagicMock()
     agent._sandbox.stop = AsyncMock()
@@ -33,8 +33,8 @@ async def test_clear_resets_all_runtime_state() -> None:
 
     agent._bg_manager.shutdown.assert_awaited_once()
     assert agent._bg_manager._tasks == {}
-    reset_tool.reset_state.assert_called_once()
-    assert todo_tool._todos == []
+    tool_a.reset_state.assert_called_once()
+    tool_b.reset_state.assert_called_once()
     agent._approval.reset_session.assert_called_once()
     agent.context.state.reset.assert_called_once()
     compressor.restore_runtime_state.assert_called_once_with([])
