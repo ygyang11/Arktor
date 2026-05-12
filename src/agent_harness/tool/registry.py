@@ -1,6 +1,7 @@
 """Tool registry for managing available tools."""
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from agent_harness.core.registry import Registry
@@ -8,6 +9,11 @@ from agent_harness.tool.base import BaseTool, ToolSchema
 
 if TYPE_CHECKING:
     from agent_harness.hooks.base import DefaultHooks
+
+
+_tool_state_restoring: ContextVar[bool] = ContextVar(
+    "_tool_state_restoring", default=False,
+)
 
 
 class ToolRegistry:
@@ -79,10 +85,14 @@ class ToolRegistry:
         """Restore tool states from session and notify hooks."""
         if not states:
             return
-        for tool in self._registry.list_all().values():
-            if tool.name in states:
-                tool.restore_state(states[tool.name])
-                await tool.notify_state(hooks, agent_name)
+        token = _tool_state_restoring.set(True)
+        try:
+            for tool in self._registry.list_all().values():
+                if tool.name in states:
+                    tool.restore_state(states[tool.name])
+                    await tool.notify_state(hooks, agent_name)
+        finally:
+            _tool_state_restoring.reset(token)
 
     def __contains__(self, name: str) -> bool:
         return self._registry.has(name)

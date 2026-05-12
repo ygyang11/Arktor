@@ -105,6 +105,24 @@ async def test_todo_update_is_queued_not_printed() -> None:
     a.queue_todo.assert_called_once()
 
 
+async def test_todo_update_suppressed_during_tool_state_restore() -> None:
+    """`on_todo_update` skips `queue_todo` while `_tool_state_restoring` is True
+    so a session restore's historical TODO broadcast doesn't surface as if
+    the user had just updated their list."""
+    from agent_harness.tool.registry import _tool_state_restoring
+
+    a = _mock_adapter()
+    hooks = CliHooks(a)
+    token = _tool_state_restoring.set(True)
+    try:
+        await hooks.on_todo_update(
+            "cli", [{"content": "x"}], {"total": 1, "completed": 0},
+        )
+    finally:
+        _tool_state_restoring.reset(token)
+    a.queue_todo.assert_not_called()
+
+
 async def test_on_error_calls_end_step_first_then_prints() -> None:
     a = _mock_adapter()
     hooks = CliHooks(a)

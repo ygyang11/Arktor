@@ -15,6 +15,7 @@ from agent_harness.core.message import ToolCall
 from agent_harness.hooks.base import DefaultHooks
 from agent_harness.hooks.progress import _subagent_active
 from agent_harness.llm.types import LLMRetryInfo, StreamDelta
+from agent_harness.tool.registry import _tool_state_restoring
 from agent_harness.utils.logging_config import setup_logging
 
 _debug_enabled: list[bool] = [False]
@@ -184,6 +185,9 @@ class CliHooks(DefaultHooks):
         # Buffer only: rendering here would collide with the active general tool_display
         # Live table. end_step flushes the buffer after Live exits.
         if _subagent_active.get(False):
+            return
+        if _tool_state_restoring.get(False):
+            # Replayed during session restore — historical, not "just happened".
             return
         self.adapter.queue_todo(todos, stats)
 
