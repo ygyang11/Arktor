@@ -46,3 +46,23 @@ def test_preview_shell_run_long_command_truncated() -> None:
 
 def test_preview_empty_string_returns_empty() -> None:
     assert _format_session_preview("") == ""
+
+
+# ── home_relative_path ───────────────────────────────────────────────
+
+
+def test_home_relative_path_strips_home() -> None:
+    import os
+    from pathlib import Path
+    from agent_cli.commands.ui import home_relative_path
+
+    home = Path.home()
+    p = home / ".agent-harness" / "exports" / "file.md"
+    assert home_relative_path(p) == "~/.agent-harness/exports/file.md"
+    assert home_relative_path(str(p)) == "~/.agent-harness/exports/file.md"
+
+
+def test_home_relative_path_absolute_when_outside_home() -> None:
+    from agent_cli.commands.ui import home_relative_path
+
+    assert home_relative_path("/tmp/x.md") == "/tmp/x.md"

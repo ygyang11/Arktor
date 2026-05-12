@@ -255,6 +255,17 @@ def _format_session_preview(raw: str, limit: int = _PREVIEW_LIMIT) -> str:
     return " ".join(raw.split())[:limit]
 
 
+def home_relative_path(path: str | Path) -> str:
+    """Render ``path`` with the home directory replaced by ``~/`` so it
+    fits on a line and stays copy-pasteable. Falls back to absolute when
+    the path doesn't live under ``$HOME``."""
+    p = Path(path)
+    try:
+        return f"~/{p.relative_to(Path.home())}"
+    except ValueError:
+        return str(p)
+
+
 def relative_time(dt: datetime) -> str:
     now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
     delta = now - dt

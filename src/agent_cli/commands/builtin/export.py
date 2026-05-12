@@ -1,11 +1,11 @@
 """/export — write the current session transcript to markdown."""
 from __future__ import annotations
 
-import time
+from datetime import datetime
 from pathlib import Path
 
 from agent_cli.commands.base import Command, CommandContext, CommandResult
-from agent_cli.commands.ui import ok
+from agent_cli.commands.ui import home_relative_path, ok
 from agent_cli.render.tool_display import args_repr
 from agent_harness.core.message import Message, Role
 
@@ -53,9 +53,9 @@ def _format_tool_group(
 
 
 async def _handler(ctx: CommandContext, args: str) -> CommandResult:
-    out_dir = Path(".agent-harness/exports")
+    out_dir = Path.home() / ".agent-harness" / "sessions" / ctx.session_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    fp = out_dir / f"{ctx.session_id}-{int(time.time())}.md"
+    fp = out_dir / f"export-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
     msgs = await ctx.agent.context.short_term_memory.get_context_messages()
 
     blocks: list[str] = []
@@ -76,7 +76,10 @@ async def _handler(ctx: CommandContext, args: str) -> CommandResult:
         i += 1
 
     fp.write_text("\n".join(blocks), encoding="utf-8")
-    return CommandResult(output=ok(("Exported → ", ""), (str(fp), "primary")))
+    return CommandResult(output=ok(
+        ("Exported → ", ""),
+        (home_relative_path(fp), "primary"),
+    ))
 
 
 CMD = Command(

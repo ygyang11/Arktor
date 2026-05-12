@@ -41,7 +41,7 @@ async def test_feedback_opens_url_and_returns_link(_stub_webbrowser: dict[str, s
 
 async def test_feedback_default_title_when_no_args(_stub_webbrowser: dict[str, str]) -> None:
     await CMD.handler(_ctx(), "")
-    assert "title=Feedback" in _stub_webbrowser["url"]
+    assert "title=Problem-Feedback" in _stub_webbrowser["url"]
 
 
 async def test_feedback_body_includes_metadata(_stub_webbrowser: dict[str, str]) -> None:
