@@ -12,9 +12,10 @@ from agent_cli.repl.mentions import (
     _within,
     expand_mentions,
     find_at_token,
+    is_attachment_turn,
     parse_mentions,
 )
-from agent_harness.core.message import ToolCall, ToolResult
+from agent_harness.core.message import Message, ToolCall, ToolResult
 
 
 class TestFindAtToken:
@@ -277,3 +278,116 @@ class TestExpandMentions:
         await expand_mentions(agent, adapter, "@foo.py @./foo.py")
 
         assert len(captured[0]) == 1
+
+
+# ── is_attachment_turn ───────────────────────────────────────────────
+
+
+class TestIsAttachmentTurn:
+    """Validate the detector contract: a tool_call counts as part of an
+    attachment turn iff one of its string arguments equals one of the
+    user's @-mentions."""
+
+    def test_true_when_path_matches_mention(self) -> None:
+        u = Message.user("look at @foo.py")
+        a = Message.assistant(
+            content="",
+            tool_calls=[ToolCall(
+                id="c1", name="read_file",
+                arguments={"file_path": "foo.py", "limit": 500},
+            )],
+        )
+        assert is_attachment_turn(u, a) is True
+
+    def test_true_for_multiple_mentions_and_tools(self) -> None:
+        u = Message.user("compare @a.py and @src")
+        a = Message.assistant(content="", tool_calls=[
+            ToolCall(id="c1", name="read_file", arguments={"file_path": "a.py"}),
+            ToolCall(id="c2", name="list_dir", arguments={"path": "src"}),
+        ])
+        assert is_attachment_turn(u, a) is True
+
+    def test_true_for_future_tool_name(self) -> None:
+        """Detection is tool-name agnostic — any tool that stores the raw
+        mention text in a string arg should be recognised."""
+        u = Message.user("@foo")
+        a = Message.assistant(
+            content="",
+            tool_calls=[ToolCall(
+                id="c1", name="future_tool",
+                arguments={"target": "foo"},
+            )],
+        )
+        assert is_attachment_turn(u, a) is True
+
+    def test_false_when_agent_calls_unrelated_path(self) -> None:
+        u = Message.user("search for bar")
+        a = Message.assistant(
+            content="",
+            tool_calls=[ToolCall(
+                id="c1", name="read_file",
+                arguments={"file_path": "bar.py"},
+            )],
+        )
+        assert is_attachment_turn(u, a) is False
+
+    def test_false_when_user_has_no_mention(self) -> None:
+        u = Message.user("just chat")
+        a = Message.assistant(
+            content="",
+            tool_calls=[ToolCall(
+                id="c1", name="read_file",
+                arguments={"file_path": "foo.py"},
+            )],
+        )
+        assert is_attachment_turn(u, a) is False
+
+    def test_false_when_assistant_has_content(self) -> None:
+        u = Message.user("@foo.py")
+        a = Message.assistant(
+            content="thinking...",
+            tool_calls=[ToolCall(
+                id="c1", name="read_file",
+                arguments={"file_path": "foo.py"},
+            )],
+        )
+        assert is_attachment_turn(u, a) is False
+
+    def test_false_when_tool_arg_value_is_not_string(self) -> None:
+        """numeric-only arg values can't match a mention path, so a tool
+        with only numeric args is rejected."""
+        u = Message.user("@500 please")
+        a = Message.assistant(
+            content="",
+            tool_calls=[ToolCall(
+                id="c1", name="t",
+                arguments={"limit": 500},
+            )],
+        )
+        assert is_attachment_turn(u, a) is False
+
+    def test_false_when_some_tool_does_not_match(self) -> None:
+        """All tool_calls must correspond to a mention; a mixed turn is
+        not the @-expansion shape (`_build_calls` never produces it)."""
+        u = Message.user("@foo.py")
+        a = Message.assistant(content="", tool_calls=[
+            ToolCall(id="c1", name="read_file", arguments={"file_path": "foo.py"}),
+            ToolCall(id="c2", name="read_file", arguments={"file_path": "unrelated.py"}),
+        ])
+        assert is_attachment_turn(u, a) is False
+
+    def test_false_for_empty_tool_calls(self) -> None:
+        u = Message.user("@foo.py")
+        a = Message.assistant(content="", tool_calls=[])
+        assert is_attachment_turn(u, a) is False
+
+    def test_false_when_user_content_empty(self) -> None:
+        u = Message.user("")
+        a = Message.assistant(
+            content="",
+            tool_calls=[ToolCall(
+                id="c1", name="read_file",
+                arguments={"file_path": "foo.py"},
+            )],
+        )
+        assert is_attachment_turn(u, a) is False

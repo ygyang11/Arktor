@@ -13,10 +13,11 @@ from agent_harness.core.message import Message, Role
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
 
 
-def _first_user_preview(messages: list[Message], limit: int = 60) -> str:
+def _first_user_text(messages: list[Message]) -> str:
+    """Raw content of the first USER message, untransformed."""
     for m in messages:
         if m.role == Role.USER and m.content:
-            return m.content.strip()[:limit]
+            return m.content
     return ""
 
 
@@ -51,7 +52,7 @@ class SessionMeta(BaseModel):
             created_at=state.created_at,
             updated_at=state.updated_at,
             message_count=len(state.messages),
-            first_user_preview=_first_user_preview(state.messages),
+            first_user_preview=_first_user_text(state.messages),
         )
 
 

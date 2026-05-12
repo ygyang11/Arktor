@@ -429,5 +429,24 @@ def format_shell_run(
     return [call, body]
 
 
+def format_attachments(
+    items: list[tuple[ToolCall, ToolResult]],
+) -> list[RenderableType]:
+    """Renderables for a ``@file`` mention expansion: a 'Loaded into context'
+    header followed by one continuation-glyph row per attachment.
+    """
+    rows: list[RenderableType] = []
+    header = Text()
+    header.append(f"{TOOL_DONE}  ", style="primary")
+    header.append("Loaded into context", style="muted")
+    rows.append(header)
+    for tc, tr in items:
+        line = Text()
+        line.append(f"{CONTINUATION}  ", style="muted")
+        line.append_text(format_attachment_line(tc, tr))
+        rows.append(line)
+    return rows
+
+
 # Trigger formatter/expander registration via import side-effect.
 from agent_cli.render import tool_formatters as _tool_formatters  # noqa: F401, E402

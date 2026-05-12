@@ -9,7 +9,7 @@ from typing import Any
 from agent_cli.adapter import CliAdapter
 from agent_cli.runtime.conversation import append_tool_turn
 from agent_harness.agent.base import BaseAgent
-from agent_harness.core.message import ToolCall, ToolResult
+from agent_harness.core.message import Message, ToolCall, ToolResult
 
 _AT_RE = re.compile(r"(?:^|(?<=\s))@([^\s]*)$")
 _MENTION_RE = re.compile(r"(?:^|(?<=\s))@([^\s]+)")
@@ -26,6 +26,26 @@ def find_at_token(text_before_cursor: str) -> tuple[int, str] | None:
 
 def parse_mentions(text: str) -> list[str]:
     return [m.group(1) for m in _MENTION_RE.finditer(text)]
+
+
+def is_attachment_turn(user_msg: Message, asst_msg: Message) -> bool:
+    """True if `(user_msg, asst_msg)` is the persistence shape produced
+    by a `@file` mention expansion.
+    """
+    if asst_msg.content:
+        return False
+    tcs = asst_msg.tool_calls or []
+    if not tcs:
+        return False
+    if not user_msg.content:
+        return False
+    mention_paths = set(parse_mentions(user_msg.content))
+    if not mention_paths:
+        return False
+    return all(
+        any(isinstance(v, str) and v in mention_paths for v in tc.arguments.values())
+        for tc in tcs
+    )
 
 
 async def expand_mentions(

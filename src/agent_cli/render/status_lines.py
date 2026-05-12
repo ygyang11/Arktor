@@ -48,10 +48,50 @@ def _fmt_duration(n: int) -> str:
     return f"{m}m {s}s"
 
 
-def _ansi_accent(theme: CliTheme) -> str:
-    hex_color = theme.palette.primary.lstrip("#")
+def _ansi_color(theme: CliTheme, name: str = "primary") -> str:
+    """Build an ANSI 24-bit colour escape from a CliTheme palette attribute."""
+    hex_color = getattr(theme.palette, name).lstrip("#")
     r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
     return f"\x1b[38;2;{r};{g};{b}m"
+
+
+def _ansi_accent(theme: CliTheme) -> str:
+    return _ansi_color(theme, "primary")
+
+
+def status_line_write(frame: int, accent: str, label: str) -> str:
+    """Render one frame of the standard live status line: ``⠋ <label>…``.
+
+    Shared by `ThinkingLine` and one-off command status lines so they
+    breathe the same spinner + animated-dot cadence."""
+    glyph = SPINNER_FRAMES[frame % len(SPINNER_FRAMES)]
+    dots = ELLIPSIS_FRAMES[(frame // _ELLIPSIS_TICKS) % len(ELLIPSIS_FRAMES)]
+    return f"{accent}{glyph} {label}{dots}{_ANSI_RESET}"
+
+
+def make_command_status_line(
+    console: Console,
+    lock: asyncio.Lock,
+    theme: CliTheme,
+    *,
+    label: str,
+    color: str = "info",
+) -> LiveLine:
+    """Transient status line for command-level operations (e.g. ``/compact``).
+
+    Fixed label, caller-chosen palette colour, no elapsed/effort detail —
+    just the standard spinner + dot animation. Caller does
+    ``await line.start()`` / work / ``await line.stop()``; stop clears
+    the line and the next print reuses that row cleanly."""
+    accent = _ansi_color(theme, color)
+
+    def _write(frame: int, _elapsed: int) -> str:
+        return status_line_write(frame, accent, label)
+
+    return LiveLine(
+        console=console, lock=lock, writer=_write,
+        debounce_s=0.0, tick_s=THINKING_TICK_S,
+    )
 
 
 class ThinkingLine:
@@ -76,11 +116,7 @@ class ThinkingLine:
         )
 
     def _write(self, frame: int, elapsed: int) -> str:
-        glyph = SPINNER_FRAMES[frame % len(SPINNER_FRAMES)]
-        # Decouple dot breathing from spinner: dots advance ~once per second
-        dots = ELLIPSIS_FRAMES[(frame // _ELLIPSIS_TICKS) % len(ELLIPSIS_FRAMES)]
-
-        head = f"{self._accent}{glyph} {self._current_word}{dots}{_ANSI_RESET}"
+        head = status_line_write(frame, self._accent, self._current_word)
         detail = ""
         if elapsed >= _DETAIL_AFTER_S:
             parts = [_fmt_duration(elapsed)]

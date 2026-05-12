@@ -8,6 +8,7 @@ from agent_cli.render.notices import (
     format_expired_notice,
     format_shell_run,
     format_warning,
+    parse_shell_run_envelope,
 )
 from agent_cli.theme import TOOL_DONE
 from agent_harness.utils.token_counter import count_tokens
@@ -174,3 +175,49 @@ def test_shell_run_envelope_close_tag_in_payload_is_escaped() -> None:
     assert s.count(raw_close) == 1
     assert s.endswith(f"\n{raw_close}")
     assert s.startswith("<user-shell-run>\n")
+
+
+# ---------------------------------------------------------------------------
+# parse_shell_run_envelope — inverse of format_shell_run
+# ---------------------------------------------------------------------------
+
+
+def test_parse_roundtrips_success_with_output() -> None:
+    s = format_shell_run("ls", 0, "a\nb")
+    parsed = parse_shell_run_envelope(s)
+    assert parsed == ("ls", "a\nb")
+
+
+def test_parse_roundtrips_empty_output() -> None:
+    s = format_shell_run("cd new", 0, "")
+    parsed = parse_shell_run_envelope(s)
+    assert parsed == ("cd new", "(Completed with no output)")
+
+
+def test_parse_roundtrips_failure_body() -> None:
+    s = format_shell_run("nope", 127, "bash: nope: not found")
+    parsed = parse_shell_run_envelope(s)
+    assert parsed is not None
+    cmd, body = parsed
+    assert cmd == "nope"
+    assert body.startswith("[exit code 127]")
+    assert "bash: nope: not found" in body
+
+
+def test_parse_returns_none_for_non_envelope() -> None:
+    assert parse_shell_run_envelope("hello world") is None
+    assert parse_shell_run_envelope("") is None
+    assert parse_shell_run_envelope("<user-shell-run> truncated") is None
+
+
+def test_parse_returns_none_for_missing_close_tag() -> None:
+    s = "<user-shell-run>\n```sh\nls\n```\nbody"
+    assert parse_shell_run_envelope(s) is None
+
+
+def test_parse_multiline_command() -> None:
+    cmd = "for f in *; do\n  echo $f\ndone"
+    s = format_shell_run(cmd, 0, "a")
+    parsed = parse_shell_run_envelope(s)
+    assert parsed is not None
+    assert parsed[0] == cmd

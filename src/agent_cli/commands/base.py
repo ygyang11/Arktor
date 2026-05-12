@@ -10,6 +10,7 @@ from rich.console import RenderableType
 from agent_cli.runtime.session import SaveSession
 
 if TYPE_CHECKING:
+    from agent_cli.adapter import CliAdapter
     from agent_cli.approval_handler import CliApprovalHandler
     from agent_cli.commands.registry import CommandRegistry
     from agent_harness.agent.base import BaseAgent
@@ -25,6 +26,7 @@ class CommandContext:
     approval_handler: CliApprovalHandler
     session_backend: BaseSession
     refresh_completer: Callable[[], None]
+    adapter: CliAdapter
 
 
 @dataclass

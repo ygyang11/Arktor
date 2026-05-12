@@ -2,14 +2,32 @@
 
 from __future__ import annotations
 
+import re
+
 from rich.text import Text
 
 from agent_cli.theme import TOOL_DONE
 from agent_harness.utils.token_counter import truncate_text_by_tokens
 
 _SHELL_LANE_OUTPUT_TOKENS = 10_000
+_SHELL_RUN_OPEN_TAG = "<user-shell-run>"
 _SHELL_RUN_CLOSE_TAG = "</user-shell-run>"
 _SHELL_RUN_CLOSE_TAG_ESCAPED = "</user-shell-run​>"
+
+_SHELL_RUN_RE = re.compile(
+    r"\A" + re.escape(_SHELL_RUN_OPEN_TAG) + r"\s*\n"
+    r"```sh\n(?P<cmd>.*?)\n```\n"
+    r"(?P<body>.*?)\n" + re.escape(_SHELL_RUN_CLOSE_TAG) + r"\s*\Z",
+    re.DOTALL,
+)
+
+
+def parse_shell_run_envelope(content: str) -> tuple[str, str] | None:
+    """Reverse of :func:`format_shell_run`. Returns (cmd, body) or None."""
+    m = _SHELL_RUN_RE.match(content)
+    if m is None:
+        return None
+    return m.group("cmd"), m.group("body")
 
 
 def _escape_envelope(s: str) -> str:

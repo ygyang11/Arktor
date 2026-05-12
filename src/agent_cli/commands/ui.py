@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from rich.syntax import Syntax
 from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.text import Text
 
 from agent_cli.commands.base import Command
+from agent_cli.render.notices import parse_shell_run_envelope
 from agent_cli.runtime.status import (
     BucketView, StatusSnapshot, UsageView, WindowView,
 )
@@ -76,7 +78,7 @@ def _section_label(label: str) -> Text:
     return Text(label, style="primary")
 
 
-def bar_heading(label: str) -> Text:
+def _bar_heading(label: str) -> Text:
     """Section heading with left-bar accent (indented to match data rows)."""
     t = Text("  ")
     t.append("▌", style="primary")
@@ -211,9 +213,46 @@ def render_permissions_panel(policy: ApprovalPolicy) -> RenderableType:
     )
 
 
+# ── /diff panel ─────────────────────────────────────────────
+
+def render_diff(status_out: str, diff_out: str) -> RenderableType:
+    rows: list[RenderableType] = []
+    status_lines = [line for line in status_out.splitlines() if line]
+    if status_lines:
+        rows.append(_bar_heading("Files"))
+        rows.append(Text(""))
+        for line in status_lines:
+            rows.append(Text(f"  {line}", style="muted"))
+    if diff_out:
+        if status_lines:
+            rows.append(Text(""))
+        rows.append(_bar_heading("Diff"))
+        rows.append(Text(""))
+        rows.append(Syntax(
+            diff_out, "diff", theme="ansi_dark",
+            background_color="default", word_wrap=False,
+        ))
+    return Panel(
+        Group(*rows),
+        title="Uncommitted changes",
+        title_align="left",
+        border_style="muted",
+        padding=(1, 1),
+        expand=False,
+    )
+
 # ── /resume session list ─────────────────────────────────────────────
 
 _RESUME_LIMIT = 10
+_PREVIEW_LIMIT = 60
+
+
+def _format_session_preview(raw: str, limit: int = _PREVIEW_LIMIT) -> str:
+    parsed = parse_shell_run_envelope(raw)
+    if parsed is not None:
+        cmd = " ".join(parsed[0].split())
+        return f"! {cmd}"[:limit]
+    return " ".join(raw.split())[:limit]
 
 
 def relative_time(dt: datetime) -> str:
@@ -273,7 +312,7 @@ def render_session_list(metas: list[SessionMeta]) -> RenderableType:
         line.append("  ")
         line.append(f"{m.message_count} msg".rjust(7), style="muted")
         line.append("  ")
-        preview = m.first_user_preview or "(no user input)"
+        preview = _format_session_preview(m.first_user_preview) or "(no user input)"
         line.append(preview)
         rows.append(line)
 
@@ -431,7 +470,7 @@ def _render_buckets(
     in_w: int,
     out_w: int,
 ) -> Group:
-    rows: list[RenderableType] = [bar_heading(heading)]
+    rows: list[RenderableType] = [_bar_heading(heading)]
     sorted_items = sorted(
         buckets.items(), key=lambda kv: -kv[1].usage.prompt_tokens,
     )

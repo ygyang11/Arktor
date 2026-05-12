@@ -65,6 +65,8 @@ relevant code
 Review focus: {target}
 """
 
+_DEFAULT_REVIEW_TARGET = "the uncommitted changes on this branch (staged and unstaged)"
+
 
 async def _handler(ctx: CommandContext, args: str) -> CommandResult:
     target = args.strip()
@@ -78,7 +80,7 @@ async def _handler(ctx: CommandContext, args: str) -> CommandResult:
             return CommandResult(output=soft(
                 ("Working tree clean — nothing to review", ""),
             ))
-        target = "the uncommitted changes on this branch (staged and unstaged)"
+        target = _DEFAULT_REVIEW_TARGET
 
     prompt = _REVIEW_PROMPT.format(target=target)
     return CommandResult(agent_input=prompt)

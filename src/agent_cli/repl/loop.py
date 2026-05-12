@@ -331,6 +331,7 @@ async def _handle_line(
         approval_handler=handler,
         session_backend=session_backend,
         refresh_completer=lambda: refresh_input_completer(pt_session, registry),
+        adapter=adapter,
     )
     task = asyncio.create_task(registry.dispatch(line, ctx))
     try:

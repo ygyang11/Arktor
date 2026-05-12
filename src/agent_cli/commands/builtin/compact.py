@@ -1,9 +1,39 @@
 """/compact — manually trigger conversation compression."""
 from __future__ import annotations
 
+from pathlib import Path
+
+from rich.text import Text
+
 from agent_cli.commands.base import Command, CommandContext, CommandResult
 from agent_cli.commands.ui import ok, soft
+from agent_cli.render.status_lines import make_command_status_line
 from agent_cli.runtime import session as sess
+
+
+def _display_archive(archive_path: str) -> str:
+    """Home-relative path so the user can copy/paste it to inspect."""
+    p = Path(archive_path)
+    try:
+        return f"~/{p.relative_to(Path.home())}"
+    except ValueError:
+        return str(p)
+
+
+def _compacted_output(res: object) -> Text:
+    """Render ``Compacted: N → M msgs · K archived to ~/...``."""
+    archived = res.original_count - res.compressed_count
+    detail = ""
+    if archived > 0 and res.archive_path:
+        detail = f" · {archived} archived to {_display_archive(res.archive_path)}"
+    return ok(
+        "Compacted: ",
+        (str(res.original_count), "bold"),
+        " → ",
+        (str(res.compressed_count), "bold"),
+        " msgs",
+        (detail, "muted"),
+    )
 
 
 async def handle(ctx: CommandContext, args: str) -> CommandResult:
@@ -16,7 +46,17 @@ async def handle(ctx: CommandContext, args: str) -> CommandResult:
 
     extra = args.strip() or None
     messages = sess.get_messages(agent)
-    new_messages = await compressor.compress(messages, extra_instructions=extra)
+
+    status = make_command_status_line(
+        ctx.adapter.console, ctx.adapter.lock(), ctx.adapter.theme,
+        label="Compacting", color="info",
+    )
+    await status.start()
+    try:
+        new_messages = await compressor.compress(messages, extra_instructions=extra)
+    finally:
+        await status.stop()
+
     sess.set_messages(agent, new_messages)
 
     res = compressor.take_last_result()
@@ -29,18 +69,11 @@ async def handle(ctx: CommandContext, args: str) -> CommandResult:
 
     await ctx.save_session()
 
-    if res is not None:
-        return CommandResult(output=ok(
-            "Compacted: ",
-            (str(res.original_count), "bold"),
-            " → ",
-            (str(res.compressed_count), "bold"),
-            " msgs",
-            (f" (~{res.summary_tokens} tokens)", "muted"),
+    if res is None:
+        return CommandResult(output=soft(
+            "Nothing to compact yet — conversation is still too short",
         ))
-    return CommandResult(output=soft(
-        "Nothing to compact yet — conversation is still too short",
-    ))
+    return CommandResult(output=_compacted_output(res))
 
 
 CMD = Command(
