@@ -338,7 +338,7 @@ class AnthropicProvider(BaseLLM):
 
         system_content = "\n\n".join(system_parts) if system_parts else None
         if len(system_parts) > 1:
-            logger.warning(
+            logger.debug(
                 "Multiple system messages (%d) merged for Anthropic API",
                 len(system_parts),
             )

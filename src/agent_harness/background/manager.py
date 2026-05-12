@@ -85,7 +85,7 @@ class BackgroundTaskManager:
         )
         self._tasks[task_id] = bg_task
         bg_task.asyncio_task = asyncio.create_task(self._run(task_id, coro))
-        logger.info("Background task %s started: %s", task_id, description)
+        logger.debug("Background task %s started: %s", task_id, description)
         return task_id
 
     async def _run(self, task_id: str, coro: Any) -> BackgroundResult:
@@ -96,12 +96,12 @@ class BackgroundTaskManager:
             output_path = self._write_output(task_id, output) if output else None
             task.result = BackgroundResult(summary=summary, output_path=output_path)
             task.status = "completed"
-            logger.info("Background task %s completed", task_id)
+            logger.debug("Background task %s completed", task_id)
             return task.result
         except asyncio.CancelledError:
             coro.close()
             task.status = "cancelled"
-            logger.info("Background task %s cancelled", task_id)
+            logger.debug("Background task %s cancelled", task_id)
             raise
         except Exception as e:
             task.result = BackgroundResult(summary=f"Error: {e}")

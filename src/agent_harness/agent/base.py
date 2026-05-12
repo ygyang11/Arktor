@@ -255,7 +255,7 @@ class BaseAgent(ABC, EventEmitter):
         warning = self._loop_detector.build_warning_message(signal)
         if warning:
             self._pending_loop_warning = warning
-            logger.warning(
+            logger.debug(
                 "Loop %s warning for agent '%s': streak=%d",
                 signal.level,
                 self.name,

@@ -126,7 +126,7 @@ async def read_file(file_path: str, offset: int = 0, limit: int = 2000) -> str:
         return f"Error: {file_path} is a directory. Use list_dir instead."
 
     if is_sensitive_path(resolved):
-        logger.warning("Reading sensitive file: %s", resolved)
+        logger.debug("Reading sensitive file: %s", resolved)
 
     try:
         return _read_file_streaming(resolved, offset, limit)
