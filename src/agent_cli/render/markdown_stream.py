@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import re
 import time
 
 from rich.console import Console
@@ -16,6 +17,27 @@ _MIN_DELAY_FLOOR = 1.0 / 20
 _MIN_DELAY_CEIL = 2.0
 _INDENT_COLS = 2
 _CONT_LINE_PREFIX = "\x1b[0m  "
+
+_PLAN_OPEN_TAG = "<proposed_plan>"
+_PLAN_CLOSE_TAG = "</proposed_plan>"
+_PLAN_HEADER = "**Proposed plan**"
+_PLAN_BLOCK_RE = re.compile(
+    rf"(?ms)^{re.escape(_PLAN_OPEN_TAG)}"
+    rf"(?:\s*\n(.*?))?"
+    rf"(^{re.escape(_PLAN_CLOSE_TAG)}[^\n]*$|\Z)",
+)
+
+
+def _transform_plan_blocks(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        body = (match.group(1) or "").rstrip()
+        if not body:
+            return f"\n\n> {_PLAN_HEADER}\n"
+        quoted = "\n".join(
+            f"> {line}" if line.strip() else ">" for line in body.split("\n")
+        )
+        return f"\n\n> {_PLAN_HEADER}\n>\n{quoted}\n\n"
+    return _PLAN_BLOCK_RE.sub(replace, text)
 
 
 class MarkdownStream:
@@ -109,6 +131,7 @@ class MarkdownStream:
         self._live.update(Text.from_ansi(tail), refresh=True)
 
     def _render_to_ansi_lines(self, text: str) -> list[str]:
+        text = _transform_plan_blocks(text)
         buf = io.StringIO()
         offline = Console(
             file=buf,
@@ -129,6 +152,7 @@ def render_markdown_block(
 ) -> None:
     if not text:
         return
+    text = _transform_plan_blocks(text)
     prefix_buf = io.StringIO()
     Console(
         file=prefix_buf,

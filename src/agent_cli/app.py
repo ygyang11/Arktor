@@ -113,6 +113,7 @@ async def _async_main() -> int:
         shell_state.cleanup()
         uninstall()
         await adapter.end_step()
+        await asyncio.sleep(0)
     return 0
 
 

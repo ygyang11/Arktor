@@ -13,6 +13,7 @@ from agent_harness.core.message import Message, Role
 from agent_harness.llm.types import ProcessUsageMeter
 from agent_harness.memory.short_term import CallSnapshot, ShortTermMemory
 from agent_harness.memory.working_term import WorkingMemory
+from agent_harness.prompt.patch import ContextPatch
 
 if TYPE_CHECKING:
     from agent_harness.hooks.base import DefaultHooks
@@ -66,6 +67,7 @@ class AgentContext:
         self.event_bus = event_bus or EventBus()
         self.tracer = tracer
         self.usage_meter: ProcessUsageMeter = usage_meter or ProcessUsageMeter()
+        self.context_patches: list[ContextPatch] = []
 
     @classmethod
     def create(cls, config: HarnessConfig | None = None, **kwargs: Any) -> AgentContext:
@@ -143,6 +145,7 @@ class AgentContext:
         await self.working_memory.clear()
         self.variables._agent_store.clear()
         self.variables._global_store.clear()
+        self.context_patches.clear()
 
         self.short_term_memory._messages = list(state.messages)
 

@@ -76,7 +76,7 @@ def _section_label(label: str) -> Text:
     return Text(label, style="primary")
 
 
-def _bar_heading(label: str) -> Text:
+def bar_heading(label: str) -> Text:
     """Section heading with left-bar accent (indented to match data rows)."""
     t = Text("  ")
     t.append("▌", style="primary")
@@ -431,7 +431,7 @@ def _render_buckets(
     in_w: int,
     out_w: int,
 ) -> Group:
-    rows: list[RenderableType] = [_bar_heading(heading)]
+    rows: list[RenderableType] = [bar_heading(heading)]
     sorted_items = sorted(
         buckets.items(), key=lambda kv: -kv[1].usage.prompt_tokens,
     )

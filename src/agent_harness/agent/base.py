@@ -122,6 +122,7 @@ class BaseAgent(ABC, EventEmitter):
         self._run_usage = Usage()
         self._usage_source: UsageSource = "main"
         self._session_created_at: datetime | None = None
+        self._session_metadata_extras: dict[str, Any] = {}
 
         # Approval setup
         self._approval = resolve_approval(approval, self.context.config)
@@ -349,6 +350,7 @@ class BaseAgent(ABC, EventEmitter):
         await self.context.working_memory.clear()
         self.context.variables._agent_store.clear()
         self.context.variables._global_store.clear()
+        self.context.context_patches.clear()
         self._reset_stateful_tools()
         self._approval.reset_session()
         self.context.state.reset()
@@ -358,6 +360,7 @@ class BaseAgent(ABC, EventEmitter):
         self._bind_session_id(new_id)
         self._run_usage = Usage()
         self._session_created_at = None
+        self._session_metadata_extras.clear()
 
     async def run(
         self,
@@ -463,6 +466,7 @@ class BaseAgent(ABC, EventEmitter):
                 )
                 ss.created_at = self._session_created_at or now
                 ss.updated_at = now
+                ss.metadata.update(self._session_metadata_extras)
                 tool_states = self.tool_registry.save_states()
                 if tool_states:
                     ss.metadata["_tool_states"] = tool_states
@@ -627,6 +631,14 @@ class BaseAgent(ABC, EventEmitter):
         )
 
         extra_sys: list[Message] = []
+
+        for patch in self.context.context_patches:
+            if patch.at != "system":
+                continue
+            msg = patch.build()
+            if msg:
+                extra_sys.append(msg)
+
         sorted_tools = sorted(self.tools, key=lambda t: t.context_order)
         for tool in sorted_tools:
             ctx_msg = tool.build_context_message()
@@ -644,6 +656,13 @@ class BaseAgent(ABC, EventEmitter):
             long_term_query=long_term_query,
             extra_system_messages=extra_sys or None,
         )
+
+        for patch in self.context.context_patches:
+            if patch.at != "tail":
+                continue
+            msg = patch.build()
+            if msg:
+                messages.append(msg)
 
         if self._pending_loop_warning:
             messages.append(self._pending_loop_warning)

@@ -98,6 +98,7 @@ def make_save_session(
         ss = agent.context.to_session_state(backend.session_id, agent_name=agent.name)
         ss.created_at = session_created_at(agent) or now
         ss.updated_at = now
+        ss.metadata.update(agent._session_metadata_extras)
         tool_states = agent.tool_registry.save_states()
         if tool_states:
             ss.metadata["_tool_states"] = tool_states
@@ -130,8 +131,11 @@ async def switch_session(
 
     backend.set_session_id(new_id)
     state = await backend.load_state()
+    plan_mode.exit(agent)
     if state is not None:
         await agent.apply_session_state(state)
+        if state.metadata.get("_plan_mode"):
+            plan_mode.enter(agent)
     else:
         await agent.reset_session_state(new_id)
 
