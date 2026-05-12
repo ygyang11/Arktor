@@ -7,7 +7,7 @@ import re
 from agent_cli.commands.base import Command, CommandContext, CommandResult
 from agent_harness.core.registry import Registry
 
-_SLASH_CMD_RE = re.compile(r"^/[a-zA-Z][\w-]*$")
+SLASH_CMD_RE = re.compile(r"^/[a-zA-Z][\w-]*$")
 
 
 class CommandRegistry(Registry[Command]):
@@ -28,7 +28,7 @@ class CommandRegistry(Registry[Command]):
             return await self.get(key).handler(ctx, args.strip())
 
         if name.startswith("/"):
-            if not _SLASH_CMD_RE.match(name):
+            if not SLASH_CMD_RE.match(name):
                 return None
             if os.path.exists(name):
                 return None
@@ -44,4 +44,17 @@ class CommandRegistry(Registry[Command]):
                 continue
             seen.add(cmd.name)
             out.append((cmd.name, cmd.description))
+        return out
+
+    def unregister_skills(self) -> None:
+        for key in [k for k, c in list(self._items.items()) if c.is_skill]:
+            del self._items[key]
+
+    def list_skill_commands(self) -> list[Command]:
+        seen: set[str] = set()
+        out: list[Command] = []
+        for cmd in self._items.values():
+            if cmd.is_skill and cmd.name not in seen:
+                seen.add(cmd.name)
+                out.append(cmd)
         return out

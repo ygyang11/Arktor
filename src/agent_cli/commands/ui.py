@@ -9,6 +9,7 @@ from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.text import Text
 
+from agent_cli.commands.base import Command
 from agent_cli.runtime.status import (
     BucketView, StatusSnapshot, UsageView, WindowView,
 )
@@ -17,6 +18,7 @@ from agent_harness.approval.policy import ApprovalPolicy
 from agent_harness.approval.rules import PermissionRule
 from agent_harness.memory.short_term import SectionWeights
 from agent_harness.session.base import SessionMeta
+from agent_harness.utils.token_counter import truncate_text_by_tokens
 
 _FILL_BAR_WIDTH = 60
 
@@ -227,6 +229,35 @@ def relative_time(dt: datetime) -> str:
     if delta.days < 7:
         return f"{delta.days}d ago"
     return dt.strftime("%b %d")
+
+
+# ── /skill list ─────────────────────────────────────────────
+
+_SKILL_LIST_LIMIT = 15
+_SKILL_DESC_TOKEN_LIMIT = 20
+
+
+def render_skill_list(cmds: list[Command]) -> RenderableType:
+    visible = cmds[:_SKILL_LIST_LIMIT]
+    truncated = len(cmds) - len(visible)
+
+    rows: list[RenderableType] = [info("Available skills"), Text("")]
+    name_w = max((len(c.name) for c in visible), default=0)
+    for c in visible:
+        line = Text("  ")
+        line.append(c.name.ljust(name_w + 2), style="primary")
+        desc = truncate_text_by_tokens(
+            c.description.strip().replace("\n", " "),
+            max_tokens=_SKILL_DESC_TOKEN_LIMIT,
+            suffix="…",
+        )
+        line.append(desc, style="muted")
+        rows.append(line)
+
+    if truncated > 0:
+        rows.append(Text(""))
+        rows.append(soft((f"… and {truncated} more", "")))
+    return Group(*rows)
 
 
 def render_session_list(metas: list[SessionMeta]) -> RenderableType:

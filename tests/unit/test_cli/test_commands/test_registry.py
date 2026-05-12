@@ -8,6 +8,7 @@ def _cmd(
     name: str = "/x",
     aliases: tuple[str, ...] = (),
     hidden: bool = False,
+    is_skill: bool = False,
 ) -> tuple[Command, AsyncMock]:
     h = AsyncMock(return_value=CommandResult(output="ok"))
     return (
@@ -17,6 +18,7 @@ def _cmd(
             handler=h,
             aliases=aliases,
             hidden=hidden,
+            is_skill=is_skill,
         ),
         h,
     )
@@ -139,3 +141,37 @@ def test_completions_dedup_and_hide() -> None:
     r.register_command(c2)
     names = {n for n, _ in r.get_completions()}
     assert names == {"/exit"}
+
+
+def test_unregister_skills_drops_only_skill_commands() -> None:
+    r = CommandRegistry()
+    builtin, _ = _cmd("/help")
+    s1, _ = _cmd("/foo", is_skill=True)
+    s2, _ = _cmd("/bar", is_skill=True)
+    r.register_command(builtin)
+    r.register_command(s1)
+    r.register_command(s2)
+    r.unregister_skills()
+    assert r.has("/help")
+    assert not r.has("/foo")
+    assert not r.has("/bar")
+
+
+def test_unregister_skills_no_skills_is_noop() -> None:
+    r = CommandRegistry()
+    builtin, _ = _cmd("/help")
+    r.register_command(builtin)
+    r.unregister_skills()
+    assert r.has("/help")
+
+
+def test_list_skill_commands_only_skills_deduped() -> None:
+    r = CommandRegistry()
+    builtin, _ = _cmd("/help")
+    s1, _ = _cmd("/foo", aliases=("/foo-alias",), is_skill=True)
+    s2, _ = _cmd("/bar", is_skill=True)
+    r.register_command(builtin)
+    r.register_command(s1)
+    r.register_command(s2)
+    names = [c.name for c in r.list_skill_commands()]
+    assert sorted(names) == ["/bar", "/foo"]

@@ -19,7 +19,7 @@ from agent_cli.commands.registry import CommandRegistry
 from agent_cli.hooks import CliHooks
 from agent_cli.render.notices import format_expired_notice
 from agent_cli.render.ui import make_status_bar_text
-from agent_cli.repl.completer import build_input_completer
+from agent_cli.repl.completer import build_input_completer, refresh_input_completer
 from agent_cli.repl.keybindings import build_keybindings, reset_ctrl_c_state
 from agent_cli.repl.mentions import expand_mentions
 from agent_cli.repl.paste import PastePlaceholderProcessor, PasteStore
@@ -330,6 +330,7 @@ async def _handle_line(
         save_session=save,
         approval_handler=handler,
         session_backend=session_backend,
+        refresh_completer=lambda: refresh_input_completer(pt_session, registry),
     )
     task = asyncio.create_task(registry.dispatch(line, ctx))
     try:

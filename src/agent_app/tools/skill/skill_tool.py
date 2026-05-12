@@ -79,6 +79,9 @@ class SkillTool(BaseTool):
         """Expose loader for SystemPromptBuilder skill catalog injection."""
         return self._ensure_loader()
 
+    def reload_skills(self) -> SkillLoader:
+        return self._ensure_loader(force=True)
+
     def get_schema(self) -> ToolSchema:
         return ToolSchema(
             name=self.name,

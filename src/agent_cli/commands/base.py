@@ -24,6 +24,7 @@ class CommandContext:
     save_session: SaveSession
     approval_handler: CliApprovalHandler
     session_backend: BaseSession
+    refresh_completer: Callable[[], None]
 
 
 @dataclass
@@ -44,3 +45,4 @@ class Command:
     handler: Handler
     aliases: tuple[str, ...] = ()
     hidden: bool = False
+    is_skill: bool = False

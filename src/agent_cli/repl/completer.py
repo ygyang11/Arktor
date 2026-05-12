@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
+from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import (
     CompleteEvent,
     Completer,
@@ -163,3 +164,9 @@ def build_input_completer(registry: CommandRegistry) -> Completer:
         slash=_build_slash_completer(registry),
         file=AtFileCompleter(Path.cwd()),
     )
+
+
+def refresh_input_completer(
+    pt_session: PromptSession[str], registry: CommandRegistry,
+) -> None:
+    pt_session.completer = build_input_completer(registry)

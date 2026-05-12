@@ -36,7 +36,7 @@ async def _async_main() -> int:
     from agent_cli.adapter import CliAdapter
     from agent_cli.agent_factory import create_cli_agent
     from agent_cli.approval_handler import CliApprovalHandler
-    from agent_cli.commands.builtin import register_builtin
+    from agent_cli.commands.builtin import register_builtin, register_dynamic
     from agent_cli.commands.registry import CommandRegistry
     from agent_cli.config import load_config
     from agent_cli.hooks import CliHooks
@@ -71,6 +71,7 @@ async def _async_main() -> int:
 
     registry = CommandRegistry()
     register_builtin(registry)
+    register_dynamic(registry, agent)
     backend = FileSession(session_id)
 
     config_source = str(config_result.path) if config_result.path else "Defaults env"
