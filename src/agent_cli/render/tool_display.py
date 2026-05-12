@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -118,6 +119,11 @@ _DISPLAY_NAMES: dict[str, str] = {
 def _display_name(raw: str) -> str:
     """Human verb for ``raw``; unregistered tools fall back to the raw name."""
     return _DISPLAY_NAMES.get(raw, raw)
+
+
+def args_repr(arguments: dict[str, object]) -> str:
+    """Full JSON repr of tool arguments — for transcript/export, no truncation."""
+    return json.dumps(arguments, ensure_ascii=False)
 
 
 def _args_preview(name: str, arguments: dict[str, object]) -> str:
