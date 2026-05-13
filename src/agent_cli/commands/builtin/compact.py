@@ -46,10 +46,15 @@ async def handle(ctx: CommandContext, args: str) -> CommandResult:
     finally:
         await status.stop()
 
+    res = compressor.take_last_result()
+    if res is None:
+        return CommandResult(output=soft(
+            "Nothing to compact yet — conversation is still too short",
+        ))
+
     sess.set_messages(agent, new_messages)
 
-    res = compressor.take_last_result()
-    if res is not None and res.llm_usage and res.llm_usage.total_tokens:
+    if res.llm_usage and res.llm_usage.total_tokens:
         agent.context.usage_meter.record(
             res.llm_usage,
             model=compressor.model_name,
@@ -57,11 +62,6 @@ async def handle(ctx: CommandContext, args: str) -> CommandResult:
         )
 
     await ctx.save_session()
-
-    if res is None:
-        return CommandResult(output=soft(
-            "Nothing to compact yet — conversation is still too short",
-        ))
     return CommandResult(output=_compacted_output(res))
 
 

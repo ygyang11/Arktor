@@ -195,6 +195,56 @@ class TestCompressorAttribute:
 
         assert "Compression failed" in caplog.text
 
+    @pytest.mark.asyncio
+    async def test_auto_compress_no_op_preserves_last_call(self) -> None:
+        """When compressor returns the unchanged list (`take_last_result()` is
+        None), `maybe_auto_compress` must not call `replace_messages` — doing
+        so would wipe `last_call`, leaving the status bar with `—/Xm` even
+        though the messages didn't actually change."""
+        from agent_harness.context.context import AgentContext
+        from agent_harness.hooks.base import DefaultHooks
+
+        compressor = ContextCompressor(
+            llm=AsyncMock(),
+            threshold=0.0,
+            retain_count=4,
+            model="gpt-4o",
+        )
+        ctx = AgentContext()
+        ctx.short_term_memory = ShortTermMemory(
+            max_tokens=50, compressor=compressor, model="gpt-4o",
+        )
+        for i in range(5):
+            await ctx.short_term_memory.add_message(
+                Message.user(f"message-{i}")
+            )
+
+        snapshot = CallSnapshot(
+            input_tokens=300, completion_tokens=200, total_tokens=500,
+            cache_read=0, cache_creation=0, reasoning_tokens=0,
+            model="gpt-4o", message_count=5,
+            section_weights=SectionWeights(
+                system_prompt=10, tools_schema=20, dynamic_system=5, history=15,
+            ),
+        )
+        ctx.short_term_memory.record_call(snapshot)
+        original_messages = list(ctx.short_term_memory._messages)
+
+        with patch.object(
+            compressor,
+            "compress",
+            AsyncMock(return_value=original_messages),
+        ):
+            await ctx.maybe_auto_compress(
+                DefaultHooks(), "test", authoritative_input=10_000,
+            )
+
+        # Snapshot survives — `displayed_input_tokens` still has provider truth
+        assert ctx.short_term_memory.last_call is snapshot
+        assert ctx.short_term_memory.displayed_input_tokens == 500
+        # Messages untouched
+        assert ctx.short_term_memory._messages == original_messages
+
 
 class TestDisplayedInputTokens:
     """displayed_input_tokens combines snapshot truth with delta of new messages."""

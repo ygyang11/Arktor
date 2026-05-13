@@ -196,7 +196,6 @@ class AgentContext:
         await hooks.on_compression_start(agent_name)
         try:
             new_msgs = await compressor.compress(stm._messages)
-            stm.replace_messages(new_msgs)
         except Exception as e:
             logger.debug("Compression failed: %s", e, exc_info=True)
             return
@@ -204,6 +203,7 @@ class AgentContext:
         res = compressor.take_last_result()
         if res is None:
             return
+        stm.replace_messages(new_msgs)
         await hooks.on_compression_end(
             agent_name, res.original_count, res.compressed_count, res.summary_tokens,
         )

@@ -63,7 +63,11 @@ async def test_compact_save_cancel_propagates_without_repl_concerns() -> None:
     outer _handle_line (tested separately) is what keeps REPL alive."""
     compressor = MagicMock()
     compressor.compress = AsyncMock(return_value=["compressed"])
-    compressor.take_last_result = MagicMock(return_value=None)
+    compressor.take_last_result = MagicMock(return_value=MagicMock(
+        original_count=10, compressed_count=3,
+        archive_path=None,
+        llm_usage=MagicMock(total_tokens=0),
+    ))
     agent = MagicMock()
     agent.context.short_term_memory.compressor = compressor
     agent.context.short_term_memory._messages = ["m1", "m2"]
@@ -73,6 +77,30 @@ async def test_compact_save_cancel_propagates_without_repl_concerns() -> None:
     with pytest.raises(asyncio.CancelledError):
         await CMD.handler(ctx, "")
     compressor.compress.assert_awaited_once()
+
+
+async def test_compact_no_op_preserves_last_call_snapshot() -> None:
+    """When compressor returns the unchanged list (`take_last_result() is None`),
+    /compact must skip `replace_messages`/`save_session` — calling them would
+    wipe `last_call`, which the status bar reads for the displayed token count
+    (regression: bottom bar shows `—/Xm` until the next LLM turn).
+    """
+    compressor = MagicMock()
+    original = ["m1", "m2"]
+    compressor.compress = AsyncMock(return_value=original)
+    compressor.take_last_result = MagicMock(return_value=None)
+    agent = MagicMock()
+    stm = agent.context.short_term_memory
+    stm.compressor = compressor
+    stm._messages = original
+    save = AsyncMock()
+    ctx = MagicMock(agent=agent, save_session=save, adapter=_stub_adapter())
+
+    result = await CMD.handler(ctx, "")
+    out = render_output(result.output)
+    assert "Nothing to compact" in out
+    stm.replace_messages.assert_not_called()
+    save.assert_not_awaited()
 
 
 async def test_compact_output_omits_archive_when_no_path() -> None:
