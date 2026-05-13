@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 
+from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.filters import has_selection
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
@@ -19,7 +20,7 @@ _CTRL_C_DOUBLE_WINDOW_S = 2.0
 # timestamp can trigger a false double-click exit across prompt boundaries.
 _ctrl_c_state: list[float] = [0.0]
 
-_HINT = "\x1b[2m  ⎋ Ctrl+C again or /exit\x1b[0m\n"
+_HINT = "\x1b[2m  ⎋ Ctrl+C again or /exit\x1b[0m"
 
 
 def reset_ctrl_c_state() -> None:
@@ -86,8 +87,11 @@ def build_keybindings(
             event.app.exit(exception=EOFError)
             return
         _ctrl_c_state[0] = now
-        event.app.output.write_raw(_HINT)
-        event.app.invalidate()
+
+        async def _show_hint() -> None:
+            await run_in_terminal(lambda: print(_HINT))
+
+        event.app.create_background_task(_show_hint())
 
     @kb.add("c-d")
     def _(event: KeyPressEvent) -> None:

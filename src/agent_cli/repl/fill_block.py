@@ -47,23 +47,36 @@ class FillBlockProcessor(Processor):
     ) -> Transformation:
         try:
             base = pick_block_class(transformation_input.document.text)
-            fragments: StyleAndTextTuples = []
-            cell_width = 0
+            effective_width = max(1, transformation_input.width - self._offset)
+            out: StyleAndTextTuples = []
+            cells = 0
             for fragment in transformation_input.fragments:
                 style, text = fragment[0], fragment[1]
                 new_style = f"{base} {style}".strip() if style else base
-                fragments.append((new_style, text, *fragment[2:]))
-                cell_width += sum(get_cwidth(c) for c in text)
-            effective_width = max(1, transformation_input.width - self._offset)
-            if cell_width == 0:
+                rest = fragment[2:]
+                chunk: list[str] = []
+                for ch in text:
+                    w = get_cwidth(ch)
+                    if cells + w > effective_width:
+                        if chunk:
+                            out.append((new_style, "".join(chunk), *rest))
+                            chunk = []
+                        gap = effective_width - cells
+                        if gap > 0:
+                            out.append((base, " " * gap))
+                        cells = 0
+                    chunk.append(ch)
+                    cells += w
+                if chunk:
+                    out.append((new_style, "".join(chunk), *rest))
+            if cells == 0 or cells == effective_width:
                 pad = effective_width - 1
             else:
-                remainder = cell_width % effective_width
-                pad = effective_width - remainder - 1 if remainder else 0
+                pad = effective_width - cells - 1
             pad = max(0, pad)
             if pad:
-                fragments.append((base, " " * pad))
-            return Transformation(fragments)
+                out.append((base, " " * pad))
+            return Transformation(out)
         except Exception:
             try:
                 return Transformation(list(transformation_input.fragments))
