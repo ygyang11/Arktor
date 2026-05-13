@@ -279,7 +279,7 @@ class PlanAndExecuteAgent(BaseAgent):
                     resolved_session.session_id,
                     agent_name=self.name,
                 )
-                ss.created_at = self._session_created_at or now
+                ss.created_at = self._ensure_session_created_at()
                 ss.updated_at = now
                 await resolved_session.save_state(ss)
 

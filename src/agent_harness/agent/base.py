@@ -262,6 +262,12 @@ class BaseAgent(ABC, EventEmitter):
                 signal.streak,
             )
 
+    def _ensure_session_created_at(self) -> datetime:
+        """Lazy-anchor `_session_created_at` and return it."""
+        if self._session_created_at is None:
+            self._session_created_at = datetime.now()
+        return self._session_created_at
+
     async def _sync_system_prompt(self) -> None:
         if not self.system_prompt:
             return
@@ -464,7 +470,7 @@ class BaseAgent(ABC, EventEmitter):
                     resolved_session.session_id,
                     agent_name=self.name,
                 )
-                ss.created_at = self._session_created_at or now
+                ss.created_at = self._ensure_session_created_at()
                 ss.updated_at = now
                 ss.metadata.update(self._session_metadata_extras)
                 tool_states = self.tool_registry.save_states()

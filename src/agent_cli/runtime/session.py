@@ -85,10 +85,6 @@ def update_compressor_model(
         compressor._llm = new_llm
 
 
-def session_created_at(agent: BaseAgent) -> datetime | None:
-    return agent._session_created_at
-
-
 def make_save_session(
     agent: BaseAgent, backend: BaseSession,
 ) -> SaveSession:
@@ -96,7 +92,7 @@ def make_save_session(
     async def _save() -> None:
         now = datetime.now()
         ss = agent.context.to_session_state(backend.session_id, agent_name=agent.name)
-        ss.created_at = session_created_at(agent) or now
+        ss.created_at = agent._ensure_session_created_at()
         ss.updated_at = now
         ss.metadata.update(agent._session_metadata_extras)
         tool_states = agent.tool_registry.save_states()
