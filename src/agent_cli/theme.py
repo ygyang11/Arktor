@@ -3,10 +3,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.styles import Style
 from rich.theme import Theme as RichTheme
 
 from agent_cli.runtime.prefs import read_prefs, write_prefs
+
+# ── Color depth mapping ───────────────────────────────────────────────
+DEPTH_MAP: dict[str, ColorDepth] = {
+    "truecolor": ColorDepth.TRUE_COLOR,
+    "256":       ColorDepth.DEPTH_8_BIT,
+    "standard":  ColorDepth.DEPTH_4_BIT,
+    "windows":   ColorDepth.DEPTH_4_BIT,
+}
 
 
 # ── Palette ────────────────────────────────────────────────────────────
@@ -76,6 +85,7 @@ def _build_theme(name: str, p: Palette) -> CliTheme:
             "bottom-toolbar.text":                     f"noreverse fg:{p.secondary} bold italic",
             "paste-placeholder":                       f"fg:{p.primary} bold",
             "shell-line":                              f"bg:{p.shell_lane_bg} fg:{p.primary} bold",
+            "input-block":                             f"bg:{p.section_bg}",
         }),
     )
 

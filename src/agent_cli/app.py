@@ -31,6 +31,7 @@ async def _async_main() -> int:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.input import create_input
     from prompt_toolkit.output import create_output
+    from prompt_toolkit.output.color_depth import ColorDepth
     from rich.console import Console
 
     from agent_cli.adapter import CliAdapter
@@ -41,10 +42,9 @@ async def _async_main() -> int:
     from agent_cli.config import load_config
     from agent_cli.hooks import CliHooks
     from agent_cli.render.ui import render_welcome
-    from agent_cli.repl.lexer import ShellLineLexer
     from agent_cli.repl.loop import run_repl
     from agent_cli.runtime.shell import ShellState
-    from agent_cli.theme import load_saved_theme
+    from agent_cli.theme import DEPTH_MAP, load_saved_theme
     from agent_harness.session.file_session import FileSession
 
     config_result = load_config()
@@ -52,12 +52,16 @@ async def _async_main() -> int:
     theme = load_saved_theme()
     console = Console(theme=theme.rich)
     adapter = CliAdapter(console, theme, effort=config_result.effort)
+    color_depth = (
+        ColorDepth.DEPTH_1_BIT if console.no_color
+        else DEPTH_MAP.get(console.color_system or "")
+    )
     pt_session: PromptSession[str] = PromptSession(
         input=create_input(),
         output=create_output(),
         refresh_interval=0.1,
         style=theme.completion,
-        lexer=ShellLineLexer(),
+        color_depth=color_depth,
     )
     shell_state = ShellState()
     approval_handler = CliApprovalHandler(

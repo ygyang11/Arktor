@@ -20,6 +20,12 @@ from agent_cli.hooks import CliHooks
 from agent_cli.render.notices import format_expired_notice
 from agent_cli.render.ui import make_status_bar_text
 from agent_cli.repl.completer import build_input_completer, refresh_input_completer
+from agent_cli.repl.fill_block import (
+    PROMPT_WIDTH,
+    FillBlockProcessor,
+    make_continuation_prompt,
+    make_input_prompt,
+)
 from agent_cli.repl.keybindings import build_keybindings, reset_ctrl_c_state
 from agent_cli.repl.mentions import expand_mentions
 from agent_cli.repl.paste import PastePlaceholderProcessor, PasteStore
@@ -41,12 +47,11 @@ from agent_cli.runtime.session import (
 from agent_cli.runtime.shell import ShellState
 from agent_cli.runtime.sigint import bind_work
 from agent_cli.render.replay import render_post_switch
-from agent_cli.theme import APPROVAL, COMPRESSION, PROMPT, CliTheme
+from agent_cli.theme import APPROVAL, COMPRESSION, CliTheme
 from agent_harness.agent.base import BaseAgent
 from agent_harness.core.message import Message, Role
 from agent_harness.session.base import BaseSession
 
-_DEFAULT_PROMPT = f"{PROMPT} "
 _ToolbarText = Callable[[], HTML]
 
 
@@ -109,7 +114,8 @@ async def _prompt_with_lock(
         prev_processors = pt_session.input_processors
         try:
             return await pt_session.prompt_async(
-                _DEFAULT_PROMPT,
+                make_input_prompt(pt_session),
+                prompt_continuation=make_continuation_prompt(pt_session),
                 default=default,
                 set_exception_handler=False,
                 bottom_toolbar=bottom_toolbar,
@@ -142,7 +148,10 @@ async def run_repl(
     theme: CliTheme,
 ) -> None:
     paste_store = PasteStore()
-    paste_processors: list[Processor] = [PastePlaceholderProcessor()]
+    input_processors: list[Processor] = [
+        PastePlaceholderProcessor(),
+        FillBlockProcessor(offset=PROMPT_WIDTH),
+    ]
 
     pt_session.completer = build_input_completer(registry)
     pt_session.key_bindings = build_keybindings(paste_store=paste_store, agent=agent)
@@ -230,7 +239,7 @@ async def run_repl(
                     adapter,
                     state.pending_input,
                     make_status_bar_text(agent),
-                    input_processors=paste_processors,
+                    input_processors=input_processors,
                 ),
             )
             state.pending_input = ""

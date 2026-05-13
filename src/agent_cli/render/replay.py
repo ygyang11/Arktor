@@ -99,16 +99,25 @@ def peel_user_command(content: str) -> str | None:
 
 # ── per-shape user renderers ───────────────────────────────────
 
+def _render_user_block(console: Console, body: str) -> None:
+    """Print ``❯ <body>`` as a section-bg block padded to terminal width."""
+    width = console.width
+    for i, raw in enumerate(body.split("\n")):
+        prefix = f"{PROMPT} " if i == 0 else "  "
+        line = Text(prefix + raw)
+        pad = max(0, width - line.cell_len)
+        if pad:
+            line.append(" " * pad)
+        line.stylize("section")
+        console.print(line)
+
+
 def _render_user_shell_run(console: Console, content: str) -> bool:
     parsed = parse_shell_run_envelope(content)
     if parsed is None:
         return False
     cmd, body = parsed
-    prompt_line = Text()
-    prompt_line.append(PROMPT, style="primary")
-    prompt_line.append(" !")
-    prompt_line.append(cmd)
-    console.print(prompt_line)
+    _render_user_block(console, f"!{cmd}")
     console.print()
     exit_code, output = _split_exit_code(body)
     for r in format_shell_run(cmd, exit_code, output):
@@ -146,24 +155,14 @@ def _render_command_invocation(console: Console, content: str) -> bool:
 
 
 def _emit_slash_command(console: Console, name: str, args: str) -> bool:
-    line = Text()
-    line.append(PROMPT, style="primary")
-    line.append(" /")
-    line.append(name)
-    if args:
-        line.append(" ")
-        line.append(args)
-    console.print(line)
+    body = f"/{name} {args}" if args else f"/{name}"
+    _render_user_block(console, body)
     console.print()
     return True
 
 
 def _render_plain_user(console: Console, content: str) -> None:
-    line = Text()
-    line.append(PROMPT, style="primary")
-    line.append(" ")
-    line.append(content)
-    console.print(line)
+    _render_user_block(console, content)
     console.print()
 
 

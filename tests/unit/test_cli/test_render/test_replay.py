@@ -101,26 +101,31 @@ def test_replay_user_message_uses_prompt_glyph() -> None:
     assert f"{PROMPT} hello" in out
 
 
-def test_replay_user_content_not_styled_as_primary() -> None:
+def test_replay_user_line_renders_as_section_bg_block() -> None:
     buf = StringIO()
     console = Console(
         file=buf, force_terminal=True, color_system="truecolor",
-        width=200, theme=DEFAULT_THEME.rich,
+        width=200, theme=DEFAULT_THEME.rich, no_color=False,
     )
     replay(console, DEFAULT_THEME, [Message.user("hello world content")])
     out = buf.getvalue()
-    # primary color in DEFAULT_THEME (flexoki-dark) is #DA702C — its truecolor
-    # escape is \x1b[38;2;218;112;44m. The PROMPT glyph must carry that span;
-    # the content body must NOT, otherwise the whole user line shows primary.
+    # section_bg in DEFAULT_THEME (flexoki-dark) is #2E2D2B → truecolor escape.
+    # The ❯ glyph + content + padding must all live under one bg span (single
+    # full-width block); ❯ must NOT carry primary fg anymore (was the old look).
+    section_bg_open = "\x1b[48;2;46;45;43m"
     primary_open = "\x1b[38;2;218;112;44m"
-    primary_segments = out.split(primary_open)
-    assert len(primary_segments) >= 2, "PROMPT glyph should carry primary style"
-    # Each opened primary span must close before "hello world content" begins.
-    span_after_first_open = primary_segments[1]
-    reset_pos = span_after_first_open.find("\x1b[0m")
-    content_pos = span_after_first_open.find("hello world content")
-    assert reset_pos != -1 and reset_pos < content_pos, \
-        "primary span must close before user content body"
+    assert section_bg_open in out, "user line should carry section_bg block style"
+    assert primary_open not in out, "❯ must not be primary-colored anymore"
+    # Block must extend past the typed text — i.e. trailing padding before reset.
+    after_bg = out.split(section_bg_open, 1)[1]
+    reset_pos = after_bg.find("\x1b[0m")
+    content = "❯ hello world content"
+    content_pos = after_bg.find(content)
+    assert content_pos != -1 and content_pos < reset_pos, \
+        "❯ and content must live inside the section_bg span"
+    trailing = after_bg[content_pos + len(content):reset_pos]
+    assert trailing and set(trailing) == {" "}, \
+        "block should pad with spaces to fill terminal width before reset"
 
 
 def test_replay_user_skips_empty_content() -> None:
