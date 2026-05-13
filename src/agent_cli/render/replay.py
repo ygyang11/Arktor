@@ -80,6 +80,23 @@ def _split_exit_code(body: str) -> tuple[int, str]:
     return int(m.group(1)), m.group(2)
 
 
+# ── per-shape session preview ───────────────────────────────────
+
+def peel_user_command(content: str) -> str | None:
+    """Canonical "what the user typed" form, or None if content is plain text."""
+    if (parsed := parse_shell_run_envelope(content)) is not None:
+        cmd, _ = parsed
+        return "! " + " ".join(cmd.split())
+    if (focus := _match_init(content)) is not None:
+        return f"/init {focus}".rstrip()
+    if (target := _match_review(content)) is not None:
+        return f"/review {target}".rstrip()
+    if (parsed := _match_skill(content)) is not None:
+        name, args = parsed
+        return f"/{name} {args}".rstrip() if args else f"/{name}"
+    return None
+
+
 # ── per-shape user renderers ───────────────────────────────────
 
 def _render_user_shell_run(console: Console, content: str) -> bool:
@@ -182,6 +199,14 @@ def _index_results(messages: list[Message]) -> dict[str, ToolResult]:
 
 # ── public API ───────────────────────────────────────────────────────
 
+def _hard_clear(console: Console) -> None:
+    # Rich Console.clear emits \x1b[2J\x1b[H but skips scrollback and is gated
+    # on is_terminal; bypass both with a raw write so the user actually sees
+    # a clean screen on /resume / /new.
+    console.file.write("\x1b[2J\x1b[3J\x1b[H")
+    console.file.flush()
+
+
 def slice_last_turns(messages: list[Message], n: int) -> list[Message]:
     seen = 0
     for idx in range(len(messages) - 1, -1, -1):
@@ -233,14 +258,6 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
         elif m.role == Role.ASSISTANT:
             _render_assistant(console, theme, m, results)
         i += step
-
-
-def _hard_clear(console: Console) -> None:
-    # Rich Console.clear emits \x1b[2J\x1b[H but skips scrollback and is gated
-    # on is_terminal; bypass both with a raw write so the user actually sees
-    # a clean screen on /resume / /new.
-    console.file.write("\x1b[2J\x1b[3J\x1b[H")
-    console.file.flush()
 
 
 def render_post_switch(

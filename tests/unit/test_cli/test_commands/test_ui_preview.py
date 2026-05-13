@@ -48,6 +48,44 @@ def test_preview_empty_string_returns_empty() -> None:
     assert _format_session_preview("") == ""
 
 
+# ── envelope unwrapping via peel_user_command ────────────────────────
+
+
+def test_preview_init_envelope_collapses_to_slash_init() -> None:
+    from agent_cli.commands.builtin.init import _INIT_NEW
+
+    raw = _INIT_NEW.format(focus="\n\nFocus: auth tests")
+    assert _format_session_preview(raw) == "/init auth tests"
+
+
+def test_preview_review_envelope_collapses_to_slash_review() -> None:
+    from agent_cli.commands.builtin.review import _REVIEW_PROMPT
+
+    raw = _REVIEW_PROMPT.format(target="src/agent_cli")
+    assert _format_session_preview(raw) == "/review src/agent_cli"
+
+
+def test_preview_skill_envelope_collapses_to_slash_command() -> None:
+    raw = (
+        "look at history\n\n"
+        "<system-reminder>The user has explicitly requested the web-search "
+        "skill. Apply the skill instructions below to address their "
+        "request.</system-reminder>\n\n"
+        '<skill-loaded name="web-search">\nbody\n</skill-loaded>'
+    )
+    assert _format_session_preview(raw) == "/web-search look at history"
+
+
+def test_preview_skill_envelope_no_args() -> None:
+    raw = (
+        "<system-reminder>The user has explicitly requested the humanizer "
+        "skill. Apply the skill instructions below to address their "
+        "request.</system-reminder>\n\n"
+        '<skill-loaded name="humanizer">\nbody\n</skill-loaded>'
+    )
+    assert _format_session_preview(raw) == "/humanizer"
+
+
 # ── home_relative_path ───────────────────────────────────────────────
 
 

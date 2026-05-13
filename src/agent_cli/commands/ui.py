@@ -11,7 +11,6 @@ from rich.panel import Panel
 from rich.text import Text
 
 from agent_cli.commands.base import Command
-from agent_cli.render.notices import parse_shell_run_envelope
 from agent_cli.runtime.status import (
     BucketView, StatusSnapshot, UsageView, WindowView,
 )
@@ -248,10 +247,11 @@ _PREVIEW_LIMIT = 60
 
 
 def _format_session_preview(raw: str, limit: int = _PREVIEW_LIMIT) -> str:
-    parsed = parse_shell_run_envelope(raw)
-    if parsed is not None:
-        cmd = " ".join(parsed[0].split())
-        return f"! {cmd}"[:limit]
+    from agent_cli.render.replay import peel_user_command
+
+    peeled = peel_user_command(raw)
+    if peeled is not None:
+        return peeled[:limit]
     return " ".join(raw.split())[:limit]
 
 

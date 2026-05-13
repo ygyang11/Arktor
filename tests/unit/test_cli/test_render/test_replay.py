@@ -327,6 +327,81 @@ def test_match_skill_returns_none_for_plain_text() -> None:
     ) is None
 
 
+# ── peel_user_command — canonical "what user typed" string ─────────────
+
+
+def test_peel_user_command_shell_run_returns_bang_form() -> None:
+    from agent_cli.render.notices import format_shell_run
+    from agent_cli.render.replay import peel_user_command
+
+    content = format_shell_run("ls -la", 0, "out")
+    assert peel_user_command(content) == "! ls -la"
+
+
+def test_peel_user_command_init_with_focus() -> None:
+    from agent_cli.commands.builtin.init import _INIT_NEW
+    from agent_cli.render.replay import peel_user_command
+
+    content = _INIT_NEW.format(focus="\n\nFocus: testing strategy")
+    assert peel_user_command(content) == "/init testing strategy"
+
+
+def test_peel_user_command_init_without_focus() -> None:
+    from agent_cli.commands.builtin.init import _INIT_NEW
+    from agent_cli.render.replay import peel_user_command
+
+    content = _INIT_NEW.format(focus="")
+    assert peel_user_command(content) == "/init"
+
+
+def test_peel_user_command_review_default_target_drops_args() -> None:
+    from agent_cli.commands.builtin.review import _DEFAULT_REVIEW_TARGET, _REVIEW_PROMPT
+    from agent_cli.render.replay import peel_user_command
+
+    content = _REVIEW_PROMPT.format(target=_DEFAULT_REVIEW_TARGET)
+    assert peel_user_command(content) == "/review"
+
+
+def test_peel_user_command_review_custom_target() -> None:
+    from agent_cli.commands.builtin.review import _REVIEW_PROMPT
+    from agent_cli.render.replay import peel_user_command
+
+    content = _REVIEW_PROMPT.format(target="src/agent_cli")
+    assert peel_user_command(content) == "/review src/agent_cli"
+
+
+def test_peel_user_command_skill_with_args() -> None:
+    from agent_cli.render.replay import peel_user_command
+
+    content = (
+        "find docs\n\n"
+        "<system-reminder>The user has explicitly requested the web-search "
+        "skill. Apply the skill instructions below to address their "
+        "request.</system-reminder>\n\n"
+        '<skill-loaded name="web-search">\nbody\n</skill-loaded>'
+    )
+    assert peel_user_command(content) == "/web-search find docs"
+
+
+def test_peel_user_command_skill_without_args() -> None:
+    from agent_cli.render.replay import peel_user_command
+
+    content = (
+        "<system-reminder>The user has explicitly requested the humanizer "
+        "skill. Apply the skill instructions below to address their "
+        "request.</system-reminder>\n\n"
+        '<skill-loaded name="humanizer">\nbody\n</skill-loaded>'
+    )
+    assert peel_user_command(content) == "/humanizer"
+
+
+def test_peel_user_command_returns_none_for_plain_text() -> None:
+    from agent_cli.render.replay import peel_user_command
+
+    assert peel_user_command("hello world") is None
+    assert peel_user_command("") is None
+
+
 # ── replay integration: command invocations render as ❯ /<cmd> args ──
 
 
