@@ -399,17 +399,18 @@ class MemoryTool(BaseTool):
     def build_context_message(self) -> Message | None:
         global_index = self.load_index("global")
         project_index = self.load_index("project")
-        if not global_index and not project_index:
-            return None
         parts = ["# Memory"]
-        if global_index:
-            parts.append("## Global Memory\n" + global_index)
-        if project_index:
-            parts.append("## Project Memory\n" + project_index)
         parts.append(
-            "Read a memory's full content with "
-            'memory_tool(action="read", scope="...", type="...", name="...") '
-            "when the one-line description is not enough. "
+            "## Global Memory\n" + (global_index or "(no entries yet)")
+        )
+        parts.append(
+            "## Project Memory\n" + (project_index or "(no entries yet)")
+        )
+        parts.append(
+            "This index lists every saved memory — do not call `read` "
+            "with names not listed. When a one-line description is not "
+            "enough, read the full memory with "
+            'memory_tool(action="read", scope="...", type="...", name="..."). '
             "Memories may be stale — verify before relying on them."
         )
         return Message.system("\n\n".join(parts))

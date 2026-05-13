@@ -354,9 +354,14 @@ class TestIndex:
 
 
 class TestBuildContextMessage:
-    async def test_returns_none_when_empty(self) -> None:
+    async def test_empty_indexes_emit_placeholder_message(self) -> None:
         tool = _tool()
-        assert tool.build_context_message() is None
+        msg = tool.build_context_message()
+        assert msg is not None
+        assert "# Memory" in msg.content
+        assert "## Global Memory\n(no entries yet)" in msg.content
+        assert "## Project Memory\n(no entries yet)" in msg.content
+        assert "do not call `read` with names not listed" in msg.content
 
     async def test_returns_message_after_save(self, tmp_path: Path) -> None:
         tool = _tool()
@@ -368,6 +373,8 @@ class TestBuildContextMessage:
         assert msg is not None
         assert "# Memory" in msg.content
         assert "test_ctx" in msg.content
+        # global still empty, project populated
+        assert "## Global Memory\n(no entries yet)" in msg.content
 
     async def test_reflects_delete(self, tmp_path: Path) -> None:
         tool = _tool()
@@ -379,9 +386,9 @@ class TestBuildContextMessage:
             action="delete", scope="project", type="user", name="ephemeral",
         )
         msg = tool.build_context_message()
-        # Index is empty after delete, so None or no mention
-        if msg is not None:
-            assert "ephemeral" not in msg.content
+        assert msg is not None
+        assert "ephemeral" not in msg.content
+        assert "## Project Memory\n(no entries yet)" in msg.content
 
 
 # ── Scope Isolation ──
