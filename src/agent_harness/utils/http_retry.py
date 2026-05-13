@@ -59,7 +59,7 @@ async def _request_with_retry(
                 }
                 if json_body is not None:
                     request_kwargs["json"] = json_body
-                async with session.request(method, url, **request_kwargs) as resp:
+                async with session.request(method, url, **request_kwargs) as resp:  # type: ignore[arg-type]
                     body = await resp.text()
                     if not _is_retryable_status(resp.status):
                         return resp.status, body
@@ -105,7 +105,7 @@ async def _request_text_with_retry(
                 }
                 if json_body is not None:
                     request_kwargs["json"] = json_body
-                async with session.request(method, url, **request_kwargs) as resp:
+                async with session.request(method, url, **request_kwargs) as resp:  # type: ignore[arg-type]
                     body = await resp.text()
                     response_headers = dict(getattr(resp, "headers", {}))
                     response = HttpTextResponse(
@@ -157,7 +157,7 @@ async def _request_bytes_with_retry(
                 }
                 if json_body is not None:
                     request_kwargs["json"] = json_body
-                async with session.request(method, url, **request_kwargs) as resp:
+                async with session.request(method, url, **request_kwargs) as resp:  # type: ignore[arg-type]
                     body = await resp.read()
                     if not _is_retryable_status(resp.status):
                         return resp.status, body
