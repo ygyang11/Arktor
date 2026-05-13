@@ -13,6 +13,7 @@ from agent_cli.commands.ui import MODE_INFO
 from agent_cli.runtime.session import current_mode_key
 from agent_cli.theme import SEP_DOT
 from agent_harness.agent.base import BaseAgent
+from agent_harness.session.base import BaseSession
 
 _BANNER_LINES: tuple[str, ...] = (
     "██╗  ██╗ █████╗ ██████╗ ███╗   ██╗███████╗███████╗███████╗",
@@ -26,6 +27,9 @@ _BANNER_WIDTH = 58
 _LABEL_WIDTH = 9
 
 
+_DEFAULT_SESSION_LABEL = f"fresh {SEP_DOT} /resume to restore"
+
+
 def render_welcome(
     console: Console,
     *,
@@ -33,6 +37,7 @@ def render_welcome(
     model: str,
     cwd: str,
     config_source: str,
+    session_label: str = _DEFAULT_SESSION_LABEL,
 ) -> None:
     """Print the welcome block — banner, tagline, meta rows, command hint."""
     console.print()
@@ -53,7 +58,7 @@ def render_welcome(
     console.print(_meta_row("model", model))
     console.print(_meta_row("cwd", shorten_home(cwd)))
     console.print(_meta_row("config", shorten_home(config_source)))
-    console.print(_session_row())
+    console.print(_session_row(session_label))
     console.print()
     console.print(_hint_row())
     console.print()
@@ -68,14 +73,12 @@ def _meta_row(label: str, value: str) -> Text:
     return row
 
 
-def _session_row() -> Text:
+def _session_row(label: str) -> Text:
     row = Text()
     row.append("  ")
     row.append("session".ljust(_LABEL_WIDTH), style="muted")
     row.append(" ")
-    row.append("fresh", style="text")
-    row.append(f" {SEP_DOT} ", style="muted")
-    row.append("/resume to restore", style="muted")
+    row.append(label, style="text")
     return row
 
 
@@ -94,6 +97,16 @@ def _hint_row() -> Text:
 def shorten_home(cwd: str) -> str:
     home = str(Path.home())
     return cwd.replace(home, "~", 1) if cwd.startswith(home) else cwd
+
+
+async def print_exit_reminder(console: Console, backend: BaseSession) -> None:
+    # Use backend.session_id (current), not the startup-resolved one — REPL
+    # commands like /new and /resume mutate backend in place.
+    sid = backend.session_id
+    if not await backend.has_session(sid):
+        return
+    console.print("[muted]Resume this session with:[/muted]")
+    console.print(f"[muted]  harness --resume {sid}[/muted]")
 
 
 def make_status_bar_text(agent: BaseAgent) -> Callable[[], HTML]:

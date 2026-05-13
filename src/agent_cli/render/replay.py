@@ -259,6 +259,21 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
         i += step
 
 
+def render_session_replay(
+    console: Console,
+    theme: CliTheme,
+    messages: list[Message],
+    session_id: str,
+) -> None:
+    if messages:
+        _render_compaction(console, messages)
+        replay(console, theme, slice_last_turns(messages, 5))
+        console.print(ok(("Resumed ", ""), (f"→ {session_id}", "muted")))
+    else:
+        console.print(ok(("New session ", ""), (f"→ {session_id}", "muted")))
+    console.print()
+
+
 def render_post_switch(
     agent: BaseAgent,
     console: Console,
@@ -266,11 +281,4 @@ def render_post_switch(
     new_id: str,
 ) -> None:
     _hard_clear(console)
-    msgs = get_messages(agent)
-    if msgs:
-        _render_compaction(console, msgs)
-        replay(console, theme, slice_last_turns(msgs, 5))
-        console.print(ok(("Resumed ", ""), (f"→ {new_id}", "muted")))
-    else:
-        console.print(ok(("New session ", ""), (f"→ {new_id}", "muted")))
-    console.print()
+    render_session_replay(console, theme, get_messages(agent), new_id)

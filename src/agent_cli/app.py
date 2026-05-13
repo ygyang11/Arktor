@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import uuid
+import sys
 from pathlib import Path
 
 
@@ -14,10 +14,23 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Agent-Harness interactive CLI",
     )
     parser.add_argument("--version", action="store_true", help="show version and exit")
+    grp = parser.add_mutually_exclusive_group()
+    grp.add_argument(
+        "-c", "--continue", dest="resume_latest", action="store_true",
+        help="resume the most recently updated session",
+    )
+    grp.add_argument(
+        "-r", "--resume", metavar="ID", default=None,
+        help="resume the session with the given id",
+    )
+    grp.add_argument(
+        "-s", "--session-id", dest="session_id", metavar="ID", default=None,
+        help="start a new session with the given id ([a-zA-Z0-9_-])",
+    )
     return parser
 
 
-async def _async_main() -> int:
+async def _async_main(args: argparse.Namespace) -> int:
     from agent_cli import __version__, _check_deps
 
     _check_deps()
@@ -41,7 +54,7 @@ async def _async_main() -> int:
     from agent_cli.commands.registry import CommandRegistry
     from agent_cli.config import load_config
     from agent_cli.hooks import CliHooks
-    from agent_cli.render.ui import render_welcome
+    from agent_cli.render.ui import print_exit_reminder, render_welcome
     from agent_cli.repl.loop import run_repl
     from agent_cli.runtime.shell import ShellState
     from agent_cli.theme import DEPTH_MAP, load_saved_theme
@@ -71,21 +84,41 @@ async def _async_main() -> int:
     )
     hooks = CliHooks(adapter, approval_handler=approval_handler)
     agent = create_cli_agent(hooks=hooks, approval_handler=approval_handler)
-    session_id = str(uuid.uuid4())
+
+    from agent_cli.runtime.session import resolve_session_id, restore_session
+
+    probe = FileSession("_probe")
+    session_id = await resolve_session_id(args, probe)
+    if session_id is None:
+        return 2
 
     registry = CommandRegistry()
     register_builtin(registry)
     register_dynamic(registry, agent)
     backend = FileSession(session_id)
 
+    if args.resume_latest or args.resume:
+        if await restore_session(agent, backend) is None:
+            print(f"harness: session corrupted: {session_id}", file=sys.stderr)
+            return 2
+
     config_source = str(config_result.path) if config_result.path else "Defaults env"
+    welcome_kwargs: dict[str, str] = {}
+    if args.resume_latest or args.resume or args.session_id:
+        welcome_kwargs["session_label"] = session_id
     render_welcome(
         console,
         version=__version__,
         model=agent.llm.model_name,
         cwd=str(Path.cwd()),
         config_source=config_source,
+        **welcome_kwargs,
     )
+    if args.resume_latest or args.resume:
+        from agent_cli.render.replay import render_session_replay
+
+        msgs = await agent.context.short_term_memory.get_context_messages()
+        render_session_replay(console, theme, msgs, session_id)
     if config_result.bootstrapped:
         console.print(
             f"[dim]config created at [bold]{config_result.path}[/bold] — edit to customize[/dim]\n"
@@ -118,6 +151,8 @@ async def _async_main() -> int:
         uninstall()
         await adapter.end_step()
         await asyncio.sleep(0)
+
+    await print_exit_reminder(console, backend)
     return 0
 
 
@@ -128,6 +163,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"harness {__version__}")
         return 0
     try:
-        return asyncio.run(_async_main())
+        return asyncio.run(_async_main(args))
     except KeyboardInterrupt:
         return 130

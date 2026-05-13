@@ -1,8 +1,11 @@
 """Runtime-layer wrappers around session state mutation."""
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
+import sys
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -13,7 +16,8 @@ from agent_harness.agent.base import BaseAgent
 from agent_harness.approval.policy import ApprovalPolicy
 from agent_harness.core.message import Message, Role
 from agent_harness.llm import BaseLLM
-from agent_harness.session.base import BaseSession
+from agent_harness.session.base import BaseSession, SessionState
+from agent_harness.session.file_session import FileSession
 
 if TYPE_CHECKING:
     from agent_cli.approval_handler import CliApprovalHandler
@@ -85,6 +89,59 @@ def update_compressor_model(
         compressor._llm = new_llm
 
 
+async def resolve_session_id(
+    args: argparse.Namespace, probe: FileSession,
+) -> str | None:
+    """Resolve the startup session id from CLI flags. Returns the id, or
+    ``None`` on failure (error already printed to stderr; caller exits 2)."""
+    new_id: str | None = args.session_id
+    if new_id:
+        if not probe._is_valid_id(new_id):
+            print(
+                f"harness: invalid session id (allowed: [a-zA-Z0-9_-]): {new_id}",
+                file=sys.stderr,
+            )
+            return None
+        if await probe.has_session(new_id):
+            print(
+                f"harness: session id already exists: {new_id} "
+                f"(use --resume to resume it)",
+                file=sys.stderr,
+            )
+            return None
+        return new_id
+    resume_id: str | None = args.resume
+    if resume_id:
+        if not await probe.has_session(resume_id):
+            print(f"harness: session not found: {resume_id}", file=sys.stderr)
+            return None
+        return resume_id
+    if args.resume_latest:
+        # Limitation: list_states() silently drops unparseable files. If the
+        # most-recently-saved session got corrupted, -c falls back to the
+        # next readable one without surfacing it. Use -r <id> if you need
+        # explicit corruption reporting on a specific session.
+        metas = await probe.list_states()
+        if not metas:
+            print("harness: no prior session found", file=sys.stderr)
+            return None
+        return metas[0].session_id
+    return str(uuid.uuid4())
+
+
+async def restore_session(
+    agent: BaseAgent, backend: BaseSession,
+) -> SessionState | None:
+    state = await backend.load_state()
+    plan_mode.exit(agent)
+    if state is None:
+        return None
+    await agent.apply_session_state(state)
+    if state.metadata.get("_plan_mode"):
+        plan_mode.enter(agent)
+    return state
+
+
 def make_save_session(
     agent: BaseAgent, backend: BaseSession,
 ) -> SaveSession:
@@ -126,13 +183,7 @@ async def switch_session(
     await stop_sandbox(agent)
 
     backend.set_session_id(new_id)
-    state = await backend.load_state()
-    plan_mode.exit(agent)
-    if state is not None:
-        await agent.apply_session_state(state)
-        if state.metadata.get("_plan_mode"):
-            plan_mode.enter(agent)
-    else:
+    if await restore_session(agent, backend) is None:
         await agent.reset_session_state(new_id)
 
 
