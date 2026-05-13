@@ -243,16 +243,15 @@ def render_diff(status_out: str, diff_out: str) -> RenderableType:
 # ── /resume session list ─────────────────────────────────────────────
 
 _RESUME_LIMIT = 10
-_PREVIEW_LIMIT = 60
+_PREVIEW_TOKEN_LIMIT = 30
 
 
-def _format_session_preview(raw: str, limit: int = _PREVIEW_LIMIT) -> str:
+def _format_session_preview(raw: str, limit: int = _PREVIEW_TOKEN_LIMIT) -> str:
     from agent_cli.render.replay import peel_user_command
 
     peeled = peel_user_command(raw)
-    if peeled is not None:
-        return peeled[:limit]
-    return " ".join(raw.split())[:limit]
+    text = peeled if peeled is not None else " ".join(raw.split())
+    return truncate_text_by_tokens(text, max_tokens=limit, suffix="…")
 
 
 def home_relative_path(path: str | Path) -> str:

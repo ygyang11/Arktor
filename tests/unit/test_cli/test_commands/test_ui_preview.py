@@ -14,11 +14,14 @@ def test_preview_collapses_whitespace() -> None:
     assert _format_session_preview(raw) == "line1 line2 with spaces"
 
 
-def test_preview_truncates_to_limit() -> None:
-    raw = "a" * 200
+def test_preview_truncates_long_prose() -> None:
+    from agent_harness.utils.token_counter import count_tokens
+
+    raw = ("hello world this is a long preview sentence " * 30).strip()
     result = _format_session_preview(raw)
-    assert len(result) == 60
-    assert result == "a" * 60
+    assert result.endswith("…")
+    assert count_tokens(result) <= 30
+    assert count_tokens(raw) > 30  # sanity: input exceeded budget
 
 
 def test_preview_shell_run_returns_bang_form() -> None:
@@ -37,11 +40,14 @@ def test_preview_shell_run_failure_shows_command() -> None:
 
 
 def test_preview_shell_run_long_command_truncated() -> None:
-    long_cmd = "echo " + "x" * 200
+    from agent_harness.utils.token_counter import count_tokens
+
+    long_cmd = "echo " + " ".join(f"word{i}" for i in range(80))
     raw = format_shell_run(long_cmd, 0, "")
     result = _format_session_preview(raw)
-    assert len(result) == 60
     assert result.startswith("! echo ")
+    assert result.endswith("…")
+    assert count_tokens(result) <= 30
 
 
 def test_preview_empty_string_returns_empty() -> None:
