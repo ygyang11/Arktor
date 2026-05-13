@@ -284,7 +284,16 @@ def relative_time(dt: datetime) -> str:
 # ── /skill list ─────────────────────────────────────────────
 
 _SKILL_LIST_LIMIT = 15
-_SKILL_DESC_TOKEN_LIMIT = 20
+_DESC_TOKEN_LIMIT = 20
+
+
+def short_desc(desc: str, *, max_tokens: int = _DESC_TOKEN_LIMIT) -> str:
+    """Single-line, token-budgeted command description for slash-command listings."""
+    return truncate_text_by_tokens(
+        desc.strip().replace("\n", " "),
+        max_tokens=max_tokens,
+        suffix="…",
+    )
 
 
 def render_skill_list(cmds: list[Command]) -> RenderableType:
@@ -296,12 +305,7 @@ def render_skill_list(cmds: list[Command]) -> RenderableType:
     for c in visible:
         line = Text("  ")
         line.append(c.name.ljust(name_w + 2), style="primary")
-        desc = truncate_text_by_tokens(
-            c.description.strip().replace("\n", " "),
-            max_tokens=_SKILL_DESC_TOKEN_LIMIT,
-            suffix="…",
-        )
-        line.append(desc, style="muted")
+        line.append(short_desc(c.description), style="muted")
         rows.append(line)
 
     if truncated > 0:
