@@ -200,6 +200,7 @@ class TestExpandMentions:
 
         agent = MagicMock()
         agent.tool_registry.has = lambda n: True
+        agent.llm.synthetic_turn_sidecar = MagicMock(return_value={})
 
         async def fake_stream(tcs: list[ToolCall]):
             for tc in tcs:
@@ -262,6 +263,7 @@ class TestExpandMentions:
 
         agent = MagicMock()
         agent.tool_registry.has = lambda n: True
+        agent.llm.synthetic_turn_sidecar = MagicMock(return_value={})
 
         captured: list[list[ToolCall]] = []
 

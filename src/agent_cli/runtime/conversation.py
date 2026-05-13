@@ -119,8 +119,14 @@ async def _write(
     """
     if tool_pairs is not None:
         tcs = [tc for tc, _ in tool_pairs]
+        # Stamp the synthesized assistant turn with provider-specific
+        # placeholder sidecar fields.
         await agent.context.short_term_memory.add_message(
-            Message.assistant(content="", tool_calls=tcs)
+            Message.assistant(
+                content="",
+                tool_calls=tcs,
+                provider_metadata=agent.llm.synthetic_turn_sidecar(),
+            )
         )
         for _, tr in tool_pairs:
             await agent.context.short_term_memory.add_message(

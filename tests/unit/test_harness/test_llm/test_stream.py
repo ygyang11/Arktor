@@ -335,3 +335,65 @@ class TestProviderMetadataRoundTrip:
         wire = OpenAIProvider._format_message(msg)
         assert "thinking_blocks" not in wire
         assert "reasoning_content" not in wire
+
+
+class TestSyntheticTurnSidecar:
+    """`synthetic_turn_sidecar` is the placeholder provider_metadata stamped
+    on harness-synthesized assistant turns (e.g. `@file` mention expansion).
+    Without it, reasoning-capable backends 400 on the next request."""
+
+    def test_base_default_is_empty(self) -> None:
+        # BaseLLM is abstract — instantiate via OpenAI and force-call BaseLLM's
+        # implementation to check the default.
+        from agent_harness.llm.base import BaseLLM
+
+        assert BaseLLM.synthetic_turn_sidecar.__qualname__.startswith("BaseLLM.")
+        # Call the unbound method with a stub `self` — confirms default = {}
+        assert BaseLLM.synthetic_turn_sidecar(object()) == {}  # type: ignore[arg-type]
+
+    def test_openai_stamps_both_reasoning_fields(self) -> None:
+        from agent_harness.core.config import LLMConfig
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider(LLMConfig(provider="openai", model="gpt-4o"))
+        sidecar = provider.synthetic_turn_sidecar()
+        assert sidecar == {
+            "openai_chat": {"reasoning_content": "", "reasoning_details": []},
+        }
+
+    def test_openai_stamps_unconditionally(self) -> None:
+        # Reasoning-capable models (deepseek-reasoner, OpenRouter thinking)
+        # require the field even when reasoning_effort is not configured.
+        from agent_harness.core.config import LLMConfig
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        no_effort = OpenAIProvider(LLMConfig(provider="openai", model="gpt-4o"))
+        with_effort = OpenAIProvider(LLMConfig(
+            provider="openai", model="gpt-4o", reasoning_effort="medium",
+        ))
+        assert no_effort.synthetic_turn_sidecar() == with_effort.synthetic_turn_sidecar()
+
+    def test_openai_returns_fresh_dict_per_call(self) -> None:
+        # Callers may stamp the dict onto a Message and provider format
+        # paths may mutate sub-dicts — must not alias the class-level constant.
+        from agent_harness.core.config import LLMConfig
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider(LLMConfig(provider="openai", model="gpt-4o"))
+        a = provider.synthetic_turn_sidecar()
+        b = provider.synthetic_turn_sidecar()
+        assert a == b
+        assert a is not b
+        assert a["openai_chat"] is not b["openai_chat"]
+
+    def test_anthropic_inherits_empty_default(self) -> None:
+        # Anthropic doesn't override — extended thinking + synthesized turn
+        # has no fabricable placeholder (signatures), so we accept the
+        # documented limitation and inherit base.
+        from agent_harness.core.config import LLMConfig
+        from agent_harness.llm.anthropic_provider import AnthropicProvider
+
+        provider = AnthropicProvider(LLMConfig(
+            provider="anthropic", model="claude-opus-4-5", api_key="dummy",
+        ))
+        assert provider.synthetic_turn_sidecar() == {}

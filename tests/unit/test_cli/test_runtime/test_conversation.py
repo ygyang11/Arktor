@@ -28,6 +28,8 @@ def _agent_with_memory() -> tuple[Any, list[Message]]:
     memory.add_message = add_message
     agent = MagicMock()
     agent.context.short_term_memory = memory
+    # Must be a real dict (not MagicMock) — pydantic validates provider_metadata
+    agent.llm.synthetic_turn_sidecar = MagicMock(return_value={})
     return agent, captured
 
 
@@ -114,6 +116,26 @@ async def test_multi_pair_assistant_carries_all_tcs() -> None:
         "id_2",
         "id_3",
     ]
+
+
+@pytest.mark.asyncio
+async def test_synthesized_assistant_carries_provider_sidecar() -> None:
+    """The fake assistant turn must inherit whatever the LLM declares as its
+    synthetic_turn_sidecar — without it, reasoning-capable backends 400 on
+    the next request with "reasoning_content must be passed back"."""
+    agent, captured = _agent_with_memory()
+    stamp = {"openai_chat": {"reasoning_content": "", "reasoning_details": []}}
+    agent.llm.synthetic_turn_sidecar = MagicMock(return_value=stamp)
+    pair = _pair(1)
+
+    await append_tool_turn(agent, [pair])
+
+    agent.llm.synthetic_turn_sidecar.assert_called_once()
+    assert captured[0].role == Role.ASSISTANT
+    assert captured[0].provider_metadata == stamp
+    # tool result message does not get the stamp — only assistant does
+    assert captured[1].role == Role.TOOL
+    assert captured[1].provider_metadata == {}
 
 
 @pytest.mark.asyncio
@@ -294,6 +316,7 @@ async def test_write_tool_pairs_with_save_orders_all_memory_before_save() -> Non
     memory.add_message = add_message
     agent = MagicMock()
     agent.context.short_term_memory = memory
+    agent.llm.synthetic_turn_sidecar = MagicMock(return_value={})
 
     async def save() -> None:
         timeline.append("save")
