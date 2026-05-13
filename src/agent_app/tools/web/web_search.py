@@ -17,6 +17,7 @@ class WebSearchConfig:
     """Configuration for the web_search tool."""
 
     max_snippet_tokens: int = 500
+    executor_timeout: float = 60.0
 
 
 _CFG = WebSearchConfig()
@@ -97,7 +98,7 @@ async def _search_serpapi(query: str, max_results: int, api_key: str) -> str:
     return _format_search_results(results)
 
 
-@tool
+@tool(executor_timeout=_CFG.executor_timeout)
 async def web_search(query: str, max_results: int = 5) -> str:
     """Search the web and return result snippets with URLs.
 
