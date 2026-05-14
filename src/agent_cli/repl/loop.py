@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.layout.processors import Processor
 from rich.console import Console
@@ -61,12 +62,12 @@ class _InputOutcome:
     eof: bool = False
     interrupted: bool = False
     cancelled: bool = False
-    buffered: str = ""
+    buffered: Document | None = None
 
 
 @dataclass
 class _LoopState:
-    pending_input: str = ""
+    pending_input: str | Document = ""
     pending_from_race: _PendingApproval | None = None
     deferred_line: str | None = None
 
@@ -75,12 +76,10 @@ async def _cancel_and_collect(
     task: asyncio.Task[str],
     pt_session: PromptSession[str],
 ) -> _InputOutcome:
-    # Unified: done tasks resolve immediately via `await`; pending tasks get
-    # their buffer snapshotted then cancelled, both paths share one except.
     if task.done():
-        buffered = ""
+        buffered = None
     else:
-        buffered = pt_session.default_buffer.text
+        buffered = pt_session.default_buffer.document
         task.cancel()
     try:
         line = await task
@@ -106,7 +105,7 @@ async def _cancel_loser(task: asyncio.Task[Any] | None) -> None:
 async def _prompt_with_lock(
     pt_session: PromptSession[str],
     adapter: CliAdapter,
-    default: str,
+    default: str | Document,
     bottom_toolbar: _ToolbarText,
     input_processors: list[Processor] | None = None,
 ) -> str:
@@ -274,7 +273,7 @@ async def run_repl(
                 break
             if outcome.line is not None:
                 state.deferred_line = outcome.line
-            elif outcome.buffered:
+            elif outcome.buffered is not None and outcome.buffered.text:
                 state.pending_input = outcome.buffered
 
     finally:

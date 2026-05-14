@@ -99,6 +99,42 @@ def test_status_bar_text_right_aligns_to_terminal_width() -> None:
     assert out.value.rstrip().endswith("1/1k")
 
 
+def _plain_toolbar(html_obj: HTML) -> str:
+    import re
+
+    return re.sub(r"<[^>]+>", "", html_obj.value)
+
+
+def test_status_bar_text_drops_hint_when_narrow() -> None:
+    from unittest.mock import patch
+
+    agent = _stub_agent("claude-opus-4-7", 12_000, 200_000)
+    renderer = make_status_bar_text(agent)
+    fake_app = MagicMock()
+    fake_app.output.get_size.return_value = MagicMock(columns=55)
+    with patch("agent_cli.render.ui.get_app", return_value=fake_app):
+        out = renderer()
+    plain = _plain_toolbar(out)
+    assert len(plain) <= 55
+    assert "shift+tab" not in plain
+    assert "claude-opus-4-7" in plain
+
+
+def test_status_bar_text_falls_back_to_label_when_very_narrow() -> None:
+    from unittest.mock import patch
+
+    agent = _stub_agent("claude-opus-4-7", 12_000, 200_000)
+    renderer = make_status_bar_text(agent)
+    fake_app = MagicMock()
+    fake_app.output.get_size.return_value = MagicMock(columns=20)
+    with patch("agent_cli.render.ui.get_app", return_value=fake_app):
+        out = renderer()
+    plain = _plain_toolbar(out)
+    assert len(plain) <= 20
+    assert "mode" in plain
+    assert "claude-opus-4-7" not in plain
+
+
 def test_status_bar_text_dash_when_no_call_yet() -> None:
     from unittest.mock import patch
 

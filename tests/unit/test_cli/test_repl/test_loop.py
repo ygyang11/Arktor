@@ -58,12 +58,14 @@ async def test_cancel_and_collect_classifies_cancelled_when_done() -> None:
     task = _done_future(asyncio.CancelledError)
     outcome = await _cancel_and_collect(task, MagicMock())
     assert outcome.cancelled is True
-    assert outcome.buffered == ""
+    assert outcome.buffered is None
 
 
 async def test_cancel_and_collect_captures_buffer_on_cancel() -> None:
+    from prompt_toolkit.document import Document
+
     pt_session = MagicMock()
-    pt_session.default_buffer.text = "partial typing"
+    pt_session.default_buffer.document = Document("partial typing", cursor_position=7)
 
     hold = asyncio.Event()
 
@@ -76,7 +78,9 @@ async def test_cancel_and_collect_captures_buffer_on_cancel() -> None:
 
     outcome = await _cancel_and_collect(task, pt_session)
     assert outcome.cancelled is True
-    assert outcome.buffered == "partial typing"
+    assert outcome.buffered is not None
+    assert outcome.buffered.text == "partial typing"
+    assert outcome.buffered.cursor_position == 7
     assert outcome.line is None
 
 

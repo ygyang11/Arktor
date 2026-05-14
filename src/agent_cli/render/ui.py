@@ -117,18 +117,25 @@ def make_status_bar_text(agent: BaseAgent) -> Callable[[], HTML]:
         snap = collect_status(agent)
         cur = _fmt(snap.input_tokens) if snap.input_tokens is not None else "—"
         info = MODE_INFO[current_mode_key(agent)]
+        width = get_app().output.get_size().columns
 
         hint = "(shift+tab to cycle)"
         right = f"{snap.model} · {cur}/{_fmt(snap.max_tokens)}"
-        left_plain = f" {info.label} mode {hint}"
-        right_plain = f"{right} "
-        width = get_app().output.get_size().columns
-        pad = max(1, width - len(left_plain) - len(right_plain))
-
-        return HTML(
+        left_html_full = (
             f' <{info.style}>{info.label}</{info.style}> mode <muted>{hint}</muted>'
-            f'{" " * pad}{right} '
         )
+        left_html_short = f' <{info.style}>{info.label}</{info.style}> mode'
+        left_full_w = len(f" {info.label} mode {hint}")
+        left_short_w = len(f" {info.label} mode")
+        right_w = len(right) + 1
+
+        if left_full_w + right_w <= width:
+            pad = width - left_full_w - right_w
+            return HTML(f'{left_html_full}{" " * pad}{right} ')
+        if left_short_w + right_w <= width:
+            pad = width - left_short_w - right_w
+            return HTML(f'{left_html_short}{" " * pad}{right} ')
+        return HTML(left_html_short)
 
     return _render
 
