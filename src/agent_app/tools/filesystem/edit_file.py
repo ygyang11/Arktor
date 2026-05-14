@@ -21,7 +21,7 @@ from agent_harness.agent.base import BaseAgent
 from agent_harness.tool.base import BaseTool, ToolSchema
 
 logger = logging.getLogger(__name__)
-_MAX_DIFF_LINES = 50
+_MAX_DIFF_LINES = 100
 
 EDIT_FILE_DESCRIPTION = (
     "Performs exact string replacements in files.\n\n"

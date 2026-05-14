@@ -15,6 +15,11 @@ from rich.cells import cell_len
 from rich.console import Console
 from rich.text import Text
 
+from agent_cli.render._code_highlight import (
+    detect_lexer_name,
+    highlight_code,
+    make_highlighter,
+)
 from agent_cli.render.tool_display import (
     _is_error_result,
     _ToolRow,
@@ -27,7 +32,7 @@ from agent_harness.core.message import ToolCall, ToolResult
 
 _PREVIEW_CAP = 10
 _INDENT = "    "
-_WRITE_DIFF_MAX_LINES = 50
+_WRITE_DIFF_MAX_LINES = 100
 
 _READ_HEADER_RE = re.compile(r"^\[(.+?)\] lines (\d+)-(\d+) of (\d+)")
 _WRITE_HEADER_RE = re.compile(r"^Created (.+?) \((\d+) lines\)\s*$")
@@ -102,7 +107,12 @@ def _print_body_head_tail(
         console.print(_INDENT + line, markup=False, highlight=False)
 
 
-def _render_diff_lines(console: Console, diff: str, indent: int = 3) -> None:
+def _render_diff_lines(
+    console: Console,
+    diff: str,
+    lexer_name: str | None = None,
+    indent: int = 3,
+) -> None:
     pad = " " * indent
     gutter_w = _DIFF_GUTTER_DIGITS + len(_DIFF_GUTTER_SEP)
     right_pad_s = " " * _DIFF_RIGHT_PAD
@@ -110,6 +120,8 @@ def _render_diff_lines(console: Console, diff: str, indent: int = 3) -> None:
         console.size.width - indent - gutter_w - _DIFF_RIGHT_PAD, 1,
     )
     full_bar_w = content_w + gutter_w
+
+    highlighter = make_highlighter(lexer_name)
 
     old_ln: int | None = None
     new_ln: int | None = None
@@ -125,11 +137,12 @@ def _render_diff_lines(console: Console, diff: str, indent: int = 3) -> None:
             continue
 
         if raw.startswith(("+++", "---")):
-            _emit_meta(raw)
             continue
 
         m = _DIFF_HUNK_RE.match(raw)
         if m:
+            if new_ln is not None:
+                console.print()
             old_ln, new_ln = int(m[1]), int(m[2])
             line = Text()
             line.append(pad)
@@ -164,10 +177,16 @@ def _render_diff_lines(console: Console, diff: str, indent: int = 3) -> None:
             _emit_meta(raw)
             continue
 
+        content = Text(first, style=style)
+        content.append_text(highlight_code(highlighter, raw[1:]))
+        pad_n = max(content_w - cell_len(content.plain), 0)
+        if pad_n:
+            content.append(" " * pad_n, style=style)
+
         line = Text()
         line.append(pad)
         line.append(gutter, style=gutter_style)
-        line.append(_cell_ljust(raw, content_w), style=style)
+        line.append_text(content)
         line.append(right_pad_s)
         console.print(line, soft_wrap=True, overflow="ellipsis")
 
@@ -351,16 +370,19 @@ def _expand_write(console: Console, row: _ToolRow) -> None:
     diff = "\n".join(f"+{line}" for line in shown)
     if len(lines) > _WRITE_DIFF_MAX_LINES:
         diff += f"\n... ({len(lines) - _WRITE_DIFF_MAX_LINES} more lines)"
-    _render_diff_lines(console, diff)
+    file_path = str(row.tool_call.arguments.get("file_path", ""))
+    _render_diff_lines(console, diff, lexer_name=detect_lexer_name(file_path))
 
 
 @register_expander("edit_file")
 def _expand_edit(console: Console, row: _ToolRow) -> None:
-    if _is_error_result(row.result) or row.result is None:
+    if _is_error_result(row.result) or row.result is None or row.tool_call is None:
         return
     _, _, diff = row.result.content.partition("\n")
-    if diff.strip():
-        _render_diff_lines(console, diff)
+    if not diff.strip():
+        return
+    file_path = str(row.tool_call.arguments.get("file_path", ""))
+    _render_diff_lines(console, diff, lexer_name=detect_lexer_name(file_path))
 
 
 @register_expander("glob_files")
