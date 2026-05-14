@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Mapping
 
 logger = logging.getLogger(__name__)
@@ -15,6 +17,7 @@ class HttpRetryConfig:
 
     max_attempts: int = 3
     base_delay: float = 1.0
+    max_sleep: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,35 @@ def _is_retryable_status(status: int) -> bool:
     return status == 429 or 500 <= status < 600
 
 
+def _parse_retry_after(value: str) -> float | None:
+    """Parse RFC 7231 Retry-After: delta-seconds or HTTP-date. None if neither."""
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return max(0.0, (dt - datetime.now(tz=UTC)).total_seconds())
+    except (TypeError, ValueError):
+        return None
+
+
+def _backoff_seconds(
+    headers: Mapping[str, str], attempt: int, retry: HttpRetryConfig,
+) -> float:
+    """Resolve sleep between attempts: prefer Retry-After (capped), fall back to exp backoff."""
+    raw = next(
+        (v for k, v in headers.items() if k.lower() == "retry-after"),
+        None,
+    )
+    delay: float | None = _parse_retry_after(raw) if raw else None
+    if delay is None:
+        delay = retry.base_delay * (2 ** attempt)
+    return min(delay, retry.max_sleep)
+
+
 async def _request_with_retry(
     *,
     method: str,
@@ -48,9 +80,11 @@ async def _request_with_retry(
     last_exc: Exception | None = None
     last_status = 429
     last_body = "Rate limit exceeded after retries"
+    last_headers: dict[str, str] = {}
     attempts = max(1, retry.max_attempts)
 
     for attempt in range(attempts):
+        last_headers = {}
         try:
             async with aiohttp.ClientSession() as session:
                 request_kwargs: dict[str, object] = {
@@ -65,13 +99,14 @@ async def _request_with_retry(
                         return resp.status, body
                     last_status = resp.status
                     last_body = body
+                    last_headers = dict(getattr(resp, "headers", {}))
                     _log_retry_status(resp.status, attempt + 1, attempts)
         except (aiohttp.ClientError, TimeoutError) as exc:
             last_exc = exc
             _log_retry_exception(exc, attempt + 1, attempts)
 
         if attempt < (attempts - 1):
-            await asyncio.sleep(retry.base_delay * (2**attempt))
+            await asyncio.sleep(_backoff_seconds(last_headers, attempt, retry))
 
     if last_exc:
         raise last_exc
@@ -97,6 +132,7 @@ async def _request_text_with_retry(
     attempts = max(1, retry.max_attempts)
 
     for attempt in range(attempts):
+        last_headers = {}
         try:
             async with aiohttp.ClientSession() as session:
                 request_kwargs: dict[str, object] = {
@@ -124,7 +160,7 @@ async def _request_text_with_retry(
             _log_retry_exception(exc, attempt + 1, attempts)
 
         if attempt < (attempts - 1):
-            await asyncio.sleep(retry.base_delay * (2**attempt))
+            await asyncio.sleep(_backoff_seconds(last_headers, attempt, retry))
 
     if last_exc:
         raise last_exc
@@ -146,9 +182,11 @@ async def _request_bytes_with_retry(
     last_exc: Exception | None = None
     last_status = 429
     last_body = b""
+    last_headers: dict[str, str] = {}
     attempts = max(1, retry.max_attempts)
 
     for attempt in range(attempts):
+        last_headers = {}
         try:
             async with aiohttp.ClientSession() as session:
                 request_kwargs: dict[str, object] = {
@@ -163,13 +201,14 @@ async def _request_bytes_with_retry(
                         return resp.status, body
                     last_status = resp.status
                     last_body = body
+                    last_headers = dict(getattr(resp, "headers", {}))
                     _log_retry_status(resp.status, attempt + 1, attempts)
         except (aiohttp.ClientError, TimeoutError) as exc:
             last_exc = exc
             _log_retry_exception(exc, attempt + 1, attempts)
 
         if attempt < (attempts - 1):
-            await asyncio.sleep(retry.base_delay * (2**attempt))
+            await asyncio.sleep(_backoff_seconds(last_headers, attempt, retry))
 
     if last_exc:
         raise last_exc

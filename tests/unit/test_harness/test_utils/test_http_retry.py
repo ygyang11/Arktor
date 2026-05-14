@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from agent_harness.utils import http_retry as http_retry_module
-from agent_harness.utils.http_retry import HttpTextResponse
+from agent_harness.utils.http_retry import (
+    HttpRetryConfig,
+    HttpTextResponse,
+    _backoff_seconds,
+    _parse_retry_after,
+)
 
 
 class _FakeTimeout:
@@ -82,6 +88,57 @@ class TestHttpTextRetry:
             headers={"Content-Type": "text/plain", "X-Test": "1"},
             body="hello",
         )
+
+    def test_parse_retry_after_delta_seconds(self) -> None:
+        assert _parse_retry_after("120") == 120.0
+        assert _parse_retry_after("0") == 0.0
+        assert _parse_retry_after("-5") == 0.0
+        assert _parse_retry_after("3.7") == 3.7
+
+    def test_parse_retry_after_http_date_future(self) -> None:
+        future = datetime.now(tz=UTC) + timedelta(seconds=45)
+        value = future.strftime("%a, %d %b %Y %H:%M:%S GMT")
+        parsed = _parse_retry_after(value)
+        assert parsed is not None
+        assert 40.0 <= parsed <= 50.0
+
+    def test_parse_retry_after_http_date_past_clamps_to_zero(self) -> None:
+        assert _parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT") == 0.0
+
+    def test_parse_retry_after_invalid_returns_none(self) -> None:
+        assert _parse_retry_after("") is None
+        assert _parse_retry_after("garbage") is None
+
+    def test_backoff_seconds_prefers_retry_after_header(self) -> None:
+        retry = HttpRetryConfig(max_attempts=3, base_delay=1.0, max_sleep=60.0)
+        delay = _backoff_seconds({"Retry-After": "15"}, attempt=0, retry=retry)
+        assert delay == 15.0
+
+    def test_backoff_seconds_caps_retry_after_at_max_sleep(self) -> None:
+        retry = HttpRetryConfig(max_attempts=3, base_delay=1.0, max_sleep=10.0)
+        delay = _backoff_seconds({"Retry-After": "120"}, attempt=0, retry=retry)
+        assert delay == 10.0
+
+    def test_backoff_seconds_falls_back_to_exponential_when_no_header(self) -> None:
+        retry = HttpRetryConfig(max_attempts=3, base_delay=2.0, max_sleep=60.0)
+        assert _backoff_seconds({}, attempt=0, retry=retry) == 2.0
+        assert _backoff_seconds({}, attempt=1, retry=retry) == 4.0
+        assert _backoff_seconds({}, attempt=2, retry=retry) == 8.0
+
+    def test_backoff_seconds_caps_exponential_at_max_sleep(self) -> None:
+        retry = HttpRetryConfig(max_attempts=10, base_delay=2.0, max_sleep=5.0)
+        assert _backoff_seconds({}, attempt=4, retry=retry) == 5.0
+
+    def test_backoff_seconds_falls_back_when_retry_after_unparseable(self) -> None:
+        retry = HttpRetryConfig(max_attempts=3, base_delay=2.0, max_sleep=60.0)
+        delay = _backoff_seconds({"Retry-After": "garbage"}, attempt=1, retry=retry)
+        assert delay == 4.0
+
+    def test_backoff_seconds_case_insensitive_header_lookup(self) -> None:
+        retry = HttpRetryConfig(max_attempts=3, base_delay=1.0, max_sleep=60.0)
+        for header_name in ("retry-after", "RETRY-AFTER", "Retry-after", "rETrY-AfTeR"):
+            delay = _backoff_seconds({header_name: "7"}, attempt=0, retry=retry)
+            assert delay == 7.0, f"failed for header name {header_name!r}"
 
     @pytest.mark.asyncio
     async def test_http_get_with_retry_keeps_legacy_tuple_shape(

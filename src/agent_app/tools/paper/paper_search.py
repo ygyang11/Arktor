@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class PaperSearchConfig:
     max_retries: int = 3
-    retry_base_delay: float = 1.0
+    retry_base_delay: float = 2.0
+    request_timeout: float = 20.0
 
 
 _CFG = PaperSearchConfig()
@@ -82,6 +83,7 @@ async def _fetch_xml(url: str) -> Element:
         status, text = await http_get_with_retry(
             url,
             headers=headers,
+            timeout=int(_CFG.request_timeout),
             retry=retry,
         )
     except Exception as exc:
@@ -179,6 +181,7 @@ async def _search_semantic_scholar(
         status, body = await http_get_with_retry(
             url,
             headers=headers,
+            timeout=int(_CFG.request_timeout),
             retry=retry,
         )
     except Exception as exc:
@@ -312,7 +315,7 @@ def _format_paper_results(papers: list[dict[str, Any]], source: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@tool
+@tool(executor_timeout=130.0)
 async def paper_search(
     query: str,
     source: Literal["arxiv", "semantic_scholar"] = "arxiv",
