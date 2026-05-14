@@ -329,9 +329,9 @@ def _format_result_line(row: _ToolRow) -> Text | None:
     return line
 
 
-def render_completed_call(
-    tc: ToolCall, tr: ToolResult | None,
-) -> RenderableType:
+def print_completed_call(
+    console: Console, tc: ToolCall, tr: ToolResult | None,
+) -> None:
     if tr is None:
         status: RowStatus = "running"
     elif _is_error_result(tr):
@@ -346,11 +346,12 @@ def render_completed_call(
         tool_call=tc,
         result=tr,
     )
-    parts: list[RenderableType] = [_format_call_line(row)]
+    console.print(_format_call_line(row))
     line = _format_result_line(row)
     if line is not None:
-        parts.append(line)
-    return Group(*parts)
+        console.print(line)
+    if row.status == "done" and row.name in _EXPANDERS:
+        _EXPANDERS[row.name](console, row)
 
 
 def format_attachment_line(tc: ToolCall, tr: ToolResult) -> Text:

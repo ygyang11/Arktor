@@ -20,7 +20,7 @@ from agent_cli.render.notices import parse_shell_run_envelope
 from agent_cli.render.tool_display import (
     format_attachments,
     format_shell_run,
-    render_completed_call,
+    print_completed_call,
 )
 from agent_cli.repl.mentions import is_attachment_turn
 from agent_cli.runtime.session import get_messages
@@ -235,7 +235,7 @@ def _render_assistant(
         render_markdown_block(console, msg.content, theme)
         console.print()
     for tc in msg.tool_calls or ():
-        console.print(render_completed_call(tc, results.get(tc.id)))
+        print_completed_call(console, tc, results.get(tc.id))
         console.print()
 
 

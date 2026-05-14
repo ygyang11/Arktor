@@ -180,6 +180,89 @@ def test_replay_tool_message_alone_not_rendered() -> None:
     assert "stray content" not in out
 
 
+def test_replay_write_file_emits_expander_diff() -> None:
+    tc = ToolCall(
+        id="c1",
+        name="write_file",
+        arguments={"file_path": "/a.py", "content": "print('hi')\nprint('bye')\n"},
+    )
+    tr = _t("c1", "Created /a.py (2 lines)")
+    out = _render(_a(calls=[tc]), tr)
+    assert "+print('hi')" in out
+    assert "+print('bye')" in out
+
+
+def test_replay_edit_file_emits_expander_diff() -> None:
+    tc = ToolCall(
+        id="c1",
+        name="edit_file",
+        arguments={"file_path": "/a.py", "old_string": "x", "new_string": "y"},
+    )
+    body = "Edited /a.py (1 replacement)\n@@ -1,1 +1,1 @@\n-x\n+y"
+    tr = _t("c1", body)
+    out = _render(_a(calls=[tc]), tr)
+    assert "-x" in out
+    assert "+y" in out
+
+
+def test_replay_paper_search_emits_expander_list() -> None:
+    tc = ToolCall(
+        id="c1",
+        name="paper_search",
+        arguments={"query": "llm iov", "source": "arxiv"},
+    )
+    body = (
+        "1. Paper Title One\n"
+        "   Authors: Alice, Bob\n"
+        "   Year: 2024\n"
+        "   URL: http://x\n\n"
+        "2. Paper Title Two\n"
+        "   Authors: Carol\n"
+        "   Year: 2025\n"
+        "   URL: http://y"
+    )
+    tr = _t("c1", body)
+    out = _render(_a(calls=[tc]), tr)
+    assert "Paper Title One" in out
+    assert "Paper Title Two" in out
+    assert "Alice, Bob" in out
+
+
+def test_replay_web_search_emits_expander_list() -> None:
+    tc = ToolCall(id="c1", name="web_search", arguments={"query": "claude"})
+    body = (
+        "1. First Result Title\n"
+        "   URL: https://example.com/a\n\n"
+        "2. Second Result Title\n"
+        "   URL: https://example.com/b"
+    )
+    tr = _t("c1", body)
+    out = _render(_a(calls=[tc]), tr)
+    assert "First Result Title" in out
+    assert "Second Result Title" in out
+    assert "https://example.com/a" in out
+
+
+def test_replay_grep_emits_expander_matches() -> None:
+    tc = ToolCall(id="c1", name="grep_files", arguments={"pattern": "TODO"})
+    body = "2 matches in 1 files\n/a.py:3:TODO fix\n/a.py:7:TODO refactor"
+    tr = _t("c1", body)
+    out = _render(_a(calls=[tc]), tr)
+    assert "TODO fix" in out
+    assert "TODO refactor" in out
+
+
+def test_replay_skips_expander_when_result_is_error() -> None:
+    tc = ToolCall(
+        id="c1",
+        name="write_file",
+        arguments={"file_path": "/a.py", "content": "print('hi')\n"},
+    )
+    tr = _t("c1", "Error: disk full", is_error=True)
+    out = _render(_a(calls=[tc]), tr)
+    assert "+print('hi')" not in out
+
+
 # ── user-shell-run rendering ─────────────────────────────────────────
 
 
