@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import difflib
 import logging
+from typing import Any
 
+from agent_app.observability.file_freshness import (
+    Verdict,
+    check_freshness,
+    record_signature,
+)
 from agent_app.tools.filesystem._security import (
     detect_text_file,
     is_sensitive_path,
     normalize_path,
     relative_to_workspace,
 )
-from agent_harness.tool.decorator import tool
+from agent_harness.agent.base import BaseAgent
+from agent_harness.tool.base import BaseTool, ToolSchema
 
 logger = logging.getLogger(__name__)
 _MAX_DIFF_LINES = 50
@@ -50,83 +57,133 @@ def _generate_diff(old: str, new: str, filename: str) -> str:
     return "\n".join(diff)
 
 
-@tool(description=EDIT_FILE_DESCRIPTION, approval_resource_key="file_path")
-async def edit_file(
-    file_path: str,
-    old_string: str,
-    new_string: str,
-    replace_all: bool = False,
-) -> str:
-    """Edit an existing file by replacing exact string matches.
+class EditFileTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="edit_file",
+            description=EDIT_FILE_DESCRIPTION,
+            approval_resource_key="file_path",
+        )
+        self._agent: BaseAgent | None = None
 
-    Args:
-        file_path: Path to the file (absolute or relative to workspace root).
-        old_string: The exact string to find and replace. Must be non-empty.
-        new_string: The replacement string. Must differ from old_string.
-        replace_all: If True, replace all occurrences. Default False.
-    """
-    if not old_string:
-        return "Error: old_string cannot be empty. Use write_file to create new files."
+    def bind_agent(self, agent: BaseAgent) -> None:
+        self._agent = agent
 
-    if old_string == new_string:
-        return "Error: old_string and new_string are identical. No edit needed."
-
-    try:
-        resolved = normalize_path(file_path, must_exist=True)
-    except ValueError as exc:
-        return f"Error: {exc}"
-
-    if resolved.is_dir():
-        return f"Error: {file_path} is a directory."
-
-    if is_sensitive_path(resolved):
-        return (
-            f"Error: Refusing to edit sensitive file: {file_path}. "
-            "This file may contain secrets or security-critical configuration."
+    def get_schema(self) -> ToolSchema:
+        return ToolSchema(
+            name=self.name,
+            description=self.description,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file (absolute or relative to workspace root).",
+                    },
+                    "old_string": {
+                        "type": "string",
+                        "description": "The exact string to find and replace. Must be non-empty.",
+                    },
+                    "new_string": {
+                        "type": "string",
+                        "description": "The replacement string. Must differ from old_string.",
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "If True, replace all occurrences. Default False.",
+                        "default": False,
+                    },
+                },
+                "required": ["file_path", "old_string", "new_string"],
+            },
         )
 
-    rel = relative_to_workspace(resolved)
+    async def execute(self, **kwargs: Any) -> str:
+        file_path: str = kwargs.get("file_path", "")
+        old_string: str = kwargs.get("old_string", "")
+        new_string: str = kwargs.get("new_string", "")
+        replace_all: bool = bool(kwargs.get("replace_all", False))
 
-    try:
-        file_info = detect_text_file(resolved)
-    except ValueError as exc:
-        return f"Error: {exc}"
+        if not old_string:
+            return "Error: old_string cannot be empty. Use write_file to create new files."
 
-    content = file_info.content
-    original_newline = file_info.newline
+        if old_string == new_string:
+            return "Error: old_string and new_string are identical. No edit needed."
 
-    work_content = content.replace("\r\n", "\n")
-    work_old = old_string.replace("\r\n", "\n")
-    work_new = new_string.replace("\r\n", "\n")
+        try:
+            resolved = normalize_path(file_path, must_exist=False)
+        except ValueError as exc:
+            return f"Error: {exc}"
 
-    count = work_content.count(work_old)
+        agent = self._agent
+        if agent is not None and check_freshness(agent, resolved) is Verdict.STALE:
+            if not resolved.exists():
+                return f"Error: {file_path} was deleted since you last accessed it."
+            return (
+                f"Error: {file_path} has changed since you last accessed it. "
+                f"Re-read it with read_file before editing."
+            )
 
-    if count == 0:
-        return (
-            f"Error: old_string not found in {rel}. "
-            "Make sure the string matches exactly (including whitespace and indentation)."
-        )
+        if not resolved.exists():
+            return f"Error: Path does not exist: {file_path}"
 
-    if count > 1 and not replace_all:
-        return (
-            f"Error: old_string appears {count} times in {rel}. "
-            "Provide more surrounding context to make it unique, "
-            "or set replace_all=True to replace all occurrences."
-        )
+        if resolved.is_dir():
+            return f"Error: {file_path} is a directory."
 
-    if replace_all:
-        new_content = work_content.replace(work_old, work_new)
-    else:
-        new_content = work_content.replace(work_old, work_new, 1)
+        if is_sensitive_path(resolved):
+            return (
+                f"Error: Refusing to edit sensitive file: {file_path}. "
+                "This file may contain secrets or security-critical configuration."
+            )
 
-    if original_newline == "\r\n":
-        new_content = new_content.replace("\n", "\r\n")
+        rel = relative_to_workspace(resolved)
 
-    try:
-        resolved.write_text(new_content, encoding=file_info.encoding)
-    except OSError as exc:
-        return f"Error: {exc}"
+        try:
+            file_info = detect_text_file(resolved)
+        except ValueError as exc:
+            return f"Error: {exc}"
 
-    diff = _generate_diff(work_content, new_content.replace("\r\n", "\n"), rel)
-    replaced = count if replace_all else 1
-    return f"Edited {rel} ({replaced} replacement{'s' if replaced > 1 else ''})\n{diff}"
+        content = file_info.content
+        original_newline = file_info.newline
+
+        work_content = content.replace("\r\n", "\n")
+        work_old = old_string.replace("\r\n", "\n")
+        work_new = new_string.replace("\r\n", "\n")
+
+        count = work_content.count(work_old)
+
+        if count == 0:
+            return (
+                f"Error: old_string not found in {rel}. "
+                "Make sure the string matches exactly (including whitespace and indentation)."
+            )
+
+        if count > 1 and not replace_all:
+            return (
+                f"Error: old_string appears {count} times in {rel}. "
+                "Provide more surrounding context to make it unique, "
+                "or set replace_all=True to replace all occurrences."
+            )
+
+        if replace_all:
+            new_content = work_content.replace(work_old, work_new)
+        else:
+            new_content = work_content.replace(work_old, work_new, 1)
+
+        if original_newline == "\r\n":
+            new_content = new_content.replace("\n", "\r\n")
+
+        try:
+            resolved.write_text(new_content, encoding=file_info.encoding)
+        except OSError as exc:
+            return f"Error: {exc}"
+
+        if agent is not None:
+            record_signature(agent, resolved)
+
+        diff = _generate_diff(work_content, new_content.replace("\r\n", "\n"), rel)
+        replaced = count if replace_all else 1
+        return f"Edited {rel} ({replaced} replacement{'s' if replaced > 1 else ''})\n{diff}"
+
+
+edit_file = EditFileTool()

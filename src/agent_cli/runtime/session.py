@@ -185,6 +185,8 @@ async def switch_session(
     backend.set_session_id(new_id)
     if await restore_session(agent, backend) is None:
         await agent.reset_session_state(new_id)
+    from agent_cli.runtime import file_observer
+    file_observer.enable(agent)
 
 
 # ── Turn lifecycle (cancel-rollback) ──

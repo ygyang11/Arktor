@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
+from agent_app.observability.file_freshness import record_signature
 from agent_app.tools.filesystem._security import (
     is_sensitive_path,
     normalize_path,
     relative_to_workspace,
 )
-from agent_harness.tool.decorator import tool
+from agent_harness.agent.base import BaseAgent
+from agent_harness.tool.base import BaseTool, ToolSchema
 
 logger = logging.getLogger(__name__)
 _MAX_LINE_CHARS = 5_000
@@ -103,34 +106,75 @@ def _read_file_streaming(path: Path, offset: int, limit: int) -> str:
     return f"{header}\n{result}"
 
 
-@tool(description=READ_FILE_DESCRIPTION, approval_resource_key="file_path")
-async def read_file(file_path: str, offset: int = 0, limit: int = 2000) -> str:
-    """Read file contents with line numbers.
+class ReadFileTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="read_file",
+            description=READ_FILE_DESCRIPTION,
+            approval_resource_key="file_path",
+        )
+        self._agent: BaseAgent | None = None
 
-    Args:
-        file_path: Path to the file (absolute or relative to workspace root).
-        offset: Line number to start reading from (0-based, default 0).
-        limit: Maximum number of lines to read (default 2000).
-    """
-    if limit <= 0:
-        return "Error: limit must be a positive integer."
-    if offset < 0:
-        return "Error: offset must be non-negative."
+    def bind_agent(self, agent: BaseAgent) -> None:
+        self._agent = agent
 
-    try:
-        resolved = normalize_path(file_path, must_exist=True)
-    except ValueError as exc:
-        return f"Error: {exc}"
+    def get_schema(self) -> ToolSchema:
+        return ToolSchema(
+            name=self.name,
+            description=self.description,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file (absolute or relative to workspace root).",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Line number to start reading from (0-based, default 0).",
+                        "default": 0,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of lines to read (default 2000).",
+                        "default": 2000,
+                    },
+                },
+                "required": ["file_path"],
+            },
+        )
 
-    if resolved.is_dir():
-        return f"Error: {file_path} is a directory. Use list_dir instead."
+    async def execute(self, **kwargs: Any) -> str:
+        file_path: str = kwargs.get("file_path", "")
+        offset: int = int(kwargs.get("offset", 0))
+        limit: int = int(kwargs.get("limit", 2000))
 
-    if is_sensitive_path(resolved):
-        logger.debug("Reading sensitive file: %s", resolved)
+        if limit <= 0:
+            return "Error: limit must be a positive integer."
+        if offset < 0:
+            return "Error: offset must be non-negative."
 
-    try:
-        return _read_file_streaming(resolved, offset, limit)
-    except PermissionError:
-        return f"Error: Permission denied: {file_path}"
-    except OSError as exc:
-        return f"Error: {exc}"
+        try:
+            resolved = normalize_path(file_path, must_exist=True)
+        except ValueError as exc:
+            return f"Error: {exc}"
+
+        if resolved.is_dir():
+            return f"Error: {file_path} is a directory. Use list_dir instead."
+
+        if is_sensitive_path(resolved):
+            logger.debug("Reading sensitive file: %s", resolved)
+
+        try:
+            content = _read_file_streaming(resolved, offset, limit)
+        except PermissionError:
+            return f"Error: Permission denied: {file_path}"
+        except OSError as exc:
+            return f"Error: {exc}"
+
+        if self._agent is not None:
+            record_signature(self._agent, resolved)
+        return content
+
+
+read_file = ReadFileTool()

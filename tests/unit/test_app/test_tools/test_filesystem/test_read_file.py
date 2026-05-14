@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from agent_app.observability.file_freshness import _key
 from agent_app.tools.filesystem.read_file import read_file
+from agent_harness.agent.base import BaseAgent
 
 
 class TestReadFile:
@@ -89,3 +91,14 @@ class TestReadFile:
         f.write_bytes(b"\xef\xbb\xbfhello\n")
         result = await read_file.execute(file_path=str(f))
         assert "hello" in result
+
+    @pytest.mark.asyncio
+    async def test_read_records_signature(
+        self, tmp_path: Path, fs_agent: BaseAgent,
+    ) -> None:
+        f = tmp_path / "tracked.txt"
+        f.write_text("hello\n")
+        await read_file.execute(file_path=str(f))
+        recorded = fs_agent.context.variables.get(_key(f))
+        assert isinstance(recorded, dict)
+        assert recorded["size"] == f.stat().st_size

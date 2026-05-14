@@ -30,7 +30,7 @@ from agent_cli.repl.fill_block import (
 from agent_cli.repl.keybindings import build_keybindings, reset_ctrl_c_state
 from agent_cli.repl.mentions import expand_mentions
 from agent_cli.repl.paste import PastePlaceholderProcessor, PasteStore
-from agent_cli.runtime import background
+from agent_cli.runtime import background, file_observer
 from agent_cli.runtime.conversation import (
     drain_pending,
     reset_pending_tracker,
@@ -155,6 +155,7 @@ async def run_repl(
     pt_session.completer = build_input_completer(registry)
     pt_session.key_bindings = build_keybindings(paste_store=paste_store, agent=agent)
     save = make_save_session(agent, session_backend)
+    file_observer.enable(agent)
 
     state = _LoopState()
 

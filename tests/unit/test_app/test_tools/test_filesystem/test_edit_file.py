@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
 import pytest
 
+from agent_app.observability.file_freshness import _key
 from agent_app.tools.filesystem.edit_file import edit_file
+from agent_app.tools.filesystem.read_file import read_file
+from agent_harness.agent.base import BaseAgent
 
 
 class TestEditFile:
@@ -145,3 +150,92 @@ class TestEditFile:
         )
         assert "-    return 1" in result
         assert "+    return 42" in result
+
+
+class TestEditFileFreshness:
+    @pytest.mark.asyncio
+    async def test_edit_passes_when_unmodified_since_read(self, tmp_path: Path) -> None:
+        f = tmp_path / "code.py"
+        f.write_text("def foo():\n    return 1\n")
+        await read_file.execute(file_path=str(f))
+        result = await edit_file.execute(
+            file_path=str(f),
+            old_string="return 1",
+            new_string="return 42",
+        )
+        assert "1 replacement" in result
+
+    @pytest.mark.asyncio
+    async def test_edit_fails_when_file_changed_since_read(self, tmp_path: Path) -> None:
+        f = tmp_path / "code.py"
+        f.write_text("def foo():\n    return 1\n")
+        await read_file.execute(file_path=str(f))
+        future = time.time() + 10
+        os.utime(f, (future, future))
+        result = await edit_file.execute(
+            file_path=str(f),
+            old_string="return 1",
+            new_string="return 42",
+        )
+        assert "has changed since you last accessed it" in result
+        assert f.read_text() == "def foo():\n    return 1\n"
+
+    @pytest.mark.asyncio
+    async def test_edit_passes_without_prior_read(self, tmp_path: Path) -> None:
+        f = tmp_path / "code.py"
+        f.write_text("def foo():\n    return 1\n")
+        result = await edit_file.execute(
+            file_path=str(f),
+            old_string="return 1",
+            new_string="return 42",
+        )
+        assert "1 replacement" in result
+
+    @pytest.mark.asyncio
+    async def test_edit_records_new_signature_after_success(
+        self, tmp_path: Path, fs_agent: BaseAgent,
+    ) -> None:
+        f = tmp_path / "code.py"
+        f.write_text("def foo():\n    return 1\n")
+        await read_file.execute(file_path=str(f))
+        await edit_file.execute(
+            file_path=str(f),
+            old_string="return 1",
+            new_string="return 42",
+        )
+        result = await edit_file.execute(
+            file_path=str(f),
+            old_string="return 42",
+            new_string="return 99",
+        )
+        assert "1 replacement" in result
+        recorded = fs_agent.context.variables.get(_key(f))
+        assert isinstance(recorded, dict)
+        assert recorded["size"] == f.stat().st_size
+
+    @pytest.mark.asyncio
+    async def test_edit_reports_deleted_when_file_unlinked_after_read(
+        self, tmp_path: Path,
+    ) -> None:
+        f = tmp_path / "code.py"
+        f.write_text("def foo():\n    return 1\n")
+        await read_file.execute(file_path=str(f))
+        os.unlink(f)
+        result = await edit_file.execute(
+            file_path=str(f),
+            old_string="return 1",
+            new_string="return 42",
+        )
+        assert "was deleted since you last accessed it" in result
+
+    @pytest.mark.asyncio
+    async def test_edit_reports_not_exist_without_prior_read(
+        self, tmp_path: Path,
+    ) -> None:
+        result = await edit_file.execute(
+            file_path=str(tmp_path / "nope.py"),
+            old_string="x",
+            new_string="y",
+        )
+        assert "Path does not exist" in result
+        assert "deleted since you last accessed it" not in result

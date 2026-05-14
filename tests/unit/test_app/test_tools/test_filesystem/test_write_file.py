@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from agent_app.observability.file_freshness import _key
 from agent_app.tools.filesystem.write_file import write_file
+from agent_harness.agent.base import BaseAgent
 
 
 class TestWriteFile:
@@ -56,3 +58,13 @@ class TestWriteFile:
         target = tmp_path / "multi.txt"
         result = await write_file.execute(file_path=str(target), content="a\nb\nc\n")
         assert "3 lines" in result
+
+    @pytest.mark.asyncio
+    async def test_write_records_signature_after_create(
+        self, tmp_path: Path, fs_agent: BaseAgent,
+    ) -> None:
+        target = tmp_path / "fresh.txt"
+        await write_file.execute(file_path=str(target), content="created\n")
+        recorded = fs_agent.context.variables.get(_key(target))
+        assert isinstance(recorded, dict)
+        assert recorded["size"] == target.stat().st_size
