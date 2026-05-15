@@ -14,6 +14,7 @@ def _mock_adapter() -> MagicMock:
     m.on_tool_denied = AsyncMock()
     m.on_llm_call = AsyncMock()
     m.end_step = AsyncMock()
+    m.end_run = AsyncMock()
     m.pause_for_stdin = AsyncMock()
     m.queue_todo = MagicMock()
     m.print_inline = AsyncMock()
@@ -161,12 +162,13 @@ async def test_on_error_debug_disabled_prints_one_line_only() -> None:
     assert a.print_inline.await_count == 1
 
 
-async def test_step_end_and_run_end_both_call_end_step() -> None:
+async def test_step_end_calls_end_step_run_end_calls_end_run() -> None:
     a = _mock_adapter()
     hooks = CliHooks(a)
     await hooks.on_step_end("cli", 1)
     await hooks.on_run_end("cli", "output")
-    assert a.end_step.await_count == 2
+    assert a.end_step.await_count == 1
+    assert a.end_run.await_count == 1
 
 
 async def test_llm_call_hook_routes_to_adapter() -> None:

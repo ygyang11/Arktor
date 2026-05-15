@@ -8,6 +8,7 @@ from rich.markup import escape as rich_escape
 
 from agent_cli.adapter import CliAdapter
 from agent_cli.approval_handler import CliApprovalHandler
+from agent_cli.render.status_lines import fmt_duration
 from agent_cli.runtime.session import _TurnContext
 from agent_cli.theme import COMPRESSION, SUBAGENT, SUBAGENT_DONE
 from agent_harness.approval.types import ApprovalRequest, ApprovalResult
@@ -107,7 +108,7 @@ class CliHooks(DefaultHooks):
     async def on_run_end(self, agent_name: str, output: str) -> None:
         if _subagent_active.get(False):
             return
-        await self.adapter.end_step()
+        await self.adapter.end_run()
 
     async def on_error(self, agent_name: str, error: Exception) -> None:
         if _subagent_active.get(False):
@@ -228,7 +229,7 @@ class CliHooks(DefaultHooks):
         await self.adapter.print_inline(
             f"[accent]╰─ {SUBAGENT_DONE} Done · SubAgent {safe_type}[/accent] "
             f'[dim]"{safe_desc}" '
-            f"({steps} steps, {tool_calls} tools, {duration_ms / 1000:.1f}s)[/dim]"
+            f"({steps} steps, {tool_calls} tools, {fmt_duration(int(duration_ms / 1000))})[/dim]"
         )
 
     async def on_pipeline_start(self, pipeline_name: str) -> None: pass

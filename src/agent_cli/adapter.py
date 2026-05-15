@@ -10,14 +10,16 @@ from rich.console import Console, RenderableType
 from rich.markup import escape as rich_escape
 
 from agent_cli.render.markdown_stream import MarkdownStream
-from agent_cli.render.status_lines import SubagentLine, ThinkingLine
+from agent_cli.render.status_lines import SubagentLine, ThinkingLine, fmt_duration
 from agent_cli.render.tool_display import SUPPRESSED_IN_ROW, ToolDisplay
-from agent_cli.theme import CliTheme
+from agent_cli.theme import RUN_DONE, CliTheme
 from agent_harness.approval.types import ApprovalResult
 from agent_harness.core.message import ToolCall, ToolResult
 from agent_harness.llm.types import LLMRetryInfo
 
 Phase = Literal["markdown", "tools", "none"]
+
+_RUN_SUMMARY_MIN_S = 60
 
 
 class CliAdapter:
@@ -138,6 +140,16 @@ class CliAdapter:
             self.tool_display.show_todos(todos, stats)
             self._pending_todo = None
         self._has_prior_step = True
+
+    async def end_run(self) -> None:
+        await self.end_step()
+        if self._run_started is not None:
+            elapsed = int(time.monotonic() - self._run_started)
+            if elapsed >= _RUN_SUMMARY_MIN_S:
+                await self.print_inline(
+                    f"[dim]{RUN_DONE} Worked for {fmt_duration(elapsed)}[/dim]"
+                )
+        self._run_started = None
 
     async def pause_for_stdin(self) -> None:
         # Caller holds _console_lock; use no-lock variants.

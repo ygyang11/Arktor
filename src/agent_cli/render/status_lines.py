@@ -46,11 +46,17 @@ _THINKING_WORDS: tuple[str, ...] = (
 )
 
 
-def _fmt_duration(n: int) -> str:
+def fmt_duration(n: int) -> str:
     if n < 60:
         return f"{n}s"
-    m, s = divmod(n, 60)
-    return f"{m}m {s}s"
+    if n < 3600:
+        m, s = divmod(n, 60)
+        return f"{m}m {s}s"
+    if n < 86400:
+        h, rem = divmod(n, 3600)
+        return f"{h}h {rem // 60}m"
+    d, rem = divmod(n, 86400)
+    return f"{d}d {rem // 3600}h"
 
 
 def _ansi_color(theme: CliTheme, name: str = "primary") -> str:
@@ -125,7 +131,7 @@ class ThinkingLine:
         head = status_line_write(frame, self._accent, self._current_word)
         detail = ""
         if elapsed >= _DETAIL_AFTER_S:
-            parts = [_fmt_duration(elapsed)]
+            parts = [fmt_duration(elapsed)]
             if self._effort:
                 parts.append(f"thinking with {self._effort} effort")
             detail = self._compose_detail(parts, elapsed)
@@ -133,7 +139,7 @@ class ThinkingLine:
             run_elapsed = self._run_elapsed_provider()
             if run_elapsed is not None:
                 detail = (
-                    f"{_ANSI_DIM} (Working {_fmt_duration(run_elapsed)}){_ANSI_RESET}"
+                    f"{_ANSI_DIM} (Working {fmt_duration(run_elapsed)}){_ANSI_RESET}"
                 )
         return f"{head}{detail}"
 
@@ -212,7 +218,7 @@ class SubagentLine:
         suffix = " · total" if show_total else ""
         return (
             f"{self._accent}{glyph} {label}{_ANSI_RESET} "
-            f"{_ANSI_DIM}· {_fmt_duration(elapsed)} · "
+            f"{_ANSI_DIM}· {fmt_duration(elapsed)} · "
             f"{self._steps} steps · {self._tools} tools{suffix}{_ANSI_RESET}"
         )
 

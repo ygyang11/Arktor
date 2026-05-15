@@ -257,6 +257,7 @@ ELLIPSIS_FRAMES: tuple[str, ...] = (".  ", ".. ", "...")
 APPROVAL = "!"
 SUBAGENT = "◆"
 SUBAGENT_DONE = "◇"
+RUN_DONE = "✻"
 COMPRESSION = "∵"
 DENIED = "⊘"
 SEP_DOT = "·"

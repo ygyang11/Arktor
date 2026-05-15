@@ -156,6 +156,61 @@ async def test_end_step_idempotent() -> None:
     assert a._phase == "none"
 
 
+async def test_end_run_omits_summary_below_one_minute() -> None:
+    import time as _time
+    a = _adapter()
+    a.print_inline = AsyncMock()
+    a.begin_run()
+    a._run_started = _time.monotonic() - 59
+    await a.end_run()
+    a.print_inline.assert_not_called()
+    assert a._run_started is None
+
+
+async def test_end_run_prints_worked_for_summary_at_one_minute() -> None:
+    import time as _time
+    a = _adapter()
+    a.print_inline = AsyncMock()
+    a.begin_run()
+    a._run_started = _time.monotonic() - 60
+    await a.end_run()
+    a.print_inline.assert_awaited_once()
+    rendered = a.print_inline.await_args.args[0]
+    assert "Worked for 1m 0s" in rendered
+    assert "✻" in rendered
+    assert a._run_started is None
+
+
+async def test_end_run_format_uses_minutes() -> None:
+    import time as _time
+    a = _adapter()
+    a.print_inline = AsyncMock()
+    a._run_started = _time.monotonic() - 135
+    await a.end_run()
+    rendered = a.print_inline.await_args.args[0]
+    assert "Worked for 2m 15s" in rendered
+
+
+async def test_end_run_omits_summary_when_no_begin_run() -> None:
+    a = _adapter()
+    a.print_inline = AsyncMock()
+    await a.end_run()
+    a.print_inline.assert_not_called()
+
+
+def test_fmt_duration_format_per_magnitude() -> None:
+    from agent_cli.render.status_lines import fmt_duration
+    assert fmt_duration(0) == "0s"
+    assert fmt_duration(59) == "59s"
+    assert fmt_duration(60) == "1m 0s"
+    assert fmt_duration(3599) == "59m 59s"
+    assert fmt_duration(3600) == "1h 0m"
+    assert fmt_duration(3661) == "1h 1m"
+    assert fmt_duration(86399) == "23h 59m"
+    assert fmt_duration(86400) == "1d 0h"
+    assert fmt_duration(90061) == "1d 1h"
+
+
 async def test_end_step_closes_markdown_phase() -> None:
     a = _adapter()
     await a.on_stream_delta("hi")
