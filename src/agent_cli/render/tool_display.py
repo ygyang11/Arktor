@@ -397,10 +397,17 @@ def format_attachments(
 
 
 def print_completed_call(
-    console: Console, tc: ToolCall, tr: ToolResult | None,
+    console: Console,
+    tc: ToolCall,
+    tr: ToolResult | None,
+    *,
+    force_status: RowStatus | None = None,
 ) -> None:
-    if tr is None:
-        status: RowStatus = "running"
+    status: RowStatus
+    if force_status is not None:
+        status = force_status
+    elif tr is None:
+        status = "running"
     elif _is_error_result(tr):
         status = "error"
     else:

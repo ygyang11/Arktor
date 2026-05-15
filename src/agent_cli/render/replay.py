@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.text import Text
 
 from agent_cli.commands.builtin.init import _INIT_NEW, _INIT_UPDATE
@@ -27,7 +28,7 @@ from agent_cli.render.tool_display import (
 )
 from agent_cli.repl.mentions import is_attachment_turn
 from agent_cli.runtime.session import get_messages
-from agent_cli.theme import PROMPT, CliTheme
+from agent_cli.theme import COMPRESSION, PROMPT, SUBAGENT, SUBAGENT_DONE, CliTheme
 from agent_harness.agent.base import BaseAgent
 from agent_harness.core.message import Message, Role, ToolCall, ToolResult
 
@@ -168,6 +169,59 @@ def _render_plain_user(console: Console, content: str) -> None:
     console.print()
 
 
+# ── notice prefix mirrors ────────────────────────────────────────────
+# Replay reconstructs UI by matching fixed-format message content.
+
+_BG_COMPLETED_PREFIX = "[Background Task Completed]"
+_BG_FAILED_PREFIX = "[Background Task Failed]"
+_BG_COMPLETION_PREFIXES = (_BG_COMPLETED_PREFIX, _BG_FAILED_PREFIX)
+
+_USER_DENIED_TEMPLATE = "Tool '{name}' was denied:"
+_POLICY_DENIED_TEMPLATE = "Tool '{name}' is not allowed by policy."
+
+
+# ── SYSTEM event records (replay-only renderings) ────────────────────
+
+def _is_background_completion(m: Message) -> bool:
+    if m.role != Role.SYSTEM:
+        return False
+    meta = getattr(m, "metadata", None) or {}
+    if not meta.get("is_background_result"):
+        return False
+    return (m.content or "").startswith(_BG_COMPLETION_PREFIXES)
+
+
+def _is_replayable_system(m: Message) -> bool:
+    return _is_background_completion(m)
+
+
+def _render_background_notice(console: Console) -> None:
+    console.print(Text.from_markup(
+        f"[info]{COMPRESSION} Background task completed[/info]"
+    ))
+    console.print()
+
+
+def _is_denied_result(tr: ToolResult | None, tc_name: str) -> bool:
+    if tr is None or not tr.is_error:
+        return False
+    content = tr.content or ""
+    return (
+        content.startswith(_USER_DENIED_TEMPLATE.format(name=tc_name))
+        or content.startswith(_POLICY_DENIED_TEMPLATE.format(name=tc_name))
+    )
+
+
+# ── tool-result indexing for completed assistant calls ───────────────
+
+def _index_results(messages: list[Message]) -> dict[str, ToolResult]:
+    out: dict[str, ToolResult] = {}
+    for m in messages:
+        if m.role == Role.TOOL and m.tool_result is not None:
+            out[m.tool_result.tool_call_id] = m.tool_result
+    return out
+
+
 # ── context compression ─────────────────────────
 
 def _render_compaction(console: Console, messages: list[Message]) -> None:
@@ -188,14 +242,30 @@ def _render_compaction(console: Console, messages: list[Message]) -> None:
         return
 
 
-# ── tool-result indexing for completed assistant calls ───────────────
+# ── sub_agent envelope (assistant tool_call renderer) ────────────────
 
-def _index_results(messages: list[Message]) -> dict[str, ToolResult]:
-    out: dict[str, ToolResult] = {}
-    for m in messages:
-        if m.role == Role.TOOL and m.tool_result is not None:
-            out[m.tool_result.tool_call_id] = m.tool_result
-    return out
+def _render_subagent_start(console: Console, tc: ToolCall) -> None:
+    agent_type = str(tc.arguments.get("agent_type", "?"))
+    desc = str(tc.arguments.get("description", ""))
+    short = desc if len(desc) <= 60 else desc[:59] + "…"
+    safe_type = rich_escape(f"[{agent_type}]")
+    safe_desc = rich_escape(short)
+    console.print(Text.from_markup(
+        f"[accent]╭─ {SUBAGENT} SubAgent {safe_type}[/accent] "
+        f'[dim]"{safe_desc}"[/dim]'
+    ))
+
+
+def _render_subagent_end(console: Console, tc: ToolCall) -> None:
+    agent_type = str(tc.arguments.get("agent_type", "?"))
+    desc = str(tc.arguments.get("description", ""))
+    short = desc if len(desc) <= 60 else desc[:59] + "…"
+    safe_type = rich_escape(f"[{agent_type}]")
+    safe_desc = rich_escape(short)
+    console.print(Text.from_markup(
+        f"[accent]╰─ {SUBAGENT_DONE} Done · SubAgent {safe_type}[/accent] "
+        f'[dim]"{safe_desc}"[/dim]'
+    ))
 
 
 # ── public API ───────────────────────────────────────────────────────
@@ -214,8 +284,14 @@ def slice_last_turns(messages: list[Message], n: int) -> list[Message]:
         if messages[idx].role == Role.USER:
             seen += 1
             if seen == n:
-                return [m for m in messages[idx:] if m.role != Role.SYSTEM]
-    return [m for m in messages if m.role != Role.SYSTEM]
+                return [
+                    m for m in messages[idx:]
+                    if m.role != Role.SYSTEM or _is_replayable_system(m)
+                ]
+    return [
+        m for m in messages
+        if m.role != Role.SYSTEM or _is_replayable_system(m)
+    ]
 
 
 def _render_user(console: Console, content: str) -> None:
@@ -238,6 +314,7 @@ def _render_assistant(
 
     needs_separator = bool(msg.content)
     last_todo: ToolCall | None = None
+    sub_agents: list[ToolCall] = []
     for tc in msg.tool_calls or ():
         if tc.name == "todo_write":
             tr = results.get(tc.id)
@@ -247,8 +324,24 @@ def _render_assistant(
         if needs_separator:
             console.print()
             needs_separator = False
+        if tc.name == "sub_agent":
+            tr = results.get(tc.id)
+            if _is_denied_result(tr, tc.name):
+                print_completed_call(console, tc, tr, force_status="denied")
+                console.print()
+                continue
+            _render_subagent_start(console, tc)
+            console.print()
+            if not tc.arguments.get("background"):
+                sub_agents.append(tc)
+            continue
         print_completed_call(console, tc, results.get(tc.id))
         console.print()
+
+    for tc in sub_agents:
+        if results.get(tc.id) is not None:
+            _render_subagent_end(console, tc)
+            console.print()
 
     if last_todo is not None:
         raw = last_todo.arguments.get("todos") or []
@@ -266,17 +359,24 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
         return
     results = _index_results(messages)
     i = 0
+    in_bg_block = False
     while i < len(messages):
         m = messages[i]
         step = 1
         if m.role == Role.USER and m.content:
+            in_bg_block = False
             _render_user(console, m.content)
             nxt = messages[i + 1] if i + 1 < len(messages) else None
             if nxt is not None and is_attachment_turn(m, nxt):
                 _render_attachment_block(console, nxt, results)
                 step = 2
         elif m.role == Role.ASSISTANT:
+            in_bg_block = False
             _render_assistant(console, theme, m, results)
+        elif _is_background_completion(m):
+            if not in_bg_block:
+                _render_background_notice(console)
+                in_bg_block = True
         i += step
 
 

@@ -852,6 +852,269 @@ def test_replay_content_plus_tool_row_keeps_single_blank() -> None:
     assert blanks == 1, f"expected 1 blank between content and tool row, got {blanks}"
 
 
+# ── background task notice replay ────────────────────────────────────
+
+
+def _bg(content: str) -> Message:
+    return Message.system(content, metadata={"is_background_result": True})
+
+
+def test_replay_single_background_completion_renders_one_notice() -> None:
+    msgs = [
+        _u("kick off bg"),
+        _a(calls=[ToolCall(id="c1", name="terminal_tool", arguments={"command": "x"})]),
+        _t("c1", "task started"),
+        _bg("[Background Task Completed] task-1 (terminal_tool): test\nsummary"),
+        _a("Processed bg result."),
+    ]
+    out = _render(*msgs)
+    assert "Background task completed" in out
+    assert out.count("Background task completed") == 1
+
+
+def test_replay_consecutive_background_completions_coalesce_to_one_notice() -> None:
+    msgs = [
+        _u("q"),
+        _bg("[Background Task Completed] task-1 (x): a\nsummary"),
+        _bg("[Background Task Completed] task-2 (x): b\nsummary"),
+        _bg("[Background Task Notification] Process the completed results."),
+        _a("done"),
+    ]
+    out = _render(*msgs)
+    assert out.count("Background task completed") == 1
+
+
+def test_replay_background_failure_also_renders_notice() -> None:
+    # live's collect_results triggers the same notice for completed AND failed.
+    msgs = [
+        _u("q"),
+        _bg("[Background Task Failed] task-1 (x): boom\nError: stack trace"),
+        _a("processed failure"),
+    ]
+    out = _render(*msgs)
+    assert "Background task completed" in out
+
+
+def test_replay_background_cancelled_renders_no_notice() -> None:
+    msgs = [
+        _u("q"),
+        _bg("[Background Task Cancelled] task-1 (x): desc — **Cancelled By User**"),
+        _a("ack"),
+    ]
+    out = _render(*msgs)
+    assert "Background task completed" not in out
+
+
+def test_replay_lone_notification_renders_no_notice() -> None:
+    msgs = [
+        _u("q"),
+        _bg("[Background Task Notification] Process the completed background task results."),
+        _a("done"),
+    ]
+    out = _render(*msgs)
+    assert "Background task completed" not in out
+
+
+def test_replay_background_completions_separated_by_message_render_separately() -> None:
+    msgs = [
+        _u("q1"),
+        _bg("[Background Task Completed] task-1 (x): a\nsummary"),
+        _a("processed first"),
+        _bg("[Background Task Completed] task-2 (x): b\nsummary"),
+        _a("processed second"),
+    ]
+    out = _render(*msgs)
+    assert out.count("Background task completed") == 2
+
+
+def test_replay_plain_system_message_still_filtered() -> None:
+    plain_sys = Message.system("some llm-only context")
+    msgs = [_u("q"), plain_sys, _a("r")]
+    out = _render(*msgs)
+    assert "Background task completed" not in out
+    assert "some llm-only context" not in out
+
+
+def test_slice_last_turns_keeps_bg_completion_drops_other_bg_kinds() -> None:
+    completed = _bg("[Background Task Completed] task-1 (x): a")
+    failed = _bg("[Background Task Failed] task-2 (x): err")
+    cancelled = _bg("[Background Task Cancelled] task-3 (x): desc")
+    notification = _bg("[Background Task Notification] Process results.")
+    plain = Message.system("plain system")
+    msgs = [_u("q1"), completed, failed, cancelled, notification, plain, _a("r")]
+    sliced = slice_last_turns(msgs, 5)
+    assert completed in sliced
+    assert failed in sliced
+    assert cancelled not in sliced
+    assert notification not in sliced
+    assert plain not in sliced
+
+
+def test_slice_last_turns_still_drops_plain_system() -> None:
+    plain = Message.system("system prompt")
+    msgs = [plain, _u("q"), _a("r")]
+    assert plain not in slice_last_turns(msgs, 5)
+
+
+def test_is_background_completion_predicate() -> None:
+    from agent_cli.render.replay import _is_background_completion
+    assert _is_background_completion(
+        _bg("[Background Task Completed] task-1 (x): a")
+    ) is True
+    assert _is_background_completion(
+        _bg("[Background Task Failed] task-2 (x): err")
+    ) is True
+    assert _is_background_completion(
+        _bg("[Background Task Cancelled] task-3 (x): desc")
+    ) is False
+    assert _is_background_completion(
+        _bg("[Background Task Notification] Process results.")
+    ) is False
+    assert _is_background_completion(Message.system("plain")) is False
+    assert _is_background_completion(_u("user msg")) is False
+    assert _is_background_completion(_a("asst msg")) is False
+
+
+# ── sub_agent envelope replay ────────────────────────────────────────
+
+
+def _sub_call(call_id: str, agent_type: str, desc: str) -> ToolCall:
+    return ToolCall(
+        id=call_id,
+        name="sub_agent",
+        arguments={
+            "agent_type": agent_type,
+            "description": desc,
+            "prompt": "...",
+        },
+    )
+
+
+def test_replay_sub_agent_success_renders_start_and_end_envelope() -> None:
+    tc = _sub_call("c1", "research", "explore the codebase")
+    tr = _t("c1", "Found 3 files...")
+    out = _render(_a(calls=[tc]), tr)
+    assert "╭─" in out
+    assert "╰─" in out
+    assert "SubAgent" in out
+    assert "[research]" in out
+    assert "explore the codebase" in out
+    assert "sub_agent(" not in out
+    assert out.index("╭─") < out.index("╰─")
+
+
+def test_replay_sub_agent_without_result_only_renders_start() -> None:
+    tc = _sub_call("c1", "research", "interrupted work")
+    out = _render(_a(calls=[tc]))  # no tool result
+    assert "╭─" in out
+    assert "╰─" not in out
+
+
+def test_replay_sub_agent_error_result_still_renders_end_as_done() -> None:
+    tc = _sub_call("c1", "research", "failing task")
+    tr = _t("c1", "Error: sub_agent failed", is_error=True)
+    out = _render(_a(calls=[tc]), tr)
+    assert "╰─" in out
+    assert "Done" in out
+    assert "Failed · SubAgent" not in out
+
+
+def test_replay_multiple_sub_agents_render_all_starts_then_all_ends() -> None:
+    tc1 = _sub_call("c1", "research", "task A")
+    tc2 = _sub_call("c2", "plan", "task B")
+    tr1 = _t("c1", "result A")
+    tr2 = _t("c2", "result B")
+    out = _render(_a(calls=[tc1, tc2]), tr1, tr2)
+    starts = [i for i, line in enumerate(out.split("\n")) if "╭─" in line]
+    ends = [i for i, line in enumerate(out.split("\n")) if "╰─" in line]
+    assert len(starts) == 2
+    assert len(ends) == 2
+    assert max(starts) < min(ends)
+    lines = out.split("\n")
+    assert "task A" in lines[starts[0]]
+    assert "task B" in lines[starts[1]]
+    assert "task A" in lines[ends[0]]
+    assert "task B" in lines[ends[1]]
+
+
+def test_replay_sub_agent_mixed_with_regular_tool_renders_in_position() -> None:
+    sub = _sub_call("c1", "research", "subtask")
+    read = ToolCall(id="c2", name="read_file", arguments={"file_path": "/a.py"})
+    tr_sub = _t("c1", "result")
+    tr_read = _t("c2", "lines 1-5")
+    out = _render(_a(calls=[sub, read]), tr_sub, tr_read)
+    sub_start = out.index("╭─")
+    read_pos = out.index("/a.py")
+    sub_end = out.index("╰─")
+    assert sub_start < read_pos < sub_end
+
+
+def test_replay_sub_agent_user_denied_renders_denied_row_no_envelope() -> None:
+    tc = _sub_call("c1", "research", "blocked work")
+    tr = _t("c1", "Tool 'sub_agent' was denied: User refused.", is_error=True)
+    out = _render(_a(calls=[tc]), tr)
+    assert "╭─" not in out
+    assert "╰─" not in out
+    assert "sub_agent" in out
+    assert "⊘" in out
+    assert "User refused" not in out
+
+
+def test_replay_sub_agent_policy_denied_renders_denied_row_no_envelope() -> None:
+    tc = _sub_call("c1", "research", "blocked by policy")
+    tr = _t("c1", "Tool 'sub_agent' is not allowed by policy.", is_error=True)
+    out = _render(_a(calls=[tc]), tr)
+    assert "╭─" not in out
+    assert "╰─" not in out
+    assert "⊘" in out
+
+
+def test_replay_sub_agent_denied_with_custom_reason_still_detected() -> None:
+    tc = _sub_call("c1", "research", "blocked")
+    tr = _t(
+        "c1",
+        "Tool 'sub_agent' was denied: shell exec is risky, try a different approach",
+        is_error=True,
+    )
+    out = _render(_a(calls=[tc]), tr)
+    assert "╭─" not in out
+    assert "⊘" in out
+
+
+def test_replay_sub_agent_background_renders_only_start_no_end() -> None:
+    tc = ToolCall(
+        id="c1",
+        name="sub_agent",
+        arguments={
+            "agent_type": "research",
+            "description": "bg work",
+            "prompt": "...",
+            "background": True,
+        },
+    )
+    tr = _t("c1", "Background sub-agent task-xyz started (research): bg work")
+    out = _render(_a(calls=[tc]), tr)
+    assert "╭─" in out
+    assert "╰─" not in out
+
+
+def test_replay_sub_agent_non_denial_error_still_renders_envelope() -> None:
+    tc = _sub_call("c1", "research", "runs but fails")
+    tr = _t("c1", "Sub-agent 'foo' failed: bad path", is_error=True)
+    out = _render(_a(calls=[tc]), tr)
+    assert "╭─" in out
+    assert "╰─" in out
+
+
+def test_replay_sub_agent_long_description_truncates_at_60() -> None:
+    long_desc = "x" * 80
+    tc = _sub_call("c1", "research", long_desc)
+    tr = _t("c1", "ok")
+    out = _render(_a(calls=[tc]), tr)
+    assert "x" * 80 not in out
+    assert "x" * 59 + "…" in out
+
+
 def test_replay_todo_write_across_two_messages_renders_two_panels() -> None:
     tc1 = _todo_call("c1", [{"id": "1", "status": "in_progress", "content": "step one"}])
     tc2 = _todo_call(
