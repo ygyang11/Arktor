@@ -824,6 +824,34 @@ def test_replay_todo_write_without_result_renders_nothing() -> None:
     assert "todo_write(" not in out
 
 
+def test_replay_content_plus_todo_panel_single_blank_between() -> None:
+    """content immediately followed by todo panel must produce exactly one
+    blank line between them — the panel's own leading blank is sufficient."""
+    tc = _todo_call("c1", [{"id": "1", "status": "in_progress", "content": "phase A"}])
+    tr = _t("c1", "ok")
+    out = _render(_a("done with phase A", calls=[tc]), tr)
+    lines = out.split("\n")
+    content_idx = next(i for i, line in enumerate(lines) if "done with phase A" in line)
+    panel_idx = next(i for i, line in enumerate(lines) if "Tasks [" in line)
+    blanks = sum(1 for line in lines[content_idx + 1:panel_idx] if not line.strip())
+    assert blanks == 1, f"expected 1 blank between content and panel, got {blanks}"
+
+
+def test_replay_content_plus_tool_row_keeps_single_blank() -> None:
+    """Regression guard: content + tool row spacing unchanged by the
+    content-blank-rework — still exactly one blank in between."""
+    tc = ToolCall(id="c1", name="read_file", arguments={"file_path": "/a.py"})
+    tr = _t("c1", "lines 1-5")
+    out = _render(_a("reading the file", calls=[tc]), tr)
+    lines = out.split("\n")
+    content_idx = next(i for i, line in enumerate(lines) if "reading the file" in line)
+    row_idx = next(
+        i for i, line in enumerate(lines) if "/a.py" in line and i > content_idx
+    )
+    blanks = sum(1 for line in lines[content_idx + 1:row_idx] if not line.strip())
+    assert blanks == 1, f"expected 1 blank between content and tool row, got {blanks}"
+
+
 def test_replay_todo_write_across_two_messages_renders_two_panels() -> None:
     tc1 = _todo_call("c1", [{"id": "1", "status": "in_progress", "content": "step one"}])
     tc2 = _todo_call(

@@ -235,8 +235,8 @@ def _render_assistant(
 ) -> None:
     if msg.content:
         render_markdown_block(console, msg.content, theme)
-        console.print()
 
+    needs_separator = bool(msg.content)
     last_todo: ToolCall | None = None
     for tc in msg.tool_calls or ():
         if tc.name == "todo_write":
@@ -244,6 +244,9 @@ def _render_assistant(
             if tr is not None and not _is_error_result(tr):
                 last_todo = tc
             continue
+        if needs_separator:
+            console.print()
+            needs_separator = False
         print_completed_call(console, tc, results.get(tc.id))
         console.print()
 
@@ -251,6 +254,10 @@ def _render_assistant(
         raw = last_todo.arguments.get("todos") or []
         if isinstance(raw, list):
             print_todos_panel(console, raw, _todo_stats(raw))
+        return
+
+    if needs_separator:
+        console.print()
 
 
 def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
