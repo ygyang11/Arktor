@@ -18,16 +18,18 @@ from agent_cli.commands.ui import ok
 from agent_cli.render.markdown_stream import render_markdown_block
 from agent_cli.render.notices import parse_shell_run_envelope
 from agent_cli.render.tool_display import (
+    _is_error_result,
+    _todo_stats,
     format_attachments,
     format_shell_run,
     print_completed_call,
+    print_todos_panel,
 )
 from agent_cli.repl.mentions import is_attachment_turn
 from agent_cli.runtime.session import get_messages
 from agent_cli.theme import PROMPT, CliTheme
 from agent_harness.agent.base import BaseAgent
-from agent_harness.core.message import Message, Role, ToolResult
-
+from agent_harness.core.message import Message, Role, ToolCall, ToolResult
 
 # ── recognisable user-message shapes ─────────────────────────────────
 
@@ -234,9 +236,21 @@ def _render_assistant(
     if msg.content:
         render_markdown_block(console, msg.content, theme)
         console.print()
+
+    last_todo: ToolCall | None = None
     for tc in msg.tool_calls or ():
+        if tc.name == "todo_write":
+            tr = results.get(tc.id)
+            if tr is not None and not _is_error_result(tr):
+                last_todo = tc
+            continue
         print_completed_call(console, tc, results.get(tc.id))
         console.print()
+
+    if last_todo is not None:
+        raw = last_todo.arguments.get("todos") or []
+        if isinstance(raw, list):
+            print_todos_panel(console, raw, _todo_stats(raw))
 
 
 def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:

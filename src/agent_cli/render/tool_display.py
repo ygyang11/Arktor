@@ -231,41 +231,7 @@ class ToolDisplay:
         self._rows.clear()
 
     def show_todos(self, todos: list[dict[str, str]], stats: dict[str, int]) -> None:
-        total = stats.get("total", 0)
-        done = stats.get("completed", 0)
-
-        def _bar(body: Text) -> Text:
-            row = Text(f"{LEFT_BAR} ", style="primary")
-            row.append_text(body)
-            return row
-
-        def _bar_only() -> Text:
-            return Text(LEFT_BAR, style="primary")
-
-        rows: list[RenderableType] = [_bar_only()]
-        rows.append(
-            _bar(
-                Text.from_markup(
-                    f"[primary]{TASKS_HEADER}[/primary] [bold]Tasks [{done}/{total}][/bold]"
-                )
-            )
-        )
-        for t in todos:
-            status = t.get("status", "pending")
-            content = rich_escape(t.get("content", ""))
-            if status == "completed":
-                body = Text.from_markup(
-                    f"  [success]{TOOL_DONE}[/success] [muted]{content}[/muted]"
-                )
-            elif status == "in_progress":
-                body = Text.from_markup(f"  [accent]{TODO_IN_PROGRESS}[/accent] {content}")
-            else:
-                body = Text.from_markup(f"  [muted]{TODO_PENDING} {content}[/muted]")
-            rows.append(_bar(body))
-        rows.append(_bar_only())
-        self._console.print()
-        self._console.print(Padding(Group(*rows), (0, 1, 0, 0), style="section"))
-        self._console.print()
+        print_todos_panel(self._console, todos, stats)
 
     def _render(self) -> RenderableType:
         rows: list[RenderableType] = []
@@ -327,31 +293,6 @@ def _format_result_line(row: _ToolRow) -> Text | None:
     line.append(f"{CONTINUATION}  ", style="muted")
     line.append(summary, style=value_style)
     return line
-
-
-def print_completed_call(
-    console: Console, tc: ToolCall, tr: ToolResult | None,
-) -> None:
-    if tr is None:
-        status: RowStatus = "running"
-    elif _is_error_result(tr):
-        status = "error"
-    else:
-        status = "done"
-    row = _ToolRow(
-        id=tc.id,
-        name=tc.name,
-        args_preview=_args_preview(tc.name, tc.arguments),
-        status=status,
-        tool_call=tc,
-        result=tr,
-    )
-    console.print(_format_call_line(row))
-    line = _format_result_line(row)
-    if line is not None:
-        console.print(line)
-    if row.status == "done" and row.name in _EXPANDERS:
-        _EXPANDERS[row.name](console, row)
 
 
 def format_attachment_line(tc: ToolCall, tr: ToolResult) -> Text:
@@ -454,6 +395,82 @@ def format_attachments(
         rows.append(line)
     return rows
 
+
+def print_completed_call(
+    console: Console, tc: ToolCall, tr: ToolResult | None,
+) -> None:
+    if tr is None:
+        status: RowStatus = "running"
+    elif _is_error_result(tr):
+        status = "error"
+    else:
+        status = "done"
+    row = _ToolRow(
+        id=tc.id,
+        name=tc.name,
+        args_preview=_args_preview(tc.name, tc.arguments),
+        status=status,
+        tool_call=tc,
+        result=tr,
+    )
+    console.print(_format_call_line(row))
+    line = _format_result_line(row)
+    if line is not None:
+        console.print(line)
+    if row.status == "done" and row.name in _EXPANDERS:
+        _EXPANDERS[row.name](console, row)
+
+
+def print_todos_panel(
+    console: Console,
+    todos: list[dict[str, str]],
+    stats: dict[str, int],
+) -> None:
+    total = stats.get("total", 0)
+    done = stats.get("completed", 0)
+
+    def _bar(body: Text) -> Text:
+        row = Text(f"{LEFT_BAR} ", style="primary")
+        row.append_text(body)
+        return row
+
+    def _bar_only() -> Text:
+        return Text(LEFT_BAR, style="primary")
+
+    rows: list[RenderableType] = [_bar_only()]
+    rows.append(
+        _bar(
+            Text.from_markup(
+                f"[primary]{TASKS_HEADER}[/primary] [bold]Tasks [{done}/{total}][/bold]"
+            )
+        )
+    )
+    for t in todos:
+        status = t.get("status", "pending")
+        content = rich_escape(t.get("content", ""))
+        if status == "completed":
+            body = Text.from_markup(
+                f"  [success]{TOOL_DONE}[/success] [muted]{content}[/muted]"
+            )
+        elif status == "in_progress":
+            body = Text.from_markup(f"  [accent]{TODO_IN_PROGRESS}[/accent] {content}")
+        else:
+            body = Text.from_markup(f"  [muted]{TODO_PENDING} {content}[/muted]")
+        rows.append(_bar(body))
+    rows.append(_bar_only())
+    console.print()
+    console.print(Padding(Group(*rows), (0, 1, 0, 0), style="section"))
+    console.print()
+
+
+def _todo_stats(todos: list[dict[str, object]]) -> dict[str, int]:
+    """Reconstruct ``{total, pending, in_progress, completed}`` from raw todos."""
+    counts = {"pending": 0, "in_progress": 0, "completed": 0}
+    for t in todos:
+        s = str(t.get("status", "pending"))
+        if s in counts:
+            counts[s] += 1
+    return {"total": len(todos), **counts}
 
 # Trigger formatter/expander registration via import side-effect.
 from agent_cli.render import tool_formatters as _tool_formatters  # noqa: F401, E402

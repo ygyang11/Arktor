@@ -725,3 +725,120 @@ def test_render_post_switch_with_messages_replays_and_shows_resumed_marker() -> 
 def test_render_post_switch_resumed_marker_appears_after_replay() -> None:
     out = _post_switch([_u("greet"), _a("response")])
     assert out.index("response") < out.index("Resumed")
+
+
+# ── todo_write panel replay ──────────────────────────────────────────
+
+
+def _todo_call(call_id: str, todos: list[dict[str, str]]) -> ToolCall:
+    return ToolCall(id=call_id, name="todo_write", arguments={"todos": todos})
+
+
+def test_replay_todo_write_renders_tasks_panel() -> None:
+    todos = [
+        {"id": "1", "status": "in_progress", "content": "wire up handler"},
+        {"id": "2", "status": "pending", "content": "write tests"},
+    ]
+    tc = _todo_call("c1", todos)
+    tr = _t("c1", "[0/2] In progress: wire up handler | Pending: write tests")
+    out = _render(_a(calls=[tc]), tr)
+    assert "Tasks [0/2]" in out
+    assert "wire up handler" in out
+    assert "write tests" in out
+    # the suppressed call row must NOT appear
+    assert "todo_write(" not in out
+
+
+def test_replay_todo_write_alongside_other_tool_panel_comes_last() -> None:
+    read_tc = ToolCall(
+        id="c0", name="read_file", arguments={"file_path": "/a.py"},
+    )
+    todo_tc = _todo_call(
+        "c1", [{"id": "1", "status": "in_progress", "content": "task A"}],
+    )
+    read_tr = _t("c0", "lines 1-5")
+    todo_tr = _t("c1", "[0/1] In progress: task A")
+    out = _render(_a(calls=[read_tc, todo_tc]), read_tr, todo_tr)
+    # both rendered
+    assert "/a.py" in out
+    assert "Tasks [0/1]" in out
+    # panel comes after the read_file row
+    assert out.index("/a.py") < out.index("Tasks [0/1]")
+
+
+def test_replay_multiple_todo_writes_in_one_msg_keeps_last() -> None:
+    first = _todo_call("c1", [{"id": "1", "status": "in_progress", "content": "first phase"}])
+    second = _todo_call(
+        "c2",
+        [
+            {"id": "1", "status": "completed", "content": "first phase"},
+            {"id": "2", "status": "in_progress", "content": "second phase"},
+        ],
+    )
+    tr1 = _t("c1", "ok")
+    tr2 = _t("c2", "ok")
+    out = _render(_a(calls=[first, second]), tr1, tr2)
+    # only one panel, showing the second call's state
+    assert out.count("Tasks [") == 1
+    assert "Tasks [1/2]" in out
+    assert "second phase" in out
+
+
+def test_replay_todo_write_failed_then_successful_uses_successful() -> None:
+    bad = _todo_call("c1", [{"id": "1", "status": "in_progress", "content": "bad phase"}])
+    good = _todo_call("c2", [{"id": "2", "status": "in_progress", "content": "good phase"}])
+    bad_tr = _t("c1", "Error: validation failed", is_error=True)
+    good_tr = _t("c2", "ok")
+    out = _render(_a(calls=[bad, good]), bad_tr, good_tr)
+    assert "Tasks [" in out
+    assert "good phase" in out
+    assert "bad phase" not in out
+
+
+def test_replay_todo_write_successful_then_failed_uses_successful() -> None:
+    # Failure on the later call must not overwrite the earlier successful one.
+    good = _todo_call("c1", [{"id": "1", "status": "in_progress", "content": "good phase"}])
+    bad = _todo_call("c2", [{"id": "2", "status": "in_progress", "content": "bad phase"}])
+    good_tr = _t("c1", "ok")
+    bad_tr = _t("c2", "Error: too many tasks", is_error=True)
+    out = _render(_a(calls=[good, bad]), good_tr, bad_tr)
+    assert "Tasks [" in out
+    assert "good phase" in out
+    assert "bad phase" not in out
+
+
+def test_replay_todo_write_only_failed_renders_nothing() -> None:
+    bad = _todo_call("c1", [{"id": "1", "status": "in_progress", "content": "broken"}])
+    bad_tr = _t("c1", "Error: validation failed", is_error=True)
+    out = _render(_a(calls=[bad]), bad_tr)
+    assert "Tasks [" not in out
+    assert "todo_write(" not in out
+    assert "broken" not in out
+
+
+def test_replay_todo_write_without_result_renders_nothing() -> None:
+    # Interrupted mid-flight — tool_call exists, result missing.
+    tc = _todo_call("c1", [{"id": "1", "status": "pending", "content": "incomplete"}])
+    out = _render(_a(calls=[tc]))
+    assert "Tasks [" not in out
+    assert "todo_write(" not in out
+
+
+def test_replay_todo_write_across_two_messages_renders_two_panels() -> None:
+    tc1 = _todo_call("c1", [{"id": "1", "status": "in_progress", "content": "step one"}])
+    tc2 = _todo_call(
+        "c2",
+        [
+            {"id": "1", "status": "completed", "content": "step one"},
+            {"id": "2", "status": "in_progress", "content": "step two"},
+        ],
+    )
+    out = _render(
+        _a(calls=[tc1]), _t("c1", "ok"),
+        _a(calls=[tc2]), _t("c2", "ok"),
+    )
+    # two distinct panels rendered
+    assert out.count("Tasks [") == 2
+    assert "Tasks [0/1]" in out
+    assert "Tasks [1/2]" in out
+    assert out.index("Tasks [0/1]") < out.index("Tasks [1/2]")
