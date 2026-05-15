@@ -8,7 +8,6 @@ from typing import Literal
 
 from rich.console import Console, RenderableType
 from rich.markup import escape as rich_escape
-from rich.text import Text
 
 from agent_cli.render.markdown_stream import MarkdownStream
 from agent_cli.render.status_lines import SubagentLine, ThinkingLine
