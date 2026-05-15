@@ -82,6 +82,14 @@ class CliAdapter:
             self.tool_display.end()
         self._phase = "none"
 
+    async def _finalize_to_none(self) -> None:
+        await self._thinking_line.stop()
+        if self._phase == "markdown":
+            self.markdown.finalize()
+        elif self._phase == "tools":
+            self.tool_display.end()
+        self._phase = "none"
+
     async def on_llm_call(self) -> None:
         await self._thinking_line.start()
 
@@ -99,6 +107,7 @@ class CliAdapter:
 
     async def on_tool_call(self, tool_call: ToolCall) -> None:
         if tool_call.name in SUPPRESSED_IN_ROW:
+            await self._finalize_to_none()
             return
         await self._enter_tools()
         self.tool_display.add_call(tool_call)

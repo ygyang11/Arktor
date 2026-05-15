@@ -41,6 +41,87 @@ async def test_first_tool_call_transitions_markdown_to_tools() -> None:
     a.tool_display.add_call.assert_called_once()
 
 
+async def test_on_tool_call_suppressed_finalizes_markdown_not_aborts() -> None:
+    a = _adapter()
+    await a.on_stream_delta("hello ")
+    assert a._phase == "markdown"
+    tc = MagicMock(id="t1")
+    tc.name = "sub_agent"
+    await a.on_tool_call(tc)
+    a.markdown.finalize.assert_called_once()
+    a.markdown.abort.assert_not_called()
+    a.tool_display.add_call.assert_not_called()
+    assert a._phase == "none"
+
+
+async def test_on_tool_call_suppressed_in_tools_phase_ends_tool_display() -> None:
+    a = _adapter()
+    tc1 = MagicMock(id="t1")
+    tc1.name = "read_file"
+    await a.on_tool_call(tc1)
+    assert a._phase == "tools"
+    tc2 = MagicMock(id="t2")
+    tc2.name = "sub_agent"
+    await a.on_tool_call(tc2)
+    a.tool_display.end.assert_called_once()
+    a.markdown.finalize.assert_not_called()
+    a.markdown.abort.assert_not_called()
+    assert a._phase == "none"
+
+
+async def test_on_tool_call_suppressed_in_none_phase_is_noop() -> None:
+    a = _adapter()
+    tc = MagicMock(id="t1")
+    tc.name = "sub_agent"
+    await a.on_tool_call(tc)
+    a.markdown.finalize.assert_not_called()
+    a.markdown.abort.assert_not_called()
+    a.tool_display.end.assert_not_called()
+    assert a._phase == "none"
+
+
+async def test_on_tool_call_todo_write_also_finalizes_markdown() -> None:
+    a = _adapter()
+    await a.on_stream_delta("ok ")
+    tc = MagicMock(id="t1")
+    tc.name = "todo_write"
+    await a.on_tool_call(tc)
+    a.markdown.finalize.assert_called_once()
+    a.markdown.abort.assert_not_called()
+    assert a._phase == "none"
+
+
+async def test_suppressed_tool_promotes_live_tail_text_to_scrollback() -> None:
+    import io as _io
+
+    from rich.console import Console as _Console
+
+    from agent_cli.render.markdown_stream import MarkdownStream
+
+    buf = _io.StringIO()
+    con = _Console(
+        file=buf,
+        force_terminal=True,
+        color_system="truecolor",
+        width=80,
+        theme=FLEXOKI_DARK.rich,
+    )
+    a = CliAdapter(con, FLEXOKI_DARK)
+    a.markdown = MarkdownStream(con, FLEXOKI_DARK)
+    a.tool_display = MagicMock()
+
+    await a.on_stream_delta("好的，再来 2 个！")
+    tc = MagicMock(id="t1")
+    tc.name = "sub_agent"
+    await a.on_tool_call(tc)
+
+    assert a._phase == "none"
+    assert "好的，再来 2 个" in buf.getvalue(), (
+        "finalize() path must promote Live tail into scrollback; "
+        "a regression to abort() would drop this line"
+    )
+
+
 async def test_denied_tool_id_skips_on_tool_result() -> None:
     a = _adapter()
     denied = MagicMock(tool_call_id="t1", tool_name="x", reason="nope")
