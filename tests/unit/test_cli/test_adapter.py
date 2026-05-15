@@ -288,6 +288,47 @@ async def test_thinking_detail_omits_effort_when_unconfigured(
     await a._thinking_line.stop()
 
 
+def test_thinking_phrase_and_color_per_tier(fast_thinking: None) -> None:
+    a = _adapter()
+    tl = a._thinking_line
+    assert tl._phrase_and_color(0) is None
+    assert tl._phrase_and_color(29) is None
+    assert tl._phrase_and_color(30) == ("still working", None)
+    assert tl._phrase_and_color(59) == ("still working", None)
+    assert tl._phrase_and_color(60) == ("running long", tl._text_ansi)
+    assert tl._phrase_and_color(119) == ("running long", tl._text_ansi)
+    assert tl._phrase_and_color(120) == ("still pushing", tl._text_ansi)
+    assert tl._phrase_and_color(299) == ("still pushing", tl._text_ansi)
+    assert tl._phrase_and_color(300) == ("going strong", tl._accent)
+
+
+async def test_thinking_phrase_renders_in_detail(
+    monkeypatch: pytest.MonkeyPatch, fast_thinking: None,
+) -> None:
+    monkeypatch.setattr(status_lines_mod, "_DETAIL_AFTER_S", 0)
+    monkeypatch.setattr(status_lines_mod, "_TIER_30_S", 0)
+    a = _adapter()
+    await a.on_llm_call()
+    await asyncio.sleep(0.02)
+    written = "".join(c.args[0] for c in a.console.file.write.call_args_list)
+    assert "still working" in written
+    await a._thinking_line.stop()
+
+
+async def test_thinking_phrase_300s_uses_primary_color_segmentation(
+    monkeypatch: pytest.MonkeyPatch, fast_thinking: None,
+) -> None:
+    monkeypatch.setattr(status_lines_mod, "_DETAIL_AFTER_S", 0)
+    monkeypatch.setattr(status_lines_mod, "_TIER_300_S", 0)
+    a = _adapter()
+    await a.on_llm_call()
+    await asyncio.sleep(0.02)
+    written = "".join(c.args[0] for c in a.console.file.write.call_args_list)
+    assert "going strong" in written
+    assert a._thinking_line._accent in written
+    await a._thinking_line.stop()
+
+
 async def test_thinking_word_stable_within_run(fast_thinking: None) -> None:
     from agent_cli.render.status_lines import _THINKING_WORDS
 

@@ -22,6 +22,11 @@ SUBAGENT_TICK_S = 0.1
 _DETAIL_AFTER_S = 5
 _ELLIPSIS_TICKS = 10
 
+_TIER_30_S = 30
+_TIER_60_S = 60
+_TIER_120_S = 120
+_TIER_300_S = 300
+
 _ANSI_DIM = "\x1b[2m"
 _ANSI_RESET = "\x1b[0m"
 
@@ -104,6 +109,7 @@ class ThinkingLine:
         run_elapsed_provider: Callable[[], int | None] | None = None,
     ) -> None:
         self._accent = _ansi_accent(theme)
+        self._text_ansi = _ansi_color(theme, "text")
         self._effort = effort
         self._run_elapsed_provider = run_elapsed_provider
         self._current_word: str = _THINKING_WORDS[0]
@@ -122,7 +128,7 @@ class ThinkingLine:
             parts = [_fmt_duration(elapsed)]
             if self._effort:
                 parts.append(f"thinking with {self._effort} effort")
-            detail = f"{_ANSI_DIM} ({' · '.join(parts)}){_ANSI_RESET}"
+            detail = self._compose_detail(parts, elapsed)
         elif self._run_elapsed_provider is not None:
             run_elapsed = self._run_elapsed_provider()
             if run_elapsed is not None:
@@ -130,6 +136,36 @@ class ThinkingLine:
                     f"{_ANSI_DIM} (Working {_fmt_duration(run_elapsed)}){_ANSI_RESET}"
                 )
         return f"{head}{detail}"
+
+    def _phrase_and_color(self, elapsed: int) -> tuple[str, str | None] | None:
+        if elapsed >= _TIER_300_S:
+            return "going strong", self._accent
+        if elapsed >= _TIER_120_S:
+            return "still pushing", self._text_ansi
+        if elapsed >= _TIER_60_S:
+            return "running long", self._text_ansi
+        if elapsed >= _TIER_30_S:
+            return "still working", None
+        return None
+
+    def _compose_detail(self, parts: list[str], elapsed: int) -> str:
+        tier = self._phrase_and_color(elapsed)
+        if tier is None:
+            body = " · ".join(parts)
+            return f"{_ANSI_DIM} ({body}){_ANSI_RESET}"
+
+        phrase, color = tier
+        if color is None:
+            parts.append(phrase)
+            body = " · ".join(parts)
+            return f"{_ANSI_DIM} ({body}){_ANSI_RESET}"
+
+        body = " · ".join(parts)
+        return (
+            f"{_ANSI_DIM} ({body} · {_ANSI_RESET}"
+            f"{color}{phrase}{_ANSI_RESET}"
+            f"{_ANSI_DIM}){_ANSI_RESET}"
+        )
 
     async def start(self) -> None:
         self._current_word = random.choice(_THINKING_WORDS)
