@@ -2,13 +2,21 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import socket
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
+from agent_harness import __version__ as _HARNESS_VERSION
+from agent_harness.core.errors import HttpResponseTooLargeError
 from agent_harness.tool.decorator import tool
-from agent_harness.utils.http_retry import HttpRetryConfig, http_get_text_with_retry
+from agent_harness.utils.http_retry import (
+    HttpRetryConfig,
+    HttpTextResponse,
+    http_get_text_with_retry,
+)
 from agent_harness.utils.token_counter import truncate_text_by_tokens
 
 
@@ -16,7 +24,10 @@ from agent_harness.utils.token_counter import truncate_text_by_tokens
 class WebFetchConfig:
     """Configuration for the web_fetch tool."""
 
-    max_response_tokens: int = 5_000
+    max_response_tokens: int = 25_000
+    max_response_bytes: int = 5 * 1024 * 1024
+    max_redirects: int = 5
+    dns_resolve_timeout: float = 5.0
     default_timeout: int = 30
     retry_max_attempts: int = 3
     retry_base_delay: float = 0.5
@@ -50,17 +61,18 @@ _EXECUTOR_TIMEOUT = (
 )
 
 
-def _validate_url(url: str) -> None:
-    if not url.strip():
-        raise ValueError("URL cannot be empty")
-    parsed = urlparse(url)
-    if parsed.scheme not in _CFG.allowed_schemes:
-        raise ValueError(
-            f"unsupported URL scheme: {parsed.scheme!r} "
-            f"(allowed: {', '.join(sorted(_CFG.allowed_schemes))})"
-        )
-    if not parsed.netloc:
-        raise ValueError("invalid URL: missing host")
+def _honest_user_agent() -> str:
+    return f"agent-harness/{_HARNESS_VERSION}"
+
+
+def _is_cf_challenge(response: HttpTextResponse) -> bool:
+    if response.status != 403:
+        return False
+    cf = next(
+        (v for k, v in response.headers.items() if k.lower() == "cf-mitigated"),
+        "",
+    )
+    return cf.lower() == "challenge"
 
 
 class _TextExtractor(HTMLParser):
@@ -97,10 +109,81 @@ class _TextExtractor(HTMLParser):
         return "\n".join(line for line in lines if line)
 
 
+async def _reject_internal_host(host: str) -> None:
+    """Best-effort SSRF guard: block loopback / private / link-local /
+    multicast hosts and the cloud metadata endpoints.
+
+    DNS resolution runs off the event loop with a bounded timeout so a
+    slow/hung resolver cannot block other coroutines or defeat the
+    caller's timeout. Unresolvable / slow DNS fails open (aiohttp then
+    surfaces the real connection error).
+    """
+    lower = host.lower()
+    if lower in {"localhost", "metadata.google.internal"}:
+        raise ValueError(f"internal/private host blocked: {host!r}")
+
+    try:
+        infos = await asyncio.wait_for(
+            asyncio.to_thread(socket.getaddrinfo, host, None),
+            timeout=_CFG.dns_resolve_timeout,
+        )
+    except (socket.gaierror, TimeoutError):
+        return  # unresolvable / slow DNS -> aiohttp will surface the real error
+    for info in infos:
+        addr = info[4][0]
+        if not isinstance(addr, str):
+            continue
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast:
+            raise ValueError(
+                f"internal/private host blocked: {host!r} -> {addr}"
+            )
+
+
+async def _validate_url(url: str) -> None:
+    if not url.strip():
+        raise ValueError("URL cannot be empty")
+    parsed = urlparse(url)
+    if parsed.scheme not in _CFG.allowed_schemes:
+        raise ValueError(
+            f"unsupported URL scheme: {parsed.scheme!r} "
+            f"(allowed: {', '.join(sorted(_CFG.allowed_schemes))})"
+        )
+    if not parsed.netloc:
+        raise ValueError("invalid URL: missing host")
+    await _reject_internal_host(parsed.hostname or "")
+
+
 def _extract_text_from_html(html: str) -> str:
     extractor = _TextExtractor()
     extractor.feed(html)
     return extractor.get_text()
+
+
+def _extract_from_html(html: str) -> str:
+    """Boilerplate-stripping extraction via trafilatura; naive fallback.
+
+    Falls back to the bundled _TextExtractor when trafilatura is absent
+    or yields nothing, so extraction quality only ever improves.
+    """
+    try:
+        import trafilatura  # type: ignore[import-untyped]  # noqa: PLC0415
+
+        extracted: str | None = trafilatura.extract(
+            html,
+            output_format="markdown",
+            include_links=True,
+            include_tables=True,
+            favor_precision=True,
+        )
+    except Exception:  # noqa: BLE001
+        return _extract_text_from_html(html)
+    if extracted and extracted.strip():
+        return extracted
+    return _extract_text_from_html(html)
 
 
 def _is_binary_content_type(content_type: str) -> bool:
@@ -126,7 +209,14 @@ def _format_response(body: str, content_type: str) -> str:
         except (json.JSONDecodeError, ValueError):
             return body
     if "text/html" in ct:
-        return _extract_text_from_html(body)
+        extracted = _extract_from_html(body)
+        if len(extracted.strip()) < 500 and len(body) > 5000:
+            extracted += (
+                "\n\n[Note: only a little text was extracted from a much larger "
+                "HTML page; it may be JS-rendered, an anti-bot/login wall, or a "
+                "non-article page. Verify before relying on this as full content.]"
+            )
+        return extracted
     return body
 
 
@@ -160,7 +250,7 @@ async def web_fetch(url: str, timeout: int = 30) -> str:
         return "Error: timeout must be greater than 0"
 
     try:
-        _validate_url(url)
+        await _validate_url(url)
     except ValueError as exc:
         return f"Error: {exc}"
 
@@ -170,19 +260,57 @@ async def web_fetch(url: str, timeout: int = 30) -> str:
         return "Error: aiohttp is not installed. Run `pip install aiohttp`."
 
     try:
+        current = url
         headers = {"User-Agent": _CFG.user_agent}
-        response = await http_get_text_with_retry(
-            url,
-            headers=headers,
-            timeout=timeout,
-            retry=_retry_policy(),
-        )
+        ua_flipped = False
+        response: HttpTextResponse | None = None
+        for _hop in range(_CFG.max_redirects + 1):
+            # Manual redirect handling: every hop is re-validated so a
+            # 3xx to an internal address cannot bypass the SSRF guard.
+            response = await http_get_text_with_retry(
+                current,
+                headers=headers,
+                timeout=timeout,
+                retry=_retry_policy(),
+                max_bytes=_CFG.max_response_bytes,
+                allow_redirects=False,
+            )
+            if not ua_flipped and _is_cf_challenge(response):
+                ua_flipped = True
+                headers = {"User-Agent": _honest_user_agent()}
+                continue
+            if 300 <= response.status < 400:
+                location = next(
+                    (
+                        v
+                        for k, v in response.headers.items()
+                        if k.lower() == "location"
+                    ),
+                    "",
+                )
+                if not location:
+                    return (
+                        f"Error: HTTP {response.status} for {current} "
+                        f"(redirect without Location)"
+                    )
+                current = urljoin(current, location)
+                try:
+                    await _validate_url(current)
+                except ValueError as exc:
+                    return f"Error: {exc}"
+                continue
+            break
+        else:
+            return f"Error: too many redirects (> {_CFG.max_redirects}(max)) for {url}"
+
+        if response is None:
+            return f"Error: no response for {url}"
         if response.status >= 400:
-            return f"Error: HTTP {response.status} for {url}"
+            return f"Error: HTTP {response.status} for {current}"
 
         content_type = response.headers.get("Content-Type", "")
 
-        if _is_pdf(content_type, url):
+        if _is_pdf(content_type, current):
             return (
                 "Error: URL is a PDF document. "
                 "Use `pdf_parser` tool to extract text from this PDF "
@@ -198,6 +326,12 @@ async def web_fetch(url: str, timeout: int = 30) -> str:
             formatted,
             max_tokens=_CFG.max_response_tokens,
             suffix="\n... (truncated)",
+        )
+    except HttpResponseTooLargeError as exc:
+        limit_mb = (exc.limit or 0) // (1024 * 1024)
+        return (
+            f"Error: {url} exceeds web_fetch's {limit_mb} MB limit; "
+            f"nothing was returned. "
         )
     except asyncio.TimeoutError:
         return f"Error: request timed out after {timeout}s"

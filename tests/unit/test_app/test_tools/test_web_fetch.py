@@ -1,18 +1,30 @@
 """Tests for web_fetch tool."""
 from __future__ import annotations
 
+import dataclasses
+import socket
 import sys
+import time
 
 import pytest
 
+from agent_harness.core.errors import HttpResponseTooLargeError
 from agent_harness.utils.http_retry import HttpRetryConfig, HttpTextResponse
 from agent_app.tools.web.web_fetch import (
+    _CFG,
+    _extract_from_html,
     _extract_text_from_html,
     _format_response,
     _is_binary_content_type,
     _is_pdf,
+    _reject_internal_host,
+    _validate_url,
     web_fetch,
 )
+
+
+async def _async_noop(host: str) -> None:
+    return None
 
 
 class TestWebFetchValidation:
@@ -55,6 +67,11 @@ class TestWebFetchValidation:
 
 
 class TestWebFetchExecution:
+    @pytest.fixture(autouse=True)
+    def _bypass_ssrf(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+        monkeypatch.setattr(module, "_reject_internal_host", _async_noop)
+
     @pytest.mark.asyncio
     async def test_html_response_uses_retry_helper(
         self,
@@ -69,6 +86,8 @@ class TestWebFetchExecution:
             headers: dict[str, str] | None = None,
             timeout: int = 30,
             retry: HttpRetryConfig,
+            max_bytes: int | None = None,
+            allow_redirects: bool = True,
         ) -> HttpTextResponse:
             captured["url"] = url
             captured["headers"] = headers
@@ -83,8 +102,8 @@ class TestWebFetchExecution:
         monkeypatch.setattr(module, "http_get_text_with_retry", _fake_http_get_text_with_retry)
 
         result = await web_fetch.execute(url="https://example.com", timeout=9)
-        assert "Hello" in result
         assert "world" in result
+        assert "<html>" not in result and "<p>" not in result
         assert captured["url"] == "https://example.com"
         assert captured["timeout"] == 9
         assert captured["headers"] == {"User-Agent": module._CFG.user_agent}
@@ -103,8 +122,10 @@ class TestWebFetchExecution:
             headers: dict[str, str] | None = None,
             timeout: int = 30,
             retry: HttpRetryConfig,
+            max_bytes: int | None = None,
+            allow_redirects: bool = True,
         ) -> HttpTextResponse:
-            _ = (url, headers, timeout, retry)
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
             raise TimeoutError
 
         monkeypatch.setattr(module, "http_get_text_with_retry", _fake_http_get_text_with_retry)
@@ -125,8 +146,10 @@ class TestWebFetchExecution:
             headers: dict[str, str] | None = None,
             timeout: int = 30,
             retry: HttpRetryConfig,
+            max_bytes: int | None = None,
+            allow_redirects: bool = True,
         ) -> HttpTextResponse:
-            _ = (url, headers, timeout, retry)
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
             return HttpTextResponse(
                 status=200,
                 headers={"Content-Type": "application/pdf"},
@@ -198,6 +221,323 @@ class TestFormatResponse:
 
     def test_empty_content_type_is_passthrough(self) -> None:
         assert _format_response("some data", "") == "some data"
+
+
+class TestTrafilaturaExtraction:
+    def test_uses_trafilatura_when_it_returns_content(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import trafilatura
+
+        monkeypatch.setattr(
+            trafilatura, "extract", lambda *a, **k: "# Title\n\nclean body"
+        )
+        out = _extract_from_html("<html><nav>junk</nav><p>x</p></html>")
+        assert out == "# Title\n\nclean body"
+        assert "junk" not in out
+
+    def test_falls_back_when_trafilatura_returns_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import trafilatura
+
+        monkeypatch.setattr(trafilatura, "extract", lambda *a, **k: None)
+        out = _extract_from_html("<html><body><p>fallback text</p></body></html>")
+        assert "fallback text" in out
+
+    def test_falls_back_when_trafilatura_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import trafilatura
+
+        def _boom(*a: object, **k: object) -> str:
+            raise RuntimeError("trafilatura blew up")
+
+        monkeypatch.setattr(trafilatura, "extract", _boom)
+        out = _extract_from_html("<html><body><p>still here</p></body></html>")
+        assert "still here" in out
+
+    def test_thin_extraction_appends_note(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import trafilatura
+
+        monkeypatch.setattr(trafilatura, "extract", lambda *a, **k: "x")
+        big_html = "<html>" + "<div>spa shell</div>" * 1000 + "</html>"
+        out = _format_response(big_html, "text/html")
+        assert "may be JS-rendered" in out
+
+    def test_no_note_when_extraction_is_substantial(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import trafilatura
+
+        monkeypatch.setattr(trafilatura, "extract", lambda *a, **k: "y" * 600)
+        out = _format_response("<html>" + "z" * 6000 + "</html>", "text/html")
+        assert "may be JS-rendered" not in out
+
+
+class TestMaxBytesWiring:
+    @pytest.fixture(autouse=True)
+    def _bypass_ssrf(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+        monkeypatch.setattr(module, "_reject_internal_host", _async_noop)
+
+    @pytest.mark.asyncio
+    async def test_passes_max_response_bytes_to_helper(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+        captured: dict[str, object] = {}
+
+        async def _fake(
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+            timeout: int = 30,
+            retry: HttpRetryConfig,
+            max_bytes: int | None = None,
+            allow_redirects: bool = True,
+        ) -> HttpTextResponse:
+            captured["max_bytes"] = max_bytes
+            return HttpTextResponse(status=200, headers={}, body="ok")
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake)
+        await web_fetch.execute(url="https://example.com")
+        assert captured["max_bytes"] == _CFG.max_response_bytes
+
+    @pytest.mark.asyncio
+    async def test_too_large_surfaces_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+
+        async def _fake(
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+            timeout: int = 30,
+            retry: HttpRetryConfig,
+            max_bytes: int | None = None,
+            allow_redirects: bool = True,
+        ) -> HttpTextResponse:
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            raise HttpResponseTooLargeError(limit=5 * 1024 * 1024)
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake)
+        result = await web_fetch.execute(url="https://example.com/huge")
+        assert result.startswith("Error:")
+        assert "exceeds web_fetch's 5 MB limit" in result
+        assert not result.startswith("Error: [")
+
+
+class TestCloudflareUaFlip:
+    @pytest.fixture(autouse=True)
+    def _bypass_ssrf(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+        monkeypatch.setattr(module, "_reject_internal_host", _async_noop)
+
+    @pytest.mark.asyncio
+    async def test_cf_challenge_triggers_honest_ua_retry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+        uas: list[str | None] = []
+
+        async def _fake(
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+            timeout: int = 30,
+            retry: HttpRetryConfig,
+            max_bytes: int | None = None,
+            allow_redirects: bool = True,
+        ) -> HttpTextResponse:
+            _ = (url, timeout, retry, max_bytes)
+            uas.append((headers or {}).get("User-Agent"))
+            if len(uas) == 1:
+                return HttpTextResponse(
+                    status=403,
+                    headers={"cf-mitigated": "challenge"},
+                    body="blocked",
+                )
+            return HttpTextResponse(
+                status=200,
+                headers={"Content-Type": "text/plain"},
+                body="real content",
+            )
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake)
+        result = await web_fetch.execute(url="https://example.com")
+        assert "real content" in result
+        assert len(uas) == 2
+        assert uas[0] == module._CFG.user_agent
+        assert uas[1] == f"agent-harness/{module._HARNESS_VERSION}"
+
+    @pytest.mark.asyncio
+    async def test_plain_403_does_not_retry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+        calls: list[int] = []
+
+        async def _fake(
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+            timeout: int = 30,
+            retry: HttpRetryConfig,
+            max_bytes: int | None = None,
+            allow_redirects: bool = True,
+        ) -> HttpTextResponse:
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            calls.append(1)
+            return HttpTextResponse(status=403, headers={}, body="forbidden")
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake)
+        result = await web_fetch.execute(url="https://example.com")
+        assert result == "Error: HTTP 403 for https://example.com"
+        assert len(calls) == 1
+
+
+class TestSsrfGuard:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "host",
+        ["localhost", "metadata.google.internal", "LocalHost"],
+    )
+    async def test_blacklisted_hosts_blocked(self, host: str) -> None:
+        with pytest.raises(ValueError, match="internal/private host blocked"):
+            await _reject_internal_host(host)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "ip",
+        ["127.0.0.1", "10.0.0.1", "192.168.1.1", "172.16.0.1", "169.254.169.254"],
+    )
+    async def test_private_and_metadata_ips_blocked(self, ip: str) -> None:
+        with pytest.raises(ValueError, match="internal/private host blocked"):
+            await _reject_internal_host(ip)
+
+    @pytest.mark.asyncio
+    async def test_public_ip_passes(self) -> None:
+        await _reject_internal_host("1.1.1.1")  # no raise
+
+    @pytest.mark.asyncio
+    async def test_unresolvable_host_does_not_block(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(*a: object, **k: object) -> object:
+            raise socket.gaierror("name resolution failed")
+
+        monkeypatch.setattr(socket, "getaddrinfo", _boom)
+        await _reject_internal_host("nonexistent.invalid")  # no raise
+
+    @pytest.mark.asyncio
+    async def test_dns_resolving_to_private_is_blocked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _fake(*a: object, **k: object) -> list[object]:
+            return [(0, 0, 0, "", ("10.1.2.3", 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", _fake)
+        with pytest.raises(ValueError, match="internal/private host blocked"):
+            await _reject_internal_host("sneaky.example.com")
+
+    @pytest.mark.asyncio
+    async def test_slow_dns_does_not_exceed_timeout_and_fails_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+        monkeypatch.setattr(
+            module,
+            "_CFG",
+            dataclasses.replace(_CFG, dns_resolve_timeout=0.1),
+        )
+
+        def _slow(*a: object, **k: object) -> list[object]:
+            time.sleep(1.0)
+            return [(0, 0, 0, "", ("10.0.0.1", 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", _slow)
+        start = time.monotonic()
+        await module._reject_internal_host("slow.example.com")  # no raise
+        elapsed = time.monotonic() - start
+        assert elapsed < 0.6  # bounded by dns_resolve_timeout, not 1.0s
+
+    @pytest.mark.asyncio
+    async def test_web_fetch_blocks_localhost(self) -> None:
+        result = await web_fetch.execute(url="http://localhost:8080/admin")
+        assert result.startswith("Error:")
+        assert "internal/private host blocked" in result
+
+    @pytest.mark.asyncio
+    async def test_web_fetch_blocks_metadata_ip(self) -> None:
+        result = await web_fetch.execute(
+            url="http://169.254.169.254/latest/meta-data/"
+        )
+        assert result.startswith("Error:")
+        assert "internal/private host blocked" in result
+
+    @pytest.mark.asyncio
+    async def test_validate_url_still_checks_scheme(self) -> None:
+        with pytest.raises(ValueError, match="unsupported URL scheme"):
+            await _validate_url("ftp://example.com/x")
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_private_is_blocked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+
+        async def _fake(
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+            timeout: int = 30,
+            retry: HttpRetryConfig,
+            max_bytes: int | None = None,
+            allow_redirects: bool = True,
+        ) -> HttpTextResponse:
+            _ = (headers, timeout, retry, max_bytes)
+            assert allow_redirects is False
+            return HttpTextResponse(
+                status=302,
+                headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+                body="",
+            )
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake)
+        result = await web_fetch.execute(url="https://public.example.com/r")
+        assert result.startswith("Error:")
+        assert "internal/private host blocked" in result
+
+    @pytest.mark.asyncio
+    async def test_too_many_redirects(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+        monkeypatch.setattr(module, "_reject_internal_host", _async_noop)
+
+        async def _fake(
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+            timeout: int = 30,
+            retry: HttpRetryConfig,
+            max_bytes: int | None = None,
+            allow_redirects: bool = True,
+        ) -> HttpTextResponse:
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return HttpTextResponse(
+                status=302,
+                headers={"Location": "https://public.example.com/next"},
+                body="",
+            )
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake)
+        result = await web_fetch.execute(url="https://public.example.com/start")
+        assert result.startswith("Error: too many redirects")
 
 
 class TestBinaryContentTypeDetection:
