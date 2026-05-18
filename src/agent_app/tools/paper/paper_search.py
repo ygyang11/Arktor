@@ -16,6 +16,31 @@ from agent_harness.utils.json_utils import parse_json_lenient
 logger = logging.getLogger(__name__)
 
 
+PAPER_SEARCH_DESCRIPTION = (
+    "Searches academic paper databases and returns structured metadata "
+    "(title, authors, abstract, etc.).\n\n"
+    "## source='arxiv'\n"
+    "Plain keywords (matched across all fields) OR arXiv structured "
+    "query syntax:\n"
+    "- Field prefixes: au: (author), ti: (title), abs: (abstract), "
+    "cat: (category), co: (comment), jr: (journal ref), "
+    "rn: (report number), all: (any field)\n"
+    "- Boolean operators: AND, OR, ANDNOT\n"
+    "- Date range: submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM] "
+    "(12-digit timestamp, GMT)\n\n"
+    "Examples:\n"
+    "- paper_search(query='diffusion transformers')\n"
+    "- paper_search(query='au:bengio AND ti:attention')\n"
+    "- paper_search(query='cat:cs.AI AND "
+    "submittedDate:[202601010000 TO 202605152359]')\n"
+    "- paper_search(query='abs:diffusion ANDNOT cat:cs.CL')\n\n"
+    "## source='semantic_scholar'\n"
+    "Keyword-only. Field prefixes and boolean operators are NOT "
+    "supported — pass natural-language terms "
+    "(e.g. 'graph neural network robustness')."
+)
+
+
 @dataclass(frozen=True)
 class PaperSearchConfig:
     max_retries: int = 3
@@ -48,6 +73,9 @@ _S2_SEARCH_FIELDS = (
 # ---------------------------------------------------------------------------
 
 
+_ARXIV_FIELD_RE = re.compile(r"\b(au|ti|abs|cat|co|jr|rn|id|all|submittedDate):")
+_ARXIV_BOOL_RE = re.compile(r"\b(AND|OR|ANDNOT)\b")
+
 def _looks_like_arxiv_id(value: str) -> bool:
     cleaned = re.sub(r"^(https?://)?arxiv\.org/(abs|pdf)/", "", value)
     cleaned = re.sub(r"(\.pdf)?$", "", cleaned)
@@ -61,11 +89,19 @@ def _normalize_arxiv_id(arxiv_id: str) -> str:
     return cleaned
 
 
+def _is_structured_arxiv_query(query: str) -> bool:
+    return bool(_ARXIV_FIELD_RE.search(query) or _ARXIV_BOOL_RE.search(query))
+
+
 def _build_arxiv_query_url(query: str, max_results: int, start: int = 0) -> str:
     params: dict[str, str | int] = {"max_results": max_results, "start": start}
     if _looks_like_arxiv_id(query) or query.startswith("id:"):
         raw_id = query.removeprefix("id:")
         params["id_list"] = _normalize_arxiv_id(raw_id)
+    elif _is_structured_arxiv_query(query):
+        params["search_query"] = query
+        params["sortBy"] = "relevance"
+        params["sortOrder"] = "descending"
     else:
         params["search_query"] = f"all:{query}"
         params["sortBy"] = "relevance"
@@ -315,7 +351,7 @@ def _format_paper_results(papers: list[dict[str, Any]], source: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@tool(executor_timeout=130.0)
+@tool(executor_timeout=130.0, description=PAPER_SEARCH_DESCRIPTION)
 async def paper_search(
     query: str,
     source: Literal["arxiv", "semantic_scholar"] = "arxiv",
@@ -333,7 +369,7 @@ async def paper_search(
     papers across all major academic databases.
 
     Args:
-        query: Search query string or arXiv ID (e.g. "2301.07041").
+        query: A plain-text search query. For source='arxiv', alternatively an arXiv ID (e.g. "2301.07041") or arXiv structured syntax (e.g. 'au:bengio AND ti:attention').
         source: "arxiv" by default (recommended for preprints and CS/AI) or "semantic_scholar" for broader cross-publisher search (e.g., IEEE, ACM, ScienceDirect, PubMed, etc.).
         max_results: Number of results to return (1-30, default 10).
     """

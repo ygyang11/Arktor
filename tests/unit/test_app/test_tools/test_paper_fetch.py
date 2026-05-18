@@ -7,7 +7,9 @@ import sys
 import pytest
 
 from agent_app.tools.paper.paper_fetch import (
+    _ArxivIdCheck,
     _fetch_arxiv_metadata,
+    _fetch_full_content,
     _format_metadata,
     paper_fetch,
 )
@@ -126,6 +128,7 @@ class _FakeResponse:
     def __init__(self, status: int, body: str) -> None:
         self.status = status
         self._body = body
+        self.charset = "utf-8"
 
     async def __aenter__(self) -> _FakeResponse:
         return self
@@ -338,3 +341,144 @@ class TestPaperFetchFullPathRetries:
         monkeypatch.setattr(paper_fetch_module, "http_get_with_retry", _fake_http_get_with_retry)
         result = await paper_fetch_module._try_unpaywall("10.1000/test")
         assert result.startswith("Error: failed to parse Unpaywall response for DOI 10.1000/test:")
+
+
+class TestFetchFullArxivPrecheck:
+    @pytest.mark.asyncio
+    async def test_html_hit_skips_id_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mod = sys.modules[_fetch_full_content.__module__]
+        called = {"id_check": False}
+
+        async def _html(arxiv_id: str) -> str:
+            return "full body " * 100
+
+        async def _idcheck(clean_id: str) -> _ArxivIdCheck:
+            called["id_check"] = True
+            return _ArxivIdCheck.PRESENT
+
+        monkeypatch.setattr(mod, "_try_arxiv_html", _html)
+        monkeypatch.setattr(mod, "_arxiv_id_check", _idcheck)
+        out = await _fetch_full_content("2301.07041", "arxiv", None)
+        assert "full body" in out
+        assert called["id_check"] is False
+
+    @pytest.mark.asyncio
+    async def test_missing_fast_fails_before_pdf(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mod = sys.modules[_fetch_full_content.__module__]
+        called = {"pdf": False}
+
+        async def _html(arxiv_id: str) -> None:
+            return None
+
+        async def _idcheck(clean_id: str) -> _ArxivIdCheck:
+            return _ArxivIdCheck.MISSING
+
+        async def _pdf(pdf_url: str, paper_id: str = "") -> str:
+            called["pdf"] = True
+            return "should not run"
+
+        monkeypatch.setattr(mod, "_try_arxiv_html", _html)
+        monkeypatch.setattr(mod, "_arxiv_id_check", _idcheck)
+        monkeypatch.setattr(mod, "_fetch_via_pdf_parser", _pdf)
+        out = await _fetch_full_content("9999.99999", "arxiv", None)
+        assert out == "Error: no arXiv paper found for ID: 9999.99999"
+        assert called["pdf"] is False
+
+    @pytest.mark.asyncio
+    async def test_unknown_still_tries_pdf(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mod = sys.modules[_fetch_full_content.__module__]
+        called = {"pdf": False}
+
+        async def _html(arxiv_id: str) -> None:
+            return None
+
+        async def _idcheck(clean_id: str) -> _ArxivIdCheck:
+            return _ArxivIdCheck.UNKNOWN
+
+        async def _pdf(pdf_url: str, paper_id: str = "") -> str:
+            called["pdf"] = True
+            return "pdf body text"
+
+        monkeypatch.setattr(mod, "_try_arxiv_html", _html)
+        monkeypatch.setattr(mod, "_arxiv_id_check", _idcheck)
+        monkeypatch.setattr(mod, "_fetch_via_pdf_parser", _pdf)
+        out = await _fetch_full_content("2301.07041", "arxiv", None)
+        assert called["pdf"] is True
+        assert out == "pdf body text"
+
+    @pytest.mark.asyncio
+    async def test_pdf_failure_returned_verbatim(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mod = sys.modules[_fetch_full_content.__module__]
+
+        async def _html(arxiv_id: str) -> None:
+            return None
+
+        async def _idcheck(clean_id: str) -> _ArxivIdCheck:
+            return _ArxivIdCheck.PRESENT
+
+        async def _pdf(pdf_url: str, paper_id: str = "") -> str:
+            return "Error: failed to extract full content from PDF.\nPDF URL: x"
+
+        monkeypatch.setattr(mod, "_try_arxiv_html", _html)
+        monkeypatch.setattr(mod, "_arxiv_id_check", _idcheck)
+        monkeypatch.setattr(mod, "_fetch_via_pdf_parser", _pdf)
+        out = await _fetch_full_content("2301.07041", "arxiv", None)
+        assert out == "Error: failed to extract full content from PDF.\nPDF URL: x"
+
+
+class TestArxivIdCheck:
+    @pytest.mark.asyncio
+    async def test_empty_entries_is_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import xml.etree.ElementTree as ET
+
+        from agent_app.tools.paper.paper_fetch import _arxiv_id_check
+
+        ps = sys.modules["agent_app.tools.paper.paper_search"]
+
+        async def _xml(url: str) -> ET.Element:
+            return ET.fromstring('<feed xmlns="http://www.w3.org/2005/Atom"></feed>')
+
+        monkeypatch.setattr(ps, "_fetch_xml", _xml)
+        assert await _arxiv_id_check("9999.99999") is _ArxivIdCheck.MISSING
+
+    @pytest.mark.asyncio
+    async def test_entry_present(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import xml.etree.ElementTree as ET
+
+        from agent_app.tools.paper.paper_fetch import _arxiv_id_check
+
+        ps = sys.modules["agent_app.tools.paper.paper_search"]
+
+        async def _xml(url: str) -> ET.Element:
+            return ET.fromstring(
+                '<feed xmlns="http://www.w3.org/2005/Atom"><entry/></feed>'
+            )
+
+        monkeypatch.setattr(ps, "_fetch_xml", _xml)
+        assert await _arxiv_id_check("1706.03762") is _ArxivIdCheck.PRESENT
+
+    @pytest.mark.asyncio
+    async def test_exception_is_unknown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agent_app.tools.paper.paper_fetch import _arxiv_id_check
+
+        ps = sys.modules["agent_app.tools.paper.paper_search"]
+
+        async def _xml(url: str) -> object:
+            raise RuntimeError("arXiv API returned HTTP 429")
+
+        monkeypatch.setattr(ps, "_fetch_xml", _xml)
+        assert await _arxiv_id_check("2301.07041") is _ArxivIdCheck.UNKNOWN

@@ -64,6 +64,42 @@ class TestArxivQueryUrl:
         url = _build_arxiv_query_url("id:2301.07041", 1)
         assert "id_list=2301.07041" in url
 
+    def test_field_prefix_passes_through(self) -> None:
+        url = _build_arxiv_query_url("au:bengio", 10)
+        assert "search_query=au%3Abengio" in url
+        assert "all%3A" not in url
+
+    def test_boolean_passes_through(self) -> None:
+        url = _build_arxiv_query_url("foo AND bar", 10)
+        assert "all%3A" not in url
+        assert "AND" in url
+
+    def test_standalone_submitted_date_passes_through(self) -> None:
+        url = _build_arxiv_query_url(
+            "submittedDate:[202601010000 TO 202605152359]", 10
+        )
+        assert "all%3A" not in url
+        assert "submittedDate" in url
+
+    def test_plain_title_with_colon_not_misdetected(self) -> None:
+        url = _build_arxiv_query_url("BERT: pre-training", 10)
+        assert "search_query=all%3A" in url
+
+    def test_plain_keyword_wrapped_with_all(self) -> None:
+        url = _build_arxiv_query_url("transformer", 10)
+        assert "search_query=all%3Atransformer" in url
+
+
+class TestPaperSearchDescription:
+    def test_schema_description_is_structured_constant(self) -> None:
+        from agent_app.tools.paper.paper_search import PAPER_SEARCH_DESCRIPTION
+
+        schema = paper_search.get_schema()
+        assert schema.description == PAPER_SEARCH_DESCRIPTION
+        assert "## source='arxiv'" in schema.description
+        assert "submittedDate" in schema.description
+        assert "lastUpdatedDate" not in schema.description
+
 
 class TestArxivParsing:
     def test_parse_entry(self) -> None:
@@ -271,6 +307,7 @@ class _FakeResponse:
     def __init__(self, status: int, body: str) -> None:
         self.status = status
         self._body = body
+        self.charset = "utf-8"
 
     async def __aenter__(self) -> _FakeResponse:
         return self

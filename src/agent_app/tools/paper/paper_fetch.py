@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -23,10 +24,11 @@ class PaperFetchConfig:
 
 _CFG = PaperFetchConfig()
 
-_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-)
+
+class _ArxivIdCheck(Enum):
+    MISSING = "missing"    # arXiv returned 0 entries -> confirmed absent
+    PRESENT = "present"    # >=1 entry -> exists
+    UNKNOWN = "unknown"    # _fetch_xml raised -> transient, undecidable
 
 _S2_DETAIL_FIELDS = (
     "paperId,title,authors,abstract,year,venue,"
@@ -198,6 +200,27 @@ async def _fetch_s2_metadata(paper_id: str, api_key: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+async def _arxiv_id_check(clean_id: str) -> _ArxivIdCheck:
+    """Pure existence probe: distinguishes MISSING vs transient UNKNOWN.
+
+    Reuses paper_search._fetch_xml; does not format metadata. Only
+    MISSING is a safe fast-fail signal -- UNKNOWN must still try the PDF.
+    """
+    from agent_app.tools.paper.paper_search import _fetch_xml
+
+    ns = "{http://www.w3.org/2005/Atom}"
+    url = f"http://export.arxiv.org/api/query?{urlencode({'id_list': clean_id})}"
+    try:
+        root = await _fetch_xml(url)
+    except Exception:
+        return _ArxivIdCheck.UNKNOWN
+    return (
+        _ArxivIdCheck.PRESENT
+        if root.findall(f"{ns}entry")
+        else _ArxivIdCheck.MISSING
+    )
+
+
 async def _fetch_full_content(
     paper_id: str, source: str, api_key: str | None
 ) -> str:
@@ -206,6 +229,7 @@ async def _fetch_full_content(
 
         clean_id = _normalize_arxiv_id(paper_id)
 
+        # 1) HTML first -- a hit costs no precheck (the common modern path).
         html_result = await _try_arxiv_html(clean_id)
         if html_result is not None:
             return truncate_text_by_tokens(
@@ -214,6 +238,13 @@ async def _fetch_full_content(
                 suffix="\n... (truncated)",
             )
 
+        # 2) HTML miss -- only a confirmed-missing ID fast-fails (skips the
+        #    expensive PDF cloud parser). UNKNOWN/PRESENT fall through.
+        if await _arxiv_id_check(clean_id) is _ArxivIdCheck.MISSING:
+            return f"Error: no arXiv paper found for ID: {clean_id}"
+
+        # 3) PDF; pdf_parser already carries a metadata hint on failure,
+        #    so its result is returned verbatim (no soft-landing).
         pdf_url = f"https://arxiv.org/pdf/{clean_id}.pdf"
         return await _fetch_via_pdf_parser(pdf_url, paper_id=clean_id)
 
@@ -224,10 +255,13 @@ async def _fetch_full_content(
 
 
 async def _try_arxiv_html(arxiv_id: str) -> str | None:
+    from agent_app.tools.paper.paper_search import _USER_AGENT as _ARXIV_UA
+
     html_url = f"https://arxiv.org/html/{arxiv_id}"
     try:
         status, body = await http_get_with_retry(
             html_url,
+            headers={"User-Agent": _ARXIV_UA},
             timeout=_CFG.html_fetch_timeout,
             retry=HttpRetryConfig(max_attempts=3, base_delay=1.0),
         )
