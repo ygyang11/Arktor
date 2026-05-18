@@ -351,6 +351,25 @@ def _attachment_size_hint(tc: ToolCall, tr: ToolResult) -> str:
     return ""
 
 
+def format_attachments(
+    items: list[tuple[ToolCall, ToolResult]],
+) -> list[RenderableType]:
+    """Renderables for a ``@file`` mention expansion: a 'Loaded into context'
+    header followed by one continuation-glyph row per attachment.
+    """
+    rows: list[RenderableType] = []
+    header = Text()
+    header.append(f"{TOOL_DONE}  ", style="primary")
+    header.append("Loaded into context", style="muted")
+    rows.append(header)
+    for tc, tr in items:
+        line = Text()
+        line.append(f"{CONTINUATION}  ", style="muted")
+        line.append_text(format_attachment_line(tc, tr))
+        rows.append(line)
+    return rows
+
+
 def format_shell_run(
     command: str,
     exit_code: int,
@@ -375,25 +394,6 @@ def format_shell_run(
         body.append("(Completed with no output)", style="muted")
 
     return [call, body]
-
-
-def format_attachments(
-    items: list[tuple[ToolCall, ToolResult]],
-) -> list[RenderableType]:
-    """Renderables for a ``@file`` mention expansion: a 'Loaded into context'
-    header followed by one continuation-glyph row per attachment.
-    """
-    rows: list[RenderableType] = []
-    header = Text()
-    header.append(f"{TOOL_DONE}  ", style="primary")
-    header.append("Loaded into context", style="muted")
-    rows.append(header)
-    for tc, tr in items:
-        line = Text()
-        line.append(f"{CONTINUATION}  ", style="muted")
-        line.append_text(format_attachment_line(tc, tr))
-        rows.append(line)
-    return rows
 
 
 def print_completed_call(
