@@ -156,3 +156,18 @@ class LoopDetectedError(AgentError):
     ) -> None:
         super().__init__(message, **kwargs)
         self.streak = streak
+
+
+# --- HTTP Errors ---
+
+class HttpResponseTooLargeError(HarnessError):
+    """HTTP response body exceeded the configured byte cap."""
+    def __init__(
+        self,
+        message: str = "Response exceeds byte cap",
+        *,
+        limit: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(message, **kwargs)
+        self.limit = limit

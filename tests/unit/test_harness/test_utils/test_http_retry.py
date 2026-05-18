@@ -2,17 +2,43 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from agent_harness.utils import http_retry as http_retry_module
+from agent_harness.core.errors import HttpResponseTooLargeError
+from agent_harness.utils import host_throttler, http_retry as http_retry_module
 from agent_harness.utils.http_retry import (
     HttpRetryConfig,
     HttpTextResponse,
     _backoff_seconds,
+    _decode_body,
     _parse_retry_after,
+    _read_capped,
 )
+
+
+class TestDecodeBody:
+    def test_valid_charset_strict(self) -> None:
+        assert _decode_body("héllo".encode("latin-1"), "latin-1") == "héllo"
+
+    def test_none_charset_defaults_utf8(self) -> None:
+        assert _decode_body("café".encode(), None) == "café"
+
+    def test_bogus_charset_falls_back_utf8_replace(self) -> None:
+        # Unknown charset -> LookupError -> utf-8/replace fallback, no crash.
+        out = _decode_body("café".encode(), "not-a-real-charset-xyz")
+        assert "caf" in out
+
+    def test_undecodable_bytes_replace_not_crash(self) -> None:
+        out = _decode_body(b"\xff\xfe\x00bad", "utf-8")
+        assert isinstance(out, str)  # replaced, no UnicodeDecodeError
+
+
+@pytest.fixture(autouse=True)
+def _reset_throttler() -> None:
+    host_throttler._STATES.clear()
 
 
 class _FakeTimeout:
@@ -20,17 +46,31 @@ class _FakeTimeout:
         self.total = total
 
 
+class _FakeContent:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    async def iter_chunked(self, n: int) -> AsyncIterator[bytes]:
+        for i in range(0, len(self._body), n):
+            yield self._body[i : i + n]
+
+
 class _FakeResponse:
     def __init__(self, status: int, body: str, headers: dict[str, str]) -> None:
         self.status = status
         self._body = body
         self.headers = headers
+        self.charset = "utf-8"
+        self.content = _FakeContent(body.encode())
 
     async def __aenter__(self) -> _FakeResponse:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
         return False
+
+    async def read(self) -> bytes:
+        return self._body.encode()
 
     async def text(self) -> str:
         return self._body
@@ -151,8 +191,9 @@ class TestHttpTextRetry:
             headers: dict[str, str] | None = None,
             timeout: int = 30,
             retry: object = None,
+            max_bytes: int | None = None,
         ) -> HttpTextResponse:
-            _ = (url, headers, timeout, retry)
+            _ = (url, headers, timeout, retry, max_bytes)
             return HttpTextResponse(status=204, headers={"X-Test": "1"}, body="")
 
         monkeypatch.setattr(
@@ -163,3 +204,53 @@ class TestHttpTextRetry:
 
         status, body = await http_retry_module.http_get_with_retry("https://example.com")
         assert (status, body) == (204, "")
+
+
+class _CappedResp:
+    def __init__(self, body: bytes) -> None:
+        self.content = _FakeContent(body)
+        self._read_called = False
+
+    async def read(self) -> bytes:
+        self._read_called = True
+        return b"".join([c async for c in self.content.iter_chunked(64 * 1024)])
+
+
+class TestReadCapped:
+    @pytest.mark.asyncio
+    async def test_max_bytes_none_keeps_full_read(self) -> None:
+        resp = _CappedResp(b"x" * 5000)
+        out = await _read_capped(resp, None)  # type: ignore[arg-type]
+        assert out == b"x" * 5000
+        assert resp._read_called is True
+
+    @pytest.mark.asyncio
+    async def test_aborts_when_exceeding_max_bytes(self) -> None:
+        # 300 KB body, cap at 100 KB: must raise before fully consuming.
+        consumed = 0
+
+        class _Counting:
+            async def iter_chunked(self, n: int) -> AsyncIterator[bytes]:
+                nonlocal consumed
+                for _ in range(300):
+                    consumed += 1024
+                    yield b"y" * 1024
+
+        resp = type("R", (), {"content": _Counting()})()
+        with pytest.raises(HttpResponseTooLargeError) as ei:
+            await _read_capped(resp, 100 * 1024)  # type: ignore[arg-type]
+        assert ei.value.limit == 100 * 1024
+        # Stopped near the cap, did not drain all 300 KB.
+        assert consumed <= 100 * 1024 + 1024
+
+    @pytest.mark.asyncio
+    async def test_web_fetch_too_large_propagates_out_of_retry_loop(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        big = _FakeResponse(status=200, body="z" * 200_000, headers={})
+        monkeypatch.setitem(sys.modules, "aiohttp", _FakeAiohttpModule(big))
+        with pytest.raises(HttpResponseTooLargeError):
+            await http_retry_module.http_get_text_with_retry(
+                "https://example.com", max_bytes=1024
+            )

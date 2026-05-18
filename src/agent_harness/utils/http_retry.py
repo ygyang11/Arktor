@@ -6,9 +6,17 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
+
+from agent_harness.core.errors import HttpResponseTooLargeError
+from agent_harness.utils.host_throttler import throttle
+
+if TYPE_CHECKING:
+    import aiohttp
 
 logger = logging.getLogger(__name__)
+
+_READ_CHUNK = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -65,6 +73,38 @@ def _backoff_seconds(
     return min(delay, retry.max_sleep)
 
 
+def _decode_body(raw: bytes, charset: str | None) -> str:
+    """Decode with the declared charset; fall back to utf-8/replace.
+
+    Mirrors aiohttp's resilience: a bogus/unknown charset header
+    (LookupError) or undecodable bytes (UnicodeDecodeError) degrade to
+    utf-8 with replacement instead of crashing, while a valid charset is
+    honored strictly (no needless replacement).
+    """
+    try:
+        return raw.decode(charset or "utf-8")
+    except (LookupError, UnicodeDecodeError):
+        return raw.decode("utf-8", errors="replace")
+
+
+async def _read_capped(resp: aiohttp.ClientResponse, max_bytes: int | None) -> bytes:
+    """Stream the body, aborting once max_bytes is exceeded.
+
+    Raises HttpResponseTooLargeError before the oversized body is fully
+    downloaded or decoded. max_bytes=None preserves the full-read behavior.
+    """
+    if max_bytes is None:
+        return await resp.read()
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in resp.content.iter_chunked(_READ_CHUNK):
+        total += len(chunk)
+        if total > max_bytes:
+            raise HttpResponseTooLargeError(limit=max_bytes)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 async def _request_with_retry(
     *,
     method: str,
@@ -86,7 +126,7 @@ async def _request_with_retry(
     for attempt in range(attempts):
         last_headers = {}
         try:
-            async with aiohttp.ClientSession() as session:
+            async with throttle(url), aiohttp.ClientSession() as session:
                 request_kwargs: dict[str, object] = {
                     "headers": hdrs,
                     "timeout": aiohttp.ClientTimeout(total=timeout),
@@ -121,6 +161,8 @@ async def _request_text_with_retry(
     timeout: int = 30,
     json_body: object | None = None,
     retry: HttpRetryConfig = DEFAULT_HTTP_RETRY,
+    max_bytes: int | None = None,
+    allow_redirects: bool = True,
 ) -> HttpTextResponse:
     import aiohttp  # noqa: PLC0415
 
@@ -134,15 +176,17 @@ async def _request_text_with_retry(
     for attempt in range(attempts):
         last_headers = {}
         try:
-            async with aiohttp.ClientSession() as session:
+            async with throttle(url), aiohttp.ClientSession() as session:
                 request_kwargs: dict[str, object] = {
                     "headers": hdrs,
                     "timeout": aiohttp.ClientTimeout(total=timeout),
+                    "allow_redirects": allow_redirects,
                 }
                 if json_body is not None:
                     request_kwargs["json"] = json_body
                 async with session.request(method, url, **request_kwargs) as resp:  # type: ignore[arg-type]
-                    body = await resp.text()
+                    raw = await _read_capped(resp, max_bytes)
+                    body = _decode_body(raw, resp.charset)
                     response_headers = dict(getattr(resp, "headers", {}))
                     response = HttpTextResponse(
                         status=resp.status,
@@ -175,6 +219,7 @@ async def _request_bytes_with_retry(
     timeout: int = 30,
     json_body: object | None = None,
     retry: HttpRetryConfig = DEFAULT_HTTP_RETRY,
+    max_bytes: int | None = None,
 ) -> tuple[int, bytes]:
     import aiohttp  # noqa: PLC0415
 
@@ -188,7 +233,7 @@ async def _request_bytes_with_retry(
     for attempt in range(attempts):
         last_headers = {}
         try:
-            async with aiohttp.ClientSession() as session:
+            async with throttle(url), aiohttp.ClientSession() as session:
                 request_kwargs: dict[str, object] = {
                     "headers": hdrs,
                     "timeout": aiohttp.ClientTimeout(total=timeout),
@@ -196,7 +241,7 @@ async def _request_bytes_with_retry(
                 if json_body is not None:
                     request_kwargs["json"] = json_body
                 async with session.request(method, url, **request_kwargs) as resp:  # type: ignore[arg-type]
-                    body = await resp.read()
+                    body = await _read_capped(resp, max_bytes)
                     if not _is_retryable_status(resp.status):
                         return resp.status, body
                     last_status = resp.status
@@ -247,6 +292,7 @@ async def http_get_with_retry(
     headers: dict[str, str] | None = None,
     timeout: int = 30,
     retry: HttpRetryConfig = DEFAULT_HTTP_RETRY,
+    max_bytes: int | None = None,
 ) -> tuple[int, str]:
     """GET with retries on 429/5xx and transient transport failures."""
     response = await http_get_text_with_retry(
@@ -254,6 +300,7 @@ async def http_get_with_retry(
         headers=headers,
         timeout=timeout,
         retry=retry,
+        max_bytes=max_bytes,
     )
     return response.status, response.body
 
@@ -264,6 +311,8 @@ async def http_get_text_with_retry(
     headers: dict[str, str] | None = None,
     timeout: int = 30,
     retry: HttpRetryConfig = DEFAULT_HTTP_RETRY,
+    max_bytes: int | None = None,
+    allow_redirects: bool = True,
 ) -> HttpTextResponse:
     """GET text with retries on 429/5xx and transient transport failures."""
     return await _request_text_with_retry(
@@ -272,6 +321,8 @@ async def http_get_text_with_retry(
         headers=headers,
         timeout=timeout,
         retry=retry,
+        max_bytes=max_bytes,
+        allow_redirects=allow_redirects,
     )
 
 
@@ -300,6 +351,7 @@ async def http_get_bytes_with_retry(
     headers: dict[str, str] | None = None,
     timeout: int = 30,
     retry: HttpRetryConfig = DEFAULT_HTTP_RETRY,
+    max_bytes: int | None = None,
 ) -> tuple[int, bytes]:
     """GET bytes with retries on 429/5xx and transient transport failures."""
     return await _request_bytes_with_retry(
@@ -308,4 +360,5 @@ async def http_get_bytes_with_retry(
         headers=headers,
         timeout=timeout,
         retry=retry,
+        max_bytes=max_bytes,
     )
