@@ -51,6 +51,7 @@ class OpenAIProvider(BaseLLM):
             timeout=llm_config.timeout,
         )
         self._additive_semantics: bool = False
+        self._strip_reasoning_details: bool = False
 
     async def generate(
         self,
@@ -64,21 +65,31 @@ class OpenAIProvider(BaseLLM):
         request_kwargs = self._build_request(
             messages, tools, tool_choice, temperature, max_tokens, **kwargs
         )
+        if self._strip_reasoning_details:
+            _normalize_reasoning_for_strict_input(request_kwargs)
 
-        try:
-            response = await self._client.chat.completions.create(**request_kwargs)
-        except openai.RateLimitError as e:
-            raise LLMRateLimitError(str(e)) from e
-        except openai.AuthenticationError as e:
-            raise LLMAuthenticationError(str(e)) from e
-        except openai.BadRequestError as e:
-            if "context_length" in str(e).lower() or "maximum context" in str(e).lower():
-                raise LLMContextLengthError(str(e)) from e
-            raise LLMError(str(e)) from e
-        except openai.APIConnectionError as e:
-            raise LLMConnectionError(str(e)) from e
-        except openai.APIError as e:
-            raise LLMError(str(e)) from e
+        retried = False
+        while True:
+            try:
+                response = await self._client.chat.completions.create(**request_kwargs)
+                break
+            except openai.RateLimitError as e:
+                raise LLMRateLimitError(str(e)) from e
+            except openai.AuthenticationError as e:
+                raise LLMAuthenticationError(str(e)) from e
+            except openai.BadRequestError as e:
+                if not retried and _is_reasoning_details_rejection(e):
+                    self._strip_reasoning_details = True
+                    _normalize_reasoning_for_strict_input(request_kwargs)
+                    retried = True
+                    continue
+                if "context_length" in str(e).lower() or "maximum context" in str(e).lower():
+                    raise LLMContextLengthError(str(e)) from e
+                raise LLMError(str(e)) from e
+            except openai.APIConnectionError as e:
+                raise LLMConnectionError(str(e)) from e
+            except openai.APIError as e:
+                raise LLMError(str(e)) from e
 
         return self._parse_response(response)
 
@@ -94,15 +105,36 @@ class OpenAIProvider(BaseLLM):
         request_kwargs = self._build_request(
             messages, tools, tool_choice, temperature, max_tokens, stream=True, **kwargs
         )
+        if self._strip_reasoning_details:
+            _normalize_reasoning_for_strict_input(request_kwargs)
 
         tc_buffer: dict[int, dict[str, str]] = {}
         # OpenAI stream usage is a request-total snapshot, not a chunk delta.
         # Keep the last snapshot and emit it once so upstream adders stay safe.
         final_usage: Usage | None = None
 
-        try:
-            stream = await self._client.chat.completions.create(**request_kwargs)
+        retried = False
+        while True:
+            try:
+                stream = await self._client.chat.completions.create(**request_kwargs)
+                break
+            except openai.RateLimitError as e:
+                raise LLMRateLimitError(str(e)) from e
+            except openai.AuthenticationError as e:
+                raise LLMAuthenticationError(str(e)) from e
+            except openai.BadRequestError as e:
+                if not retried and _is_reasoning_details_rejection(e):
+                    self._strip_reasoning_details = True
+                    _normalize_reasoning_for_strict_input(request_kwargs)
+                    retried = True
+                    continue
+                raise LLMError(str(e)) from e
+            except openai.APIConnectionError as e:
+                raise LLMConnectionError(str(e)) from e
+            except openai.APIError as e:
+                raise LLMError(str(e)) from e
 
+        try:
             async for chunk in stream:
                 if hasattr(chunk, "usage") and chunk.usage:
                     final_usage = self._parse_usage(chunk.usage)
@@ -328,6 +360,36 @@ class OpenAIProvider(BaseLLM):
             cache_creation_tokens=0,
             reasoning_tokens=reasoning,
         )
+
+
+def _is_reasoning_details_rejection(e: openai.BadRequestError) -> bool:
+    s = str(e)
+    return "Extra inputs are not permitted" in s and "reasoning_details" in s
+
+
+def _normalize_reasoning_for_strict_input(request_kwargs: dict[str, Any]) -> None:
+    """Sticky workaround for relays that emit reasoning_details but reject it
+    as input (opencode-zen → Moonshot). Flatten its block text into
+    reasoning_content (keeps multi-step thinking continuity) and drop
+    reasoning_details. Never runs for spec-conformant providers since they do
+    not raise the rejection that sets the sticky flag."""
+    messages = request_kwargs.get("messages")
+    if not isinstance(messages, list):
+        return
+    for m in messages:
+        rd = m.get("reasoning_details")
+        if rd is None:
+            continue
+        if not m.get("reasoning_content") and isinstance(rd, list):
+            parts = [
+                b.get("text") or b.get("summary") or ""
+                for b in rd
+                if isinstance(b, dict)
+            ]
+            joined = "".join(p for p in parts if p)
+            if joined:
+                m["reasoning_content"] = joined
+        m.pop("reasoning_details", None)
 
 
 def _map_finish_reason(reason: str | None) -> FinishReason:
