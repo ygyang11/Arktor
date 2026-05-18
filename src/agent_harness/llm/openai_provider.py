@@ -55,6 +55,7 @@ class OpenAIProvider(BaseLLM):
             base_url=llm_config.base_url,
             timeout=llm_config.timeout,
         )
+        self._additive_semantics: bool = False
 
     async def generate(
         self,
@@ -250,8 +251,7 @@ class OpenAIProvider(BaseLLM):
 
         return result
 
-    @staticmethod
-    def _parse_response(response: Any) -> LLMResponse:
+    def _parse_response(self, response: Any) -> LLMResponse:
         """Convert OpenAI response to LLMResponse."""
         if not response.choices:
             raise LLMResponseError(
@@ -286,7 +286,7 @@ class OpenAIProvider(BaseLLM):
             provider_metadata=provider_metadata,
         )
 
-        usage = OpenAIProvider._parse_usage(response.usage)
+        usage = self._parse_usage(response.usage)
 
         return LLMResponse(
             message=message,
@@ -296,18 +296,39 @@ class OpenAIProvider(BaseLLM):
             raw_response=response,
         )
 
-    @staticmethod
-    def _parse_usage(raw_usage: Any) -> Usage:
+    def _parse_usage(self, raw_usage: Any) -> Usage:
         if not raw_usage:
             return Usage()
         prompt_details = getattr(raw_usage, "prompt_tokens_details", None)
         cached = getattr(prompt_details, "cached_tokens", 0) or 0
         completion_details = getattr(raw_usage, "completion_tokens_details", None)
         reasoning = getattr(completion_details, "reasoning_tokens", 0) or 0
+        prompt = raw_usage.prompt_tokens or 0
+        completion = raw_usage.completion_tokens or 0
+        total = raw_usage.total_tokens or 0
+
+        # OpenAI invariant: cached_tokens is a subset of prompt_tokens.
+        # Some OpenAI-compatible relays (e.g. opencode-zen → minimax) leak
+        # Anthropic-style additive semantics through OpenAI field names —
+        # cached is reported *outside* prompt. Detect via the invariant
+        # violation and normalize to inclusive form. Sticky per instance
+        # because additive providers can also return cached <= prompt on
+        # cache-miss-heavy turns.
+        if not self._additive_semantics and cached > prompt:
+            self._additive_semantics = True
+            logger.info(
+                "Detected additive cache semantics on model=%s base_url=%s; "
+                "normalizing prompt_tokens to inclusive form.",
+                self.config.model, self.config.base_url,
+            )
+        if self._additive_semantics:
+            prompt = prompt + cached
+            total = prompt + completion
+
         return Usage(
-            prompt_tokens=raw_usage.prompt_tokens or 0,
-            completion_tokens=raw_usage.completion_tokens or 0,
-            total_tokens=raw_usage.total_tokens or 0,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=total,
             cache_read_tokens=cached,
             cache_creation_tokens=0,
             reasoning_tokens=reasoning,

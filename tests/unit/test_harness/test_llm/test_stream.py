@@ -240,6 +240,7 @@ def _make_provider(chunks: list[SimpleNamespace]) -> object:
         )
     )
     provider._rate_limiter = None
+    provider._additive_semantics = False
     return provider
 
 
