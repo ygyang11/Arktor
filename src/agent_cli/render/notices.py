@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from rich.text import Text
 
 from agent_cli.theme import TOOL_DONE
+from agent_harness.core.message import ToolCall, ToolResult
 from agent_harness.utils.token_counter import truncate_text_by_tokens
 
 _SHELL_LANE_OUTPUT_TOKENS = 10_000
@@ -21,17 +23,20 @@ _SHELL_RUN_RE = re.compile(
     re.DOTALL,
 )
 
-
-def parse_shell_run_envelope(content: str) -> tuple[str, str] | None:
-    """Reverse of :func:`format_shell_run`. Returns (cmd, body) or None."""
-    m = _SHELL_RUN_RE.match(content)
-    if m is None:
-        return None
-    return m.group("cmd"), m.group("body")
+_REMINDER_PAIR_RE = re.compile(
+    r"\A<system-reminder>\nCalled the \S+ tool[^\n]*\n</system-reminder>(?=\n\n)"
+    r"\n\n"
+    r"<system-reminder>\nResult of calling the \S+ tool:\n.*?\n</system-reminder>(?=\n\n|\Z)",
+    re.DOTALL,
+)
 
 
 def _escape_envelope(s: str) -> str:
     return s.replace(_SHELL_RUN_CLOSE_TAG, _SHELL_RUN_CLOSE_TAG_ESCAPED)
+
+
+def _emit_reminder(body: str) -> str:
+    return f"<system-reminder>\n{body}\n</system-reminder>"
 
 
 def format_warning(message: str) -> Text:
@@ -44,6 +49,14 @@ def format_warning(message: str) -> Text:
 def format_expired_notice(ids: list[int]) -> Text:
     ids_str = ", ".join(f"#{i}" for i in ids)
     return format_warning(f"Pasted text {ids_str} unavailable")
+
+
+def parse_shell_run_envelope(content: str) -> tuple[str, str] | None:
+    """Reverse of :func:`format_shell_run`. Returns (cmd, body) or None."""
+    m = _SHELL_RUN_RE.match(content)
+    if m is None:
+        return None
+    return m.group("cmd"), m.group("body")
 
 
 def format_shell_run(
@@ -75,3 +88,22 @@ def format_shell_run(
     safe_command = _escape_envelope(command)
     safe_body = _escape_envelope(body)
     return f"<user-shell-run>\n```sh\n{safe_command}\n```\n{safe_body}\n</user-shell-run>"
+
+
+def format_attachment_reminders(tc: ToolCall, tr: ToolResult) -> str:
+    """Reverse-pair with :func:`peel_attachment_reminders`.."""
+    args_json = json.dumps(tc.arguments, ensure_ascii=False, separators=(",", ":"))
+    return (
+        _emit_reminder(f"Called the {tc.name} tool with the following input: {args_json}")
+        + "\n\n"
+        + _emit_reminder(f"Result of calling the {tc.name} tool:\n{tr.content}")
+    )
+
+
+def peel_attachment_reminders(content: str) -> str:
+    """Reverse of :func:`format_attachment_reminders`. Greedily strips leading
+    attachment-shaped pairs; skill envelopes / drift notices never match."""
+    s = content
+    while (m := _REMINDER_PAIR_RE.match(s)) is not None:
+        s = s[m.end():].lstrip("\n")
+    return s

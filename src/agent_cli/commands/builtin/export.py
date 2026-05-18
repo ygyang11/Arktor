@@ -20,8 +20,18 @@ _ROLE_HEADERS: dict[Role, str] = {
 def _format_message(m: Message) -> str:
     header = _ROLE_HEADERS.get(m.role, f"## {m.role.value}")
     parts: list[str] = []
-    if m.content:
-        parts.append(m.content)
+    if m.role == Role.USER:
+        from agent_cli.render.notices import (  # noqa: PLC0415
+            peel_attachment_reminders,
+        )
+        from agent_cli.render.replay import peel_user_command  # noqa: PLC0415
+
+        peeled = peel_attachment_reminders(m.content or "")
+        body_content = peel_user_command(peeled) or peeled
+    else:
+        body_content = m.content or ""
+    if body_content:
+        parts.append(body_content)
     if m.tool_calls:
         tool_lines = "\n".join(
             f"- `{tc.name}({args_repr(tc.arguments)})`" for tc in m.tool_calls

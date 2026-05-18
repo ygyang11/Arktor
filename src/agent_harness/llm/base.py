@@ -333,10 +333,6 @@ class BaseLLM(ABC, EventEmitter):
     def _resolve_max_tokens(self, max_tokens: int | None) -> int:
         return max_tokens if max_tokens is not None else self.config.max_tokens
 
-    def synthetic_turn_sidecar(self) -> dict[str, dict[str, Any]]:
-        """Provider-metadata to stamp on harness-synthesized assistant turns"""
-        return {}
-
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} model={self.model_name}>"
 

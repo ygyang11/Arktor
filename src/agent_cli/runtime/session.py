@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 import sys
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -198,7 +197,6 @@ class _TurnContext:
     snapshot_compressor_state: tuple[int, list[str]] | None
     snapshot_ids: frozenset[int]
     main_system_id: int | None
-    pending_mention_writes: list[asyncio.Future[Any]] = field(default_factory=list)
     committed: bool = False
 
 

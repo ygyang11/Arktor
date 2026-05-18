@@ -131,14 +131,6 @@ def test_snapshot_compressor_archives_are_copied() -> None:
     assert ctx.snapshot_compressor_state == (1, ["a.md"])
 
 
-def test_snapshot_pending_mention_writes_initialized_empty() -> None:
-    agent = _agent([Message.user("hi")])
-
-    ctx = take_snapshot(agent)
-
-    assert ctx.pending_mention_writes == []
-
-
 def test_snapshot_does_not_carry_total_usage_field() -> None:
     agent = _agent([Message.user("hi")])
 

@@ -405,7 +405,6 @@ async def _run(
 
     turn_ctx = take_snapshot(agent)
     cli_hooks.begin_turn(turn_ctx)
-    pending_token = use_pending_tracker(turn_ctx.pending_mention_writes)
 
     task = asyncio.create_task(
         agent.run(text, session=session_backend, after_input_appended=cb),
@@ -420,14 +419,12 @@ async def _run(
                 # would raise.
                 agent.context.state.reset()
                 cancelled = True
-                await drain_pending(turn_ctx.pending_mention_writes)
                 if should_rollback(turn_ctx, get_messages(agent)):
                     await rollback(agent, turn_ctx, save)
             except Exception:
                 # hooks.on_error already rendered; just keep REPL alive.
                 pass
     finally:
-        reset_pending_tracker(pending_token)
         cli_hooks.end_turn()
         # end_step flushes any pending stream / Live buffers; print cancel
         # banner AFTER so it doesn't get overwritten by late-arriving chunks.

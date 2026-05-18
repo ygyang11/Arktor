@@ -116,3 +116,52 @@ async def test_export_groups_consecutive_tool_messages(
     assert "A content" in body and "B content" in body
     # both tool calls resolve to read_file name labels
     assert body.count("**`read_file`**:") == 2
+
+
+# ── user-block canonicalization (peel attachment + envelope) ──
+
+
+def _att_user_msg(trailing: str) -> Message:
+    from agent_cli.render.notices import format_attachment_reminders
+
+    tc = ToolCall(id="c1", name="read_file", arguments={"file_path": "a.py"})
+    tr = ToolResult(tool_call_id="c1", content="[a.py] lines 1-1 of 1\nx")
+    block = format_attachment_reminders(tc, tr)
+    return Message.user(f"{block}\n\n{trailing}")
+
+
+def test_export_user_block_strips_attachment_reminders() -> None:
+    out = _format_message(_att_user_msg("@a.py explain"))
+    assert "<system-reminder>" not in out
+    assert out.endswith("@a.py explain\n")
+
+
+def test_export_user_block_canonicalizes_shell_run_envelope() -> None:
+    from agent_cli.render.notices import format_shell_run
+
+    msg = Message.user(format_shell_run("echo hi", 0, "hi"))
+    out = _format_message(msg)
+    assert "<user-shell-run>" not in out
+    assert "! echo hi" in out
+
+
+def test_export_user_block_canonicalizes_skill_envelope() -> None:
+    envelope = (
+        "<system-reminder>The user has explicitly requested the foo "
+        "skill. Apply the skill instructions below to address their "
+        'request.</system-reminder>\n\n<skill-loaded name="foo">b'
+        "</skill-loaded>"
+    )
+    out = _format_message(Message.user(envelope))
+    assert "/foo" in out
+    assert "<skill-loaded" not in out
+
+
+def test_export_user_block_plain_text_unchanged() -> None:
+    out = _format_message(Message.user("just a plain question"))
+    assert out == "## User\n\njust a plain question\n"
+
+
+def test_export_assistant_block_unchanged() -> None:
+    out = _format_message(Message.assistant("plain answer"))
+    assert out == "## Assistant\n\nplain answer\n"

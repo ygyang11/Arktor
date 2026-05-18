@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from rich.console import Console, Group, RenderableType
 from rich.live import Live
@@ -295,43 +295,10 @@ def _format_result_line(row: _ToolRow) -> Text | None:
     return line
 
 
-def format_attachment_line(tc: ToolCall, tr: ToolResult) -> Text:
-    """Body Text for one attachment row."""
-    target = (
-        str(tc.arguments.get("file_path"))
-        if tc.arguments.get("file_path") is not None
-        else str(tc.arguments.get("path"))
-        if tc.arguments.get("path") is not None
-        else ""
-    )
-    label = _DISPLAY_NAMES.get(tc.name, tc.name)
-
-    if _is_error_result(tr):
-        msg = (tr.content or "").replace("\n", " ")
-        t = Text()
-        t.append(f"{label} ", style="error")
-        t.append(target, style="error bold")
-        if msg:
-            t.append(f" {SEP_DOT} ", style="error")
-            t.append(_truncate(msg, 60), style="error")
-        return t
-
-    t = Text()
-    t.append(f"{label} ", style="muted")
-    t.append(target, style="muted bold")
-    suffix = _attachment_size_hint(tc, tr)
-    if suffix:
-        t.append(f" {suffix}", style="muted")
-    return t
-
-
-def _attachment_size_hint(tc: ToolCall, tr: ToolResult) -> str:
+def _summarize_result(tc: ToolCall, tr: ToolResult) -> str:
     if tc.name == "read_file" and tr.content:
         if tr.content.startswith(("Binary file", "Empty file", "(empty")):
-            return f"({tr.content.split(chr(10), 1)[0]})"
-        # read_file prepends a "[path] lines N-M of T" header; parse it for
-        # the true content-line count (raw newline count over-reports by 1
-        # because of the header line itself).
+            return tr.content.split(chr(10), 1)[0]
         from agent_cli.render.tool_formatters import _READ_HEADER_RE  # noqa: PLC0415
 
         m = _READ_HEADER_RE.match(tr.content)
@@ -339,35 +306,64 @@ def _attachment_size_hint(tc: ToolCall, tr: ToolResult) -> str:
             start, end, total = int(m[2]), int(m[3]), int(m[4])
             shown = end - start + 1
             if shown == total:
-                return f"({total} lines)"
-            return f"(lines {start}-{end} of {total})"
+                return f"{total} lines"
+            return f"lines {start}-{end} of {total}"
         return ""
     if tc.name == "list_dir" and tr.content:
         from agent_cli.render.tool_formatters import _LIST_HEADER_RE  # noqa: PLC0415
 
         m = _LIST_HEADER_RE.search(tr.content)
         if m:
-            return f"({m[2]} entries)"
+            return f"{m[2]} entries"
     return ""
 
 
-def format_attachments(
-    items: list[tuple[ToolCall, ToolResult]],
-) -> list[RenderableType]:
+def format_attachments(items: list[dict[str, Any]]) -> list[RenderableType]:
     """Renderables for a ``@file`` mention expansion: a 'Loaded into context'
-    header followed by one continuation-glyph row per attachment.
-    """
+    header followed by one continuation-glyph row per attachment, built from
+    the :func:`attachment_summary` dict shape."""
     rows: list[RenderableType] = []
     header = Text()
     header.append(f"{TOOL_DONE}  ", style="primary")
     header.append("Loaded into context", style="muted")
     rows.append(header)
-    for tc, tr in items:
+    for it in items:
+        label = _DISPLAY_NAMES.get(it["tool_name"], it["tool_name"])
+        args = it["arguments"]
+        target = str(args.get("file_path") or args.get("path") or "")
         line = Text()
         line.append(f"{CONTINUATION}  ", style="muted")
-        line.append_text(format_attachment_line(tc, tr))
+        if it["is_error"]:
+            line.append(f"{label} ", style="error")
+            line.append(target, style="error bold")
+            snip = it.get("error_snippet") or ""
+            if snip:
+                line.append(f" {SEP_DOT} ", style="error")
+                line.append(snip, style="error")
+        else:
+            line.append(f"{label} ", style="muted")
+            line.append(target, style="muted bold")
+            summary = it.get("summary") or ""
+            if summary:
+                line.append(f" ({summary})", style="muted")
         rows.append(line)
     return rows
+
+
+def attachment_summary(tc: ToolCall, tr: ToolResult) -> dict[str, Any]:
+    """Single encode point. Persisted to ``message.metadata['attachments']``;
+    consumed by :func:`format_attachments` for both the live path (built
+    fresh) and replay (read back from metadata) — same dict shape."""
+    err = _is_error_result(tr)
+    return {
+        "tool_name": tc.name,
+        "arguments": dict(tc.arguments),
+        "summary": _summarize_result(tc, tr),
+        "is_error": err,
+        "error_snippet": (
+            _truncate((tr.content or "").replace("\n", " "), 60) if err else ""
+        ),
+    }
 
 
 def format_shell_run(

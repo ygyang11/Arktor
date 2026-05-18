@@ -338,63 +338,52 @@ class TestProviderMetadataRoundTrip:
         assert "reasoning_content" not in wire
 
 
-class TestSyntheticTurnSidecar:
-    """`synthetic_turn_sidecar` is the placeholder provider_metadata stamped
-    on harness-synthesized assistant turns (e.g. `@file` mention expansion).
-    Without it, reasoning-capable backends 400 on the next request."""
+class TestReasoningRoundTripFidelity:
+    """Round-trip fidelity: reasoning fields a provider returns are lifted
+    into provider_metadata and re-emitted verbatim, no flatten/drop."""
 
-    def test_base_default_is_empty(self) -> None:
-        # BaseLLM is abstract — instantiate via OpenAI and force-call BaseLLM's
-        # implementation to check the default.
+    def _provider(self) -> object:
+        from agent_harness.core.config import LLMConfig
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        return OpenAIProvider(LLMConfig(provider="openai", model="gpt-4o"))
+
+    def _response(self, **msg_attrs: object) -> SimpleNamespace:
+        message = SimpleNamespace(content="answer", tool_calls=None, **msg_attrs)
+        choice = SimpleNamespace(message=message, finish_reason="stop")
+        return SimpleNamespace(choices=[choice], model="m", usage=None)
+
+    def test_reasoning_content_roundtrip_fidelity_unchanged(self) -> None:
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        provider = self._provider()
+        resp = self._response(reasoning_content="step by step")
+        parsed = provider._parse_response(resp)  # type: ignore[attr-defined]
+
+        sidecar = parsed.message.provider_metadata["openai_chat"]
+        assert sidecar["reasoning_content"] == "step by step"
+        wire = OpenAIProvider._format_message(parsed.message)
+        assert wire["reasoning_content"] == "step by step"
+
+    def test_reasoning_details_roundtrip_fidelity_unchanged(self) -> None:
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        details = [
+            {"type": "reasoning.text", "text": "t", "signature": "sig-abc"},
+        ]
+        provider = self._provider()
+        resp = self._response(reasoning_details=details)
+        parsed = provider._parse_response(resp)  # type: ignore[attr-defined]
+
+        assert parsed.message.provider_metadata["openai_chat"][
+            "reasoning_details"
+        ] == details
+        wire = OpenAIProvider._format_message(parsed.message)
+        assert wire["reasoning_details"] == details
+
+    def test_no_synthetic_reasoning_fields_after_turn_removal(self) -> None:
         from agent_harness.llm.base import BaseLLM
-
-        assert BaseLLM.synthetic_turn_sidecar.__qualname__.startswith("BaseLLM.")
-        # Call the unbound method with a stub `self` — confirms default = {}
-        assert BaseLLM.synthetic_turn_sidecar(object()) == {}  # type: ignore[arg-type]
-
-    def test_openai_stamps_both_reasoning_fields(self) -> None:
-        from agent_harness.core.config import LLMConfig
         from agent_harness.llm.openai_provider import OpenAIProvider
 
-        provider = OpenAIProvider(LLMConfig(provider="openai", model="gpt-4o"))
-        sidecar = provider.synthetic_turn_sidecar()
-        assert sidecar == {
-            "openai_chat": {"reasoning_content": "", "reasoning_details": []},
-        }
-
-    def test_openai_stamps_unconditionally(self) -> None:
-        # Reasoning-capable models (deepseek-reasoner, OpenRouter thinking)
-        # require the field even when reasoning_effort is not configured.
-        from agent_harness.core.config import LLMConfig
-        from agent_harness.llm.openai_provider import OpenAIProvider
-
-        no_effort = OpenAIProvider(LLMConfig(provider="openai", model="gpt-4o"))
-        with_effort = OpenAIProvider(LLMConfig(
-            provider="openai", model="gpt-4o", reasoning_effort="medium",
-        ))
-        assert no_effort.synthetic_turn_sidecar() == with_effort.synthetic_turn_sidecar()
-
-    def test_openai_returns_fresh_dict_per_call(self) -> None:
-        # Callers may stamp the dict onto a Message and provider format
-        # paths may mutate sub-dicts — must not alias the class-level constant.
-        from agent_harness.core.config import LLMConfig
-        from agent_harness.llm.openai_provider import OpenAIProvider
-
-        provider = OpenAIProvider(LLMConfig(provider="openai", model="gpt-4o"))
-        a = provider.synthetic_turn_sidecar()
-        b = provider.synthetic_turn_sidecar()
-        assert a == b
-        assert a is not b
-        assert a["openai_chat"] is not b["openai_chat"]
-
-    def test_anthropic_inherits_empty_default(self) -> None:
-        # Anthropic doesn't override — extended thinking + synthesized turn
-        # has no fabricable placeholder (signatures), so we accept the
-        # documented limitation and inherit base.
-        from agent_harness.core.config import LLMConfig
-        from agent_harness.llm.anthropic_provider import AnthropicProvider
-
-        provider = AnthropicProvider(LLMConfig(
-            provider="anthropic", model="claude-opus-4-5", api_key="dummy",
-        ))
-        assert provider.synthetic_turn_sidecar() == {}
+        assert not hasattr(BaseLLM, "synthetic_turn_sidecar")
+        assert not hasattr(OpenAIProvider, "synthetic_turn_sidecar")

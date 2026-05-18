@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from agent_cli.adapter import CliAdapter
-from agent_cli.runtime.conversation import append_tool_turn
+from agent_cli.render.notices import format_attachment_reminders
+from agent_cli.render.tool_display import attachment_summary
 from agent_harness.agent.base import BaseAgent
-from agent_harness.core.message import Message, ToolCall, ToolResult
+from agent_harness.core.message import Role, ToolCall, ToolResult
 
 _AT_RE = re.compile(r"(?:^|(?<=\s))@([^\s]*)$")
 _MENTION_RE = re.compile(r"(?:^|(?<=\s))@([^\s]+)")
@@ -28,33 +29,14 @@ def parse_mentions(text: str) -> list[str]:
     return [m.group(1) for m in _MENTION_RE.finditer(text)]
 
 
-def is_attachment_turn(user_msg: Message, asst_msg: Message) -> bool:
-    """True if `(user_msg, asst_msg)` is the persistence shape produced
-    by a `@file` mention expansion.
-    """
-    if asst_msg.content:
-        return False
-    tcs = asst_msg.tool_calls or []
-    if not tcs:
-        return False
-    if not user_msg.content:
-        return False
-    mention_paths = set(parse_mentions(user_msg.content))
-    if not mention_paths:
-        return False
-    return all(
-        any(isinstance(v, str) and v in mention_paths for v in tc.arguments.values())
-        for tc in tcs
-    )
-
-
 async def expand_mentions(
     agent: BaseAgent, adapter: CliAdapter, text: str,
 ) -> None:
-    """Execute @ mentions concurrently, render, splice into memory.
+    """Execute @ mentions concurrently, render the live indicator, and
+    embed the result as ``<system-reminder>`` blocks on the user message.
 
-    Cancel during execute_stream discards partial results and skips
-    the memory write; shield only protects the write phase.
+    Cancel during execute_stream discards partial results before the
+    in-memory mutate, leaving the user message untouched.
     """
     raw = parse_mentions(text)
     if not raw:
@@ -74,7 +56,31 @@ async def expand_mentions(
         by_id[tr.tool_call_id] = tr
 
     pairs = [(tc, by_id[tc.id]) for tc in tcs]
-    await append_tool_turn(agent, pairs, render=adapter.render_attachments)
+    await adapter.render_attachments(pairs)
+    await embed_attachments_into_last_user(agent, pairs)
+
+
+async def embed_attachments_into_last_user(
+    agent: BaseAgent, pairs: list[tuple[ToolCall, ToolResult]],
+) -> None:
+    """Prepend reminder blocks to the last user message content and record
+    the attachment summary into its metadata (for replay reconstruction)."""
+    from agent_cli.runtime.session import get_messages  # noqa: PLC0415
+
+    msgs = get_messages(agent)
+    if not msgs:
+        return
+    last = msgs[-1]
+    if last.role != Role.USER:
+        return
+
+    blocks = [format_attachment_reminders(tc, tr) for tc, tr in pairs]
+    summaries = [attachment_summary(tc, tr) for tc, tr in pairs]
+
+    original = last.content or ""
+    prefix = "\n\n".join(blocks)
+    last.content = f"{prefix}\n\n{original}" if original else prefix
+    last.metadata.setdefault("attachments", []).extend(summaries)
 
 
 def _build_calls(

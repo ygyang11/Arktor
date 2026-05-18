@@ -8,6 +8,7 @@ and renders it back to the live-REPL look, then falls back to plain text.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from rich.console import Console
 from rich.markup import escape as rich_escape
@@ -17,7 +18,10 @@ from agent_cli.commands.builtin.init import _INIT_NEW, _INIT_UPDATE
 from agent_cli.commands.builtin.review import _DEFAULT_REVIEW_TARGET, _REVIEW_PROMPT
 from agent_cli.commands.ui import ok
 from agent_cli.render.markdown_stream import render_markdown_block
-from agent_cli.render.notices import parse_shell_run_envelope
+from agent_cli.render.notices import (
+    parse_shell_run_envelope,
+    peel_attachment_reminders,
+)
 from agent_cli.render.tool_display import (
     _is_error_result,
     _todo_stats,
@@ -26,7 +30,6 @@ from agent_cli.render.tool_display import (
     print_completed_call,
     print_todos_panel,
 )
-from agent_cli.repl.mentions import is_attachment_turn
 from agent_cli.runtime.session import get_messages
 from agent_cli.theme import COMPRESSION, PROMPT, SUBAGENT, SUBAGENT_DONE, CliTheme
 from agent_harness.agent.base import BaseAgent
@@ -128,19 +131,12 @@ def _render_user_shell_run(console: Console, content: str) -> bool:
     console.print()
     return True
 
-def _render_attachment_block(
-    console: Console,
-    asst_msg: Message,
-    results: dict[str, ToolResult],
+
+def _render_attachment_indicator(
+    console: Console, items: list[dict[str, Any]],
 ) -> None:
-    """Render an attachment turn via the shared live formatter."""
-    items = [
-        (tc, results[tc.id])
-        for tc in asst_msg.tool_calls or []
-        if tc.id in results
-    ]
-    if not items:
-        return
+    """Re-paint the 'Loaded into context' indicator from persisted
+    ``message.metadata['attachments']``."""
     for r in format_attachments(items):
         console.print(r)
     console.print()
@@ -365,11 +361,10 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
         step = 1
         if m.role == Role.USER and m.content:
             in_bg_block = False
-            _render_user(console, m.content)
-            nxt = messages[i + 1] if i + 1 < len(messages) else None
-            if nxt is not None and is_attachment_turn(m, nxt):
-                _render_attachment_block(console, nxt, results)
-                step = 2
+            attachments = (m.metadata or {}).get("attachments")
+            if attachments:
+                _render_attachment_indicator(console, attachments)
+            _render_user(console, peel_attachment_reminders(m.content or ""))
         elif m.role == Role.ASSISTANT:
             in_bg_block = False
             _render_assistant(console, theme, m, results)

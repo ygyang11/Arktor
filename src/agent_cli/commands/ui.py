@@ -247,8 +247,10 @@ _PREVIEW_TOKEN_LIMIT = 30
 
 
 def _format_session_preview(raw: str, limit: int = _PREVIEW_TOKEN_LIMIT) -> str:
+    from agent_cli.render.notices import peel_attachment_reminders
     from agent_cli.render.replay import peel_user_command
 
+    raw = peel_attachment_reminders(raw)
     peeled = peel_user_command(raw)
     text = peeled if peeled is not None else " ".join(raw.split())
     return truncate_text_by_tokens(text, max_tokens=limit, suffix="…")

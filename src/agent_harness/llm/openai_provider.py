@@ -25,12 +25,7 @@ from agent_harness.tool.base import ToolSchema
 logger = logging.getLogger(__name__)
 
 _PROTOCOL_KEY = "openai_chat"
-# Single source of truth for the OpenAI-compatible reasoning sidecar:
-# field name → empty/placeholder value of the right type. Used by:
-#   - _parse_response: which fields to lift off responses into provider_metadata
-#   - _format_message: which fields to re-emit when sending the message back
-#   - synthetic_turn_sidecar: placeholder stamp on harness-synthesized turns
-# Adding a new sidecar field is a one-line change here.
+# Single source of truth for the OpenAI-compatible reasoning sidecar.
 _REASONING_SIDECAR: dict[str, Any] = {
     "reasoning_content": "",  # models native + OpenRouter alias
     "reasoning_details": [],  # OpenRouter's structured form (list of blocks)
@@ -333,11 +328,6 @@ class OpenAIProvider(BaseLLM):
             cache_creation_tokens=0,
             reasoning_tokens=reasoning,
         )
-
-    def synthetic_turn_sidecar(self) -> dict[str, dict[str, Any]]:
-        # Stamp unconditionally: reasoning-capable backends 
-        # OpenAI tolerates the extra fields as a no-op.
-        return {_PROTOCOL_KEY: dict(_REASONING_SIDECAR)}
 
 
 def _map_finish_reason(reason: str | None) -> FinishReason:

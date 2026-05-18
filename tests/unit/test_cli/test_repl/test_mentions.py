@@ -10,12 +10,12 @@ import pytest
 from agent_cli.repl.mentions import (
     _build_calls,
     _within,
+    embed_attachments_into_last_user,
     expand_mentions,
     find_at_token,
-    is_attachment_turn,
     parse_mentions,
 )
-from agent_harness.core.message import Message, ToolCall, ToolResult
+from agent_harness.core.message import Message, Role, ToolCall, ToolResult
 
 
 class TestFindAtToken:
@@ -162,6 +162,53 @@ class TestBuildCalls:
         assert out[0][0] == "read_file"
         assert out[1][0] == "list_dir"
 
+    def test_completer_suggestion_resolves_to_same_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from agent_cli.runtime.file_index import list_project_files
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "app.py").write_text("x")
+        (tmp_path / "top.py").write_text("y")
+        monkeypatch.chdir(tmp_path)
+
+        cache = list_project_files(tmp_path)
+        agent = self._agent_with_tools("read_file", "list_dir")
+
+        for entry in cache:
+            if entry.endswith("/"):
+                continue
+            out = _build_calls(agent, [entry])
+            assert len(out) == 1, f"completer entry {entry!r} not resolvable"
+            _, args = out[0]
+            raw = args.get("file_path") or args.get("path")
+            assert raw is not None
+            tool_resolved = (
+                Path(raw) if Path(raw).is_absolute()
+                else tmp_path / raw
+            ).resolve()
+            assert tool_resolved == (tmp_path / entry).resolve()
+
+
+def _agent_with_stm(last_content: str | None) -> Any:
+    agent = MagicMock()
+    agent.tool_registry.has = lambda n: True
+    msgs: list[Message] = []
+    if last_content is not None:
+        msgs.append(Message.user(last_content))
+    agent.context.short_term_memory._messages = msgs
+    return agent
+
+
+def _stream_factory(content_by_name: dict[str, str] | None = None,
+                     is_error: bool = False) -> Any:
+    async def fake_stream(tcs: list[ToolCall]) -> Any:
+        for tc in tcs:
+            body = (content_by_name or {}).get(tc.name, "ok")
+            yield ToolResult(
+                tool_call_id=tc.id, content=body, is_error=is_error,
+            )
+    return fake_stream
+
 
 class TestExpandMentions:
     @pytest.mark.asyncio
@@ -192,204 +239,148 @@ class TestExpandMentions:
         agent.tool_executor.execute_stream.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_file_mention_invokes_executor_and_writer(
+    async def test_single_file_mention_embeds_call_and_result_reminders(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         (tmp_path / "foo.py").write_text("x")
         monkeypatch.chdir(tmp_path)
-
-        agent = MagicMock()
-        agent.tool_registry.has = lambda n: True
-        agent.llm.synthetic_turn_sidecar = MagicMock(return_value={})
-
-        async def fake_stream(tcs: list[ToolCall]):
-            for tc in tcs:
-                yield ToolResult(
-                    tool_call_id=tc.id, content="ok", is_error=False,
-                )
-
-        agent.tool_executor.execute_stream = fake_stream
-        recorded: list[Any] = []
-
-        async def add_message(msg: Any) -> None:
-            recorded.append(msg)
-
-        agent.context.short_term_memory.add_message = add_message
+        agent = _agent_with_stm("look at @foo.py")
+        agent.tool_executor.execute_stream = _stream_factory(
+            {"read_file": "[foo.py] lines 1-1 of 1\n1\tx"},
+        )
         adapter = MagicMock()
         adapter.render_attachments = AsyncMock()
 
         await expand_mentions(agent, adapter, "look at @foo.py")
 
         adapter.render_attachments.assert_awaited_once()
-        assert len(recorded) == 2  # assistant + 1 tool
-
-    def test_completer_suggestion_resolves_to_same_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Contract: whatever the completer cache surfaces, _build_calls
-        resolves to the same physical path. Pins completer/executor
-        symmetry so the menu can't show X while the tool loads Y."""
-        from agent_cli.runtime.file_index import list_project_files
-        (tmp_path / "src").mkdir()
-        (tmp_path / "src" / "app.py").write_text("x")
-        (tmp_path / "top.py").write_text("y")
-        monkeypatch.chdir(tmp_path)
-
-        cache = list_project_files(tmp_path)
-        agent = MagicMock()
-        agent.tool_registry.has = lambda n: True
-
-        for entry in cache:
-            if entry.endswith("/"):
-                continue
-            out = _build_calls(agent, [entry])
-            assert len(out) == 1, f"completer entry {entry!r} not resolvable"
-            name, args = out[0]
-            raw = args.get("file_path") or args.get("path")
-            assert raw is not None
-            tool_resolved = (
-                Path(raw) if Path(raw).is_absolute()
-                else tmp_path / raw
-            ).resolve()
-            cache_resolved = (tmp_path / entry).resolve()
-            assert tool_resolved == cache_resolved
+        last = agent.context.short_term_memory._messages[-1]
+        assert last.role == Role.USER
+        assert last.content.startswith(
+            "<system-reminder>\nCalled the read_file tool with the following input:"
+        )
+        assert "Result of calling the read_file tool:" in last.content
+        assert last.content.endswith("look at @foo.py")
+        atts = last.metadata["attachments"]
+        assert len(atts) == 1
+        assert atts[0]["tool_name"] == "read_file"
+        assert atts[0]["is_error"] is False
 
     @pytest.mark.asyncio
-    async def test_dedupe_canonicalizes_to_one_call(
+    async def test_directory_mention_uses_list_dir_tool_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        (tmp_path / "src").mkdir()
+        monkeypatch.chdir(tmp_path)
+        agent = _agent_with_stm("@src")
+        agent.tool_executor.execute_stream = _stream_factory(
+            {"list_dir": "[src] (0 entries):"},
+        )
+        adapter = MagicMock()
+        adapter.render_attachments = AsyncMock()
+
+        await expand_mentions(agent, adapter, "@src")
+
+        last = agent.context.short_term_memory._messages[-1]
+        assert "Called the list_dir tool" in last.content
+        assert last.metadata["attachments"][0]["tool_name"] == "list_dir"
+
+    @pytest.mark.asyncio
+    async def test_error_attachment_keeps_error_content_in_result_reminder(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         (tmp_path / "foo.py").write_text("x")
         monkeypatch.chdir(tmp_path)
-
-        agent = MagicMock()
-        agent.tool_registry.has = lambda n: True
-        agent.llm.synthetic_turn_sidecar = MagicMock(return_value={})
-
-        captured: list[list[ToolCall]] = []
-
-        async def fake_stream(tcs: list[ToolCall]):
-            captured.append(list(tcs))
-            for tc in tcs:
-                yield ToolResult(tool_call_id=tc.id, content="ok")
-
-        agent.tool_executor.execute_stream = fake_stream
-        agent.context.short_term_memory.add_message = AsyncMock()
+        agent = _agent_with_stm("@foo.py")
+        agent.tool_executor.execute_stream = _stream_factory(
+            {"read_file": "Permission denied"}, is_error=True,
+        )
         adapter = MagicMock()
         adapter.render_attachments = AsyncMock()
 
-        await expand_mentions(agent, adapter, "@foo.py @./foo.py")
+        await expand_mentions(agent, adapter, "@foo.py")
 
-        assert len(captured[0]) == 1
+        last = agent.context.short_term_memory._messages[-1]
+        assert "Permission denied" in last.content
+        assert last.metadata["attachments"][0]["is_error"] is True
+
+    @pytest.mark.asyncio
+    async def test_multiple_mentions_preserve_declaration_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        (tmp_path / "a.py").write_text("x")
+        (tmp_path / "src").mkdir()
+        monkeypatch.chdir(tmp_path)
+        agent = _agent_with_stm("@a.py @src compare")
+        agent.tool_executor.execute_stream = _stream_factory()
+        adapter = MagicMock()
+        adapter.render_attachments = AsyncMock()
+
+        await expand_mentions(agent, adapter, "@a.py @src compare")
+
+        last = agent.context.short_term_memory._messages[-1]
+        i_read = last.content.index("Called the read_file tool")
+        i_list = last.content.index("Called the list_dir tool")
+        assert i_read < i_list
+        names = [a["tool_name"] for a in last.metadata["attachments"]]
+        assert names == ["read_file", "list_dir"]
+
+    @pytest.mark.asyncio
+    async def test_pure_at_mention_no_text_keeps_at_in_trailing_content(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        (tmp_path / "foo.py").write_text("x")
+        monkeypatch.chdir(tmp_path)
+        agent = _agent_with_stm("@foo.py")
+        agent.tool_executor.execute_stream = _stream_factory()
+        adapter = MagicMock()
+        adapter.render_attachments = AsyncMock()
+
+        await expand_mentions(agent, adapter, "@foo.py")
+
+        last = agent.context.short_term_memory._messages[-1]
+        assert last.content.endswith("@foo.py")
+        assert last.content.count("<system-reminder>") == 2
+
+    @pytest.mark.asyncio
+    async def test_no_mention_no_mutation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        agent = _agent_with_stm("plain message")
+        agent.tool_executor.execute_stream = _stream_factory()
+        adapter = MagicMock()
+        adapter.render_attachments = AsyncMock()
+
+        await expand_mentions(agent, adapter, "plain message")
+
+        last = agent.context.short_term_memory._messages[-1]
+        assert last.content == "plain message"
+        assert "attachments" not in last.metadata
 
 
-# ── is_attachment_turn ───────────────────────────────────────────────
+class TestEmbedAttachmentsIntoLastUser:
+    @pytest.mark.asyncio
+    async def test_noop_when_last_not_user(self) -> None:
+        agent = MagicMock()
+        agent.context.short_term_memory._messages = [
+            Message.assistant(content="hi"),
+        ]
+        tc = ToolCall(id="c1", name="read_file", arguments={"file_path": "f"})
+        tr = ToolResult(tool_call_id="c1", content="data")
 
+        await embed_attachments_into_last_user(agent, [(tc, tr)])
 
-class TestIsAttachmentTurn:
-    """Validate the detector contract: a tool_call counts as part of an
-    attachment turn iff one of its string arguments equals one of the
-    user's @-mentions."""
+        last = agent.context.short_term_memory._messages[-1]
+        assert last.content == "hi"
 
-    def test_true_when_path_matches_mention(self) -> None:
-        u = Message.user("look at @foo.py")
-        a = Message.assistant(
-            content="",
-            tool_calls=[ToolCall(
-                id="c1", name="read_file",
-                arguments={"file_path": "foo.py", "limit": 500},
-            )],
-        )
-        assert is_attachment_turn(u, a) is True
+    @pytest.mark.asyncio
+    async def test_noop_when_no_messages(self) -> None:
+        agent = MagicMock()
+        agent.context.short_term_memory._messages = []
+        tc = ToolCall(id="c1", name="read_file", arguments={"file_path": "f"})
+        tr = ToolResult(tool_call_id="c1", content="data")
 
-    def test_true_for_multiple_mentions_and_tools(self) -> None:
-        u = Message.user("compare @a.py and @src")
-        a = Message.assistant(content="", tool_calls=[
-            ToolCall(id="c1", name="read_file", arguments={"file_path": "a.py"}),
-            ToolCall(id="c2", name="list_dir", arguments={"path": "src"}),
-        ])
-        assert is_attachment_turn(u, a) is True
+        await embed_attachments_into_last_user(agent, [(tc, tr)])
 
-    def test_true_for_future_tool_name(self) -> None:
-        """Detection is tool-name agnostic — any tool that stores the raw
-        mention text in a string arg should be recognised."""
-        u = Message.user("@foo")
-        a = Message.assistant(
-            content="",
-            tool_calls=[ToolCall(
-                id="c1", name="future_tool",
-                arguments={"target": "foo"},
-            )],
-        )
-        assert is_attachment_turn(u, a) is True
-
-    def test_false_when_agent_calls_unrelated_path(self) -> None:
-        u = Message.user("search for bar")
-        a = Message.assistant(
-            content="",
-            tool_calls=[ToolCall(
-                id="c1", name="read_file",
-                arguments={"file_path": "bar.py"},
-            )],
-        )
-        assert is_attachment_turn(u, a) is False
-
-    def test_false_when_user_has_no_mention(self) -> None:
-        u = Message.user("just chat")
-        a = Message.assistant(
-            content="",
-            tool_calls=[ToolCall(
-                id="c1", name="read_file",
-                arguments={"file_path": "foo.py"},
-            )],
-        )
-        assert is_attachment_turn(u, a) is False
-
-    def test_false_when_assistant_has_content(self) -> None:
-        u = Message.user("@foo.py")
-        a = Message.assistant(
-            content="thinking...",
-            tool_calls=[ToolCall(
-                id="c1", name="read_file",
-                arguments={"file_path": "foo.py"},
-            )],
-        )
-        assert is_attachment_turn(u, a) is False
-
-    def test_false_when_tool_arg_value_is_not_string(self) -> None:
-        """numeric-only arg values can't match a mention path, so a tool
-        with only numeric args is rejected."""
-        u = Message.user("@500 please")
-        a = Message.assistant(
-            content="",
-            tool_calls=[ToolCall(
-                id="c1", name="t",
-                arguments={"limit": 500},
-            )],
-        )
-        assert is_attachment_turn(u, a) is False
-
-    def test_false_when_some_tool_does_not_match(self) -> None:
-        """All tool_calls must correspond to a mention; a mixed turn is
-        not the @-expansion shape (`_build_calls` never produces it)."""
-        u = Message.user("@foo.py")
-        a = Message.assistant(content="", tool_calls=[
-            ToolCall(id="c1", name="read_file", arguments={"file_path": "foo.py"}),
-            ToolCall(id="c2", name="read_file", arguments={"file_path": "unrelated.py"}),
-        ])
-        assert is_attachment_turn(u, a) is False
-
-    def test_false_for_empty_tool_calls(self) -> None:
-        u = Message.user("@foo.py")
-        a = Message.assistant(content="", tool_calls=[])
-        assert is_attachment_turn(u, a) is False
-
-    def test_false_when_user_content_empty(self) -> None:
-        u = Message.user("")
-        a = Message.assistant(
-            content="",
-            tool_calls=[ToolCall(
-                id="c1", name="read_file",
-                arguments={"file_path": "foo.py"},
-            )],
-        )
-        assert is_attachment_turn(u, a) is False
+        assert agent.context.short_term_memory._messages == []

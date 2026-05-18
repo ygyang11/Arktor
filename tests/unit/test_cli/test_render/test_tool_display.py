@@ -190,104 +190,115 @@ def _tr(content: str, *, is_error: bool = False) -> MagicMock:
     return MagicMock(tool_call_id="t1", content=content, is_error=is_error)
 
 
-class TestFormatAttachmentLine:
-    def _render(self, text: object) -> str:
-        from agent_cli.theme import FLEXOKI_DARK
-        buf = io.StringIO()
-        con = Console(
-            file=buf, color_system=None, width=200, theme=FLEXOKI_DARK.rich,
+def _render_rows(rows: object) -> str:
+    from agent_cli.theme import FLEXOKI_DARK
+    buf = io.StringIO()
+    con = Console(
+        file=buf, color_system=None, width=200, theme=FLEXOKI_DARK.rich,
+    )
+    for r in rows:  # type: ignore[union-attr]
+        con.print(r)
+    return buf.getvalue()
+
+
+class TestAttachmentSummaryAndFormat:
+    def _render_one(self, tc: object, tr: object) -> str:
+        from agent_cli.render.tool_display import (
+            attachment_summary,
+            format_attachments,
         )
-        con.print(text)
-        return buf.getvalue()
+        return _render_rows(format_attachments([attachment_summary(tc, tr)]))
 
     def test_read_normal_includes_label_target_lines(self) -> None:
-        from agent_cli.render.tool_display import format_attachment_line
         tc = _tc("read_file", file_path="src/foo.py")
         tr = _tr("[src/foo.py] lines 1-3 of 3\nline1\nline2\nline3")
-
-        out = self._render(format_attachment_line(tc, tr))
-
+        out = self._render_one(tc, tr)
+        assert "Loaded into context" in out
         assert "Read" in out
         assert "src/foo.py" in out
         assert "(3 lines)" in out
 
     def test_read_truncated_shows_range(self) -> None:
-        from agent_cli.render.tool_display import format_attachment_line
         tc = _tc("read_file", file_path="big.py")
         tr = _tr("[big.py] lines 1-500 of 1200\n" + "\n".join(f"l{i}" for i in range(500)))
-
-        out = self._render(format_attachment_line(tc, tr))
-
-        assert "(lines 1-500 of 1200)" in out
+        assert "(lines 1-500 of 1200)" in self._render_one(tc, tr)
 
     def test_read_binary_branch(self) -> None:
-        from agent_cli.render.tool_display import format_attachment_line
         tc = _tc("read_file", file_path="img.png")
         tr = _tr("Binary file detected: img.png")
-
-        out = self._render(format_attachment_line(tc, tr))
-
-        assert "Binary" in out
+        assert "Binary" in self._render_one(tc, tr)
 
     def test_read_empty_branch(self) -> None:
-        from agent_cli.render.tool_display import format_attachment_line
         tc = _tc("read_file", file_path="empty.txt")
         tr = _tr("Empty file")
-
-        out = self._render(format_attachment_line(tc, tr))
-
-        assert "Empty file" in out
+        assert "Empty file" in self._render_one(tc, tr)
 
     def test_list_dir_normal_includes_entries(self) -> None:
-        from agent_cli.render.tool_display import format_attachment_line
         tc = _tc("list_dir", path="src/")
         tr = _tr("src/  (8 entries)\n  app.py\n  util.py")
-
-        out = self._render(format_attachment_line(tc, tr))
-
+        out = self._render_one(tc, tr)
         assert "List" in out
         assert "src/" in out
         assert "(8 entries)" in out
 
-    def test_list_dir_empty_no_count_suffix(self) -> None:
-        from agent_cli.render.tool_display import format_attachment_line
-        tc = _tc("list_dir", path="empty/")
-        tr = _tr("(empty directory)")
-
-        out = self._render(format_attachment_line(tc, tr))
-
-        assert "List" in out
-        assert "empty/" in out
-
-    def test_error_uses_error_styling_with_truncated_message(self) -> None:
-        from agent_cli.render.tool_display import format_attachment_line
-        tc = _tc("read_file", file_path="missing.py")
-        tr = _tr("Error: file not found", is_error=False)
-
-        out = self._render(format_attachment_line(tc, tr))
-
-        assert "Read" in out
-        assert "missing.py" in out
-        assert "Error" in out
-
     def test_unknown_tool_falls_back_to_raw_name(self) -> None:
-        from agent_cli.render.tool_display import format_attachment_line
         tc = _tc("custom_tool", path="x")
         tr = _tr("ok")
-
-        out = self._render(format_attachment_line(tc, tr))
-
+        out = self._render_one(tc, tr)
         assert "custom_tool" in out
         assert "x" in out
 
     def test_path_with_brackets_does_not_break(self) -> None:
-        from agent_cli.render.tool_display import format_attachment_line
         tc = _tc("read_file", file_path="src/[generated]/foo.py")
         tr = _tr("x\ny")
+        assert "[generated]" in self._render_one(tc, tr)
 
-        out = self._render(format_attachment_line(tc, tr))
+    def test_attachment_summary_includes_error_snippet_on_error(self) -> None:
+        from agent_cli.render.tool_display import attachment_summary
+        tc = _tc("read_file", file_path="missing.py")
+        tr = _tr("Error: file not found", is_error=True)
+        s = attachment_summary(tc, tr)
+        assert s["is_error"] is True
+        assert "file not found" in s["error_snippet"]
+        assert s["summary"] == ""
 
-        assert "[generated]" in out
+    def test_format_attachments_renders_from_summary_dict(self) -> None:
+        from agent_cli.render.tool_display import (
+            attachment_summary,
+            format_attachments,
+        )
+        tc = _tc("read_file", file_path="a.py")
+        tr = _tr("[a.py] lines 1-2 of 2\nx\ny")
+        out = _render_rows(format_attachments([attachment_summary(tc, tr)]))
+        assert "Read" in out
+        assert "a.py" in out
+        assert "(2 lines)" in out
+
+    def test_format_attachments_renders_error_row(self) -> None:
+        from agent_cli.render.tool_display import (
+            attachment_summary,
+            format_attachments,
+        )
+        tc = _tc("read_file", file_path="missing.py")
+        tr = _tr("Error: nope", is_error=True)
+        out = _render_rows(format_attachments([attachment_summary(tc, tr)]))
+        assert "missing.py" in out
+        assert "nope" in out
+
+    def test_live_and_replay_same_dict_render_identical(self) -> None:
+        from agent_cli.render.tool_display import (
+            attachment_summary,
+            format_attachments,
+        )
+        tc = _tc("read_file", file_path="a.py")
+        tr = _tr("[a.py] lines 1-1 of 1\nx")
+        live_dict = attachment_summary(tc, tr)
+        # replay path reads the same dict back from persisted metadata
+        replay_dict = dict(live_dict)
+        assert (
+            _render_rows(format_attachments([live_dict]))
+            == _render_rows(format_attachments([replay_dict]))
+        )
 
 
 def test_show_todos_escapes_markup_in_content() -> None:

@@ -551,48 +551,92 @@ def test_replay_skill_invocation_without_args() -> None:
 # ── @file mention attachment turn ────────────────────────────────────
 
 
-def test_replay_at_mention_renders_attachment_block() -> None:
-    tc = ToolCall(id="c1", name="read_file", arguments={"file_path": "foo.py"})
+def _att_user(trailing: str, *specs: tuple[str, dict[str, object], str]) -> Message:
+    """Build a new-schema attachment user message: reminder-prefixed content
+    + metadata['attachments'], exactly as embed_attachments_into_last_user."""
+    from agent_cli.render.notices import format_attachment_reminders
+    from agent_cli.render.tool_display import attachment_summary
+
+    pairs = [
+        (
+            ToolCall(id=f"c{i}", name=name, arguments=args),
+            ToolResult(tool_call_id=f"c{i}", content=content),
+        )
+        for i, (name, args, content) in enumerate(specs)
+    ]
+    blocks = [format_attachment_reminders(tc, tr) for tc, tr in pairs]
+    summaries = [attachment_summary(tc, tr) for tc, tr in pairs]
+    prefix = "\n\n".join(blocks)
+    content = f"{prefix}\n\n{trailing}" if trailing else prefix
+    return Message.user(content, metadata={"attachments": summaries})
+
+
+def test_replay_at_mention_renders_attachment_indicator() -> None:
     msgs = [
-        _u("@foo.py what does this?"),
-        _a("", [tc]),
-        _t("c1", "content here"),
+        _att_user(
+            "@foo.py what does this?",
+            ("read_file", {"file_path": "foo.py"},
+             "[foo.py] lines 1-1 of 1\nx"),
+        ),
         _a("It is the foo module."),
     ]
     out = _render(*msgs)
     assert "Loaded into context" in out
     assert "foo.py" in out
-    # the regular `Read(foo.py)` style must NOT appear in attachment turn
-    assert "Read(foo.py)" not in out
-    # subsequent assistant message still rendered
+    # raw reminder framing must NOT leak into the rendered user line
+    assert "<system-reminder>" not in out
+    assert "@foo.py what does this?" in out
     assert "It is the foo module." in out
 
 
-def test_replay_at_mention_without_at_in_user_falls_back_to_regular() -> None:
-    """User msg without '@' but assistant uses empty content + read_file — not
-    treated as attachment turn (could be an agent's own tool call)."""
-    tc = ToolCall(id="c1", name="read_file", arguments={"file_path": "foo.py"})
-    msgs = [
-        _u("show me foo.py"),
-        _a("", [tc]),
-        _t("c1", "content"),
-    ]
-    out = _render(*msgs)
+def test_replay_plain_user_no_attachment_metadata_unchanged() -> None:
+    out = _render(_u("show me foo.py"))
     assert "Loaded into context" not in out
-    assert "Read(foo.py)" in out
+    assert "show me foo.py" in out
 
 
-def test_replay_at_mention_with_non_attachment_tool_falls_back() -> None:
-    """User msg has '@' but the assistant's tool isn't read_file/list_dir — not
-    an attachment turn (an agent's own use of the @ char doesn't qualify)."""
-    tc = ToolCall(id="c1", name="terminal_tool", arguments={"command": "ls"})
+def test_replay_at_mention_multiple_files_one_header() -> None:
     msgs = [
-        _u("@example.com please email"),
-        _a("", [tc]),
-        _t("c1", "ok"),
+        _att_user(
+            "compare @a.py and @src",
+            ("read_file", {"file_path": "a.py"}, "[a.py] lines 1-1 of 1\na"),
+            ("list_dir", {"path": "src"}, "[src] (1 entries):\napp.py"),
+        ),
     ]
     out = _render(*msgs)
-    assert "Loaded into context" not in out
+    assert out.count("Loaded into context") == 1
+    assert "a.py" in out
+    assert "src" in out
+    assert "<system-reminder>" not in out
+
+
+def test_peel_user_command_strips_attachments_before_envelope_match() -> None:
+    from agent_cli.render.notices import format_shell_run
+    from agent_cli.render.replay import peel_user_command
+
+    att = _att_user(
+        format_shell_run("echo hi", 0, "hi"),
+        ("read_file", {"file_path": "a.py"}, "a"),
+    )
+    from agent_cli.render.notices import peel_attachment_reminders
+
+    assert peel_user_command(
+        peel_attachment_reminders(att.content or "")
+    ) == "! echo hi"
+
+
+def test_skill_envelope_with_preceding_attachment_still_detected() -> None:
+    skill = (
+        "<system-reminder>The user has explicitly requested the foo "
+        "skill. Apply the skill instructions below to address their "
+        'request.</system-reminder>\n\n<skill-loaded name="foo">body'
+        "</skill-loaded>"
+    )
+    msg = _att_user(skill, ("read_file", {"file_path": "a.py"}, "a"))
+    out = _render(msg)
+    assert "Loaded into context" in out
+    assert "/foo" in out
+    assert "<system-reminder>" not in out
 
 
 # ── compaction marker via render_post_switch ─────────────────────────
@@ -662,22 +706,6 @@ def test_render_post_switch_omits_marker_without_summary() -> None:
     assert "Earlier messages compacted" not in out
 
 
-def test_replay_at_mention_multiple_files_in_one_block() -> None:
-    tcs = [
-        ToolCall(id="c1", name="read_file", arguments={"file_path": "a.py"}),
-        ToolCall(id="c2", name="list_dir", arguments={"path": "src"}),
-    ]
-    msgs = [
-        _u("compare @a.py and @src"),
-        _a("", tcs),
-        _t("c1", "a"),
-        _t("c2", "listing"),
-    ]
-    out = _render(*msgs)
-    # one shared "Loaded into context" header, not two
-    assert out.count("Loaded into context") == 1
-    assert "a.py" in out
-    assert "src" in out
 
 
 # ── render_post_switch ───────────────────────────────────────────────

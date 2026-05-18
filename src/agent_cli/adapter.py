@@ -174,12 +174,16 @@ class CliAdapter:
     ) -> None:
         if not items:
             return
-        from agent_cli.render.tool_display import format_attachments  # noqa: PLC0415
+        from agent_cli.render.tool_display import (  # noqa: PLC0415
+            attachment_summary,
+            format_attachments,
+        )
 
+        summaries = [attachment_summary(tc, tr) for tc, tr in items]
         async with self._console_lock:
             self._thinking_line.clear_no_lock()
             self._subagent_line.clear_no_lock()
-            for r in format_attachments(items):
+            for r in format_attachments(summaries):
                 self.console.print(r)
             self.console.print()
 
