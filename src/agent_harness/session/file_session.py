@@ -47,6 +47,13 @@ class FileSession(BaseSession):
             tmp_path.unlink(missing_ok=True)
             raise
 
+    async def rename(self, new_id: str) -> None:
+        old_path = self._file_path
+        self.set_session_id(new_id)
+        new_path = self._file_path
+        if old_path != new_path and old_path.exists():
+            old_path.rename(new_path)
+
     async def clear(self) -> None:
         if self._file_path.exists():
             self._file_path.unlink()

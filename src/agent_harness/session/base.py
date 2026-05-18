@@ -77,6 +77,9 @@ class BaseSession(ABC):
             )
         self.session_id = new_id
 
+    async def rename(self, new_id: str) -> None:
+        self.set_session_id(new_id)
+
     @abstractmethod
     async def load_state(self) -> SessionState | None: ...
 

@@ -16,6 +16,12 @@ class InMemorySession(BaseSession):
     async def save_state(self, state: SessionState) -> None:
         self._states[self.session_id] = state
 
+    async def rename(self, new_id: str) -> None:
+        old_id = self.session_id
+        self.set_session_id(new_id)
+        if old_id in self._states and old_id != new_id:
+            self._states[new_id] = self._states.pop(old_id)
+
     async def clear(self) -> None:
         self._states.pop(self.session_id, None)
 

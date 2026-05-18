@@ -188,6 +188,14 @@ async def switch_session(
     file_observer.enable(agent)
 
 
+async def rename_session(
+    agent: BaseAgent, backend: BaseSession, new_id: str,
+) -> None:
+    """Rename the live session in place, keeping the conversation intact."""
+    await backend.rename(new_id)
+    agent._bind_session_id(new_id)
+
+
 # ── Turn lifecycle (cancel-rollback) ──
 
 
