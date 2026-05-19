@@ -188,7 +188,7 @@ def _format_response(body: str, content_type: str) -> str:
             return json.dumps(parsed, indent=2, ensure_ascii=False)
         except (json.JSONDecodeError, ValueError):
             return body
-    if "text/html" in ct:
+    if "text/html" in ct or "application/xhtml+xml" in ct:
         extracted = _extract_from_html(body)
         if len(extracted.strip()) < 500 and len(body) > 5000:
             extracted += (
