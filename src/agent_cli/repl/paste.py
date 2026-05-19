@@ -32,7 +32,6 @@ class PasteStore:
         """Return placeholder if text exceeds threshold, else None."""
         if not text:
             return None
-        # 视觉行数：尾换行不加 1、否则加 1；纯换行串算足额行
         line_count = text.count("\n") + (0 if text.endswith("\n") else 1)
         if len(text) <= CHAR_THRESHOLD and line_count < LINE_THRESHOLD:
             return None
@@ -68,7 +67,6 @@ class PastePlaceholderProcessor(Processor):
     def apply_transformation(
         self, transformation_input: TransformationInput,
     ) -> Transformation:
-        # Highlighting 是 UX 增强，失败宁可降级为无高亮也不能让 render 循环崩
         try:
             fragments: StyleAndTextTuples = list(transformation_input.fragments)
             plain = "".join(text for _, text, *_ in fragments)
