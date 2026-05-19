@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal
@@ -9,7 +11,11 @@ from urllib.parse import urlencode
 
 from agent_harness.core.config import resolve_paper_config
 from agent_harness.tool.decorator import tool
-from agent_harness.utils.http_retry import HttpRetryConfig, http_get_with_retry
+from agent_harness.utils.http_retry import (
+    HttpRetryConfig,
+    http_get_bytes_with_retry,
+    http_get_with_retry,
+)
 from agent_harness.utils.json_utils import parse_json_lenient
 from agent_harness.utils.token_counter import truncate_text_by_tokens
 
@@ -20,6 +26,7 @@ logger = logging.getLogger(__name__)
 class PaperFetchConfig:
     max_full_tokens: int = 15_000
     html_fetch_timeout: int = 30
+    pdf_download_max_bytes: int = 50 * 1024 * 1024
 
 
 _CFG = PaperFetchConfig()
@@ -291,6 +298,30 @@ async def _try_arxiv_html(arxiv_id: str) -> str | None:
     return text
 
 
+def _clean_pdf_failure_reason(raw: str) -> str:
+    """Map pdf_parser's internal errors to caller-meaningful reasons."""
+    low = raw.lower()
+    if "not configured" in low or "unknown pdf provider" in low:
+        return "PDF full-text extraction is not configured on this system"
+    if "timed out" in low:
+        return (
+            "PDF text extraction timed out — it may be large or "
+            'the service slow; retry later or use mode="metadata"'
+        )
+    if "rate limit" in low:
+        return "PDF extraction is temporarily rate-limited; retry shortly"
+    if "格式不支持" in raw or "no extractable text" in low:
+        return (
+            "the PDF itself could not be parsed (unsupported, "
+            "or corrupted) — full text is unavailable "
+            "for this specific paper"
+        )
+    return (
+        "PDF text extraction failed for this request, "
+        "retrying the same request later may succeed"
+    )
+
+
 async def _fetch_via_pdf_parser(
     pdf_url: str, paper_id: str = ""
 ) -> str:
@@ -298,11 +329,45 @@ async def _fetch_via_pdf_parser(
 
     result = await _pdf_parser.execute(url=pdf_url)
 
+    # Silent fallback: the cloud parser's URL fetcher rejects some arXiv
+    # URLs at submission. Download the bytes and retry via the local-file
+    # path, which has no URL to misparse. Only submission-stage
+    # rejections trigger this -- not rate limits, OCR timeouts, or
+    # empty-result failures, where the local path would fare no better.
+    if (
+        result.startswith("Error:")
+        and "submission failed" in result
+        and pdf_url.startswith(("http://", "https://"))
+    ):
+        try:
+            status, data = await http_get_bytes_with_retry(
+                pdf_url,
+                timeout=_CFG.html_fetch_timeout,
+                retry=HttpRetryConfig(max_attempts=3, base_delay=1.0),
+                max_bytes=_CFG.pdf_download_max_bytes,
+            )
+        except Exception:
+            status, data = 0, b""
+        if status == 200 and data:
+            # Close the handle before pdf_parser reopens by path so this
+            # works on Windows too (an open NamedTemporaryFile cannot be
+            # reopened there).
+            fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+            try:
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(data)
+                result = await _pdf_parser.execute(url=tmp_path)
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
     if result.startswith("Error:"):
-        reason = result.removeprefix("Error:").strip()
         msg = (
-            f"Error: failed to extract full content from PDF ({pdf_url}). \n"
-            f"Reason: {reason}"
+            f"Error: could not retrieve full text — it is extracted from "
+            f"this paper's PDF ({pdf_url}), which failed.\n"
+            f"Reason: {_clean_pdf_failure_reason(result)}."
         )
         if paper_id:
             msg += (

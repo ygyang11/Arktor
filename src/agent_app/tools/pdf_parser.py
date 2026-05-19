@@ -615,7 +615,9 @@ async def pdf_parser(url: str) -> str:
                 try:
                     remote_url = await _upload_to_mineru(file_name, file_bytes, api_key)
                 except Exception as exc:
-                    logger.warning("MinerU precise upload failed, trying lightweight: %s", exc)
+                    # Debug-level: expected recoverable fallback, fires in
+                    # the CLI live-status window (cf. http_retry).
+                    logger.debug("MinerU precise upload failed, trying lightweight: %s", exc)
                     try:
                         remote_url = await _upload_to_mineru_lightweight(file_name, file_bytes)
                     except Exception as exc2:
@@ -630,7 +632,7 @@ async def pdf_parser(url: str) -> str:
             if api_key:
                 raw = await _parse_mineru(url, api_key)
                 if raw.startswith("Error:"):
-                    logger.warning("MinerU precise API failed, falling back to lightweight: %s", raw)
+                    logger.debug("MinerU precise API failed, falling back to lightweight: %s", raw)
                     raw = await _parse_mineru_lightweight(url)
             else:
                 raw = await _parse_mineru_lightweight(url)
@@ -638,25 +640,26 @@ async def pdf_parser(url: str) -> str:
         api_key = cfg.paddleocr_api_key or ""
         if not api_key:
             return (
-                "PDF parsing not configured: PADDLEOCR_API_KEY not set. "
-                "Set the environment variable or configure in config.yaml."
+                "Error: PDF parsing not configured: PADDLEOCR_API_KEY not "
+                "set. Set the environment variable or configure in "
+                "config.yaml."
             )
         if is_local:
             raw = await _parse_paddleocr_file_with_model(
                 file_name, file_bytes, api_key, "PaddleOCR-VL-1.5",
             )
             if raw.startswith("Error:"):
-                logger.warning("PaddleOCR VL-1.5 file upload failed, falling back to VL: %s", raw)
+                logger.debug("PaddleOCR VL-1.5 file upload failed, falling back to VL: %s", raw)
                 raw = await _parse_paddleocr_file_with_model(
                     file_name, file_bytes, api_key, "PaddleOCR-VL",
                 )
         else:
             raw = await _parse_paddleocr_with_model(url, api_key, "PaddleOCR-VL-1.5")
             if raw.startswith("Error:"):
-                logger.warning("PaddleOCR VL-1.5 failed, falling back to VL: %s", raw)
+                logger.debug("PaddleOCR VL-1.5 failed, falling back to VL: %s", raw)
                 raw = await _parse_paddleocr_with_model(url, api_key, "PaddleOCR-VL")
     else:
-        return f"Unknown PDF provider: {provider!r}. Use 'mineru' or 'paddleocr'."
+        return f"Error: Unknown PDF provider: {provider!r}. Use 'mineru' or 'paddleocr'."
 
     if raw.startswith("Error:"):
         return raw

@@ -425,13 +425,13 @@ class TestFetchFullArxivPrecheck:
             return _ArxivIdCheck.PRESENT
 
         async def _pdf(pdf_url: str, paper_id: str = "") -> str:
-            return "Error: failed to extract full content from PDF (x). Reason: boom"
+            return "Error: could not retrieve full text — this paper's PDF (x) failed. Reason: boom"
 
         monkeypatch.setattr(mod, "_try_arxiv_html", _html)
         monkeypatch.setattr(mod, "_arxiv_id_check", _idcheck)
         monkeypatch.setattr(mod, "_fetch_via_pdf_parser", _pdf)
         out = await _fetch_full_content("2301.07041", "arxiv", None)
-        assert out == "Error: failed to extract full content from PDF (x). Reason: boom"
+        assert out == "Error: could not retrieve full text — this paper's PDF (x) failed. Reason: boom"
 
 
 class TestFetchViaPdfParserMessage:
@@ -452,10 +452,17 @@ class TestFetchViaPdfParserMessage:
             "https://arxiv.org/pdf/2006.16668.pdf", paper_id="2006.16668"
         )
         assert out.startswith(
-            "Error: failed to extract full content from PDF "
-            "(https://arxiv.org/pdf/2006.16668.pdf)."
+            "Error: could not retrieve full text — it is extracted from "
+            "this paper's PDF (https://arxiv.org/pdf/2006.16668.pdf), "
+            "which failed."
         )
-        assert "Reason: PDF parsing failed: 文件格式不支持" in out
+        # 格式不支持 -> document-unparseable bucket, scoped to this paper.
+        assert "could not be parsed" in out
+        assert "unavailable for this specific paper" in out
+        # No internal jargon / backend identity / raw body leaks.
+        assert "文件格式不支持" not in out
+        assert "PDF parsing failed" not in out
+        assert "MinerU" not in out and "PaddleOCR" not in out
         assert "Error: Error:" not in out
         assert "Underlying error:" not in out
         assert 'paper_fetch(mode="metadata")' in out
