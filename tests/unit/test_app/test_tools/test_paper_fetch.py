@@ -425,13 +425,57 @@ class TestFetchFullArxivPrecheck:
             return _ArxivIdCheck.PRESENT
 
         async def _pdf(pdf_url: str, paper_id: str = "") -> str:
-            return "Error: failed to extract full content from PDF.\nPDF URL: x"
+            return "Error: failed to extract full content from PDF (x). Reason: boom"
 
         monkeypatch.setattr(mod, "_try_arxiv_html", _html)
         monkeypatch.setattr(mod, "_arxiv_id_check", _idcheck)
         monkeypatch.setattr(mod, "_fetch_via_pdf_parser", _pdf)
         out = await _fetch_full_content("2301.07041", "arxiv", None)
-        assert out == "Error: failed to extract full content from PDF.\nPDF URL: x"
+        assert out == "Error: failed to extract full content from PDF (x). Reason: boom"
+
+
+class TestFetchViaPdfParserMessage:
+    @pytest.mark.asyncio
+    async def test_backend_reason_surfaced_without_double_error_prefix(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agent_app.tools.paper.paper_fetch import _fetch_via_pdf_parser
+
+        pdf_mod = sys.modules["agent_app.tools.pdf_parser"]
+
+        async def _exec(url: str) -> str:
+            _ = url
+            return "Error: PDF parsing failed: 文件格式不支持"
+
+        monkeypatch.setattr(pdf_mod.pdf_parser, "execute", _exec)
+        out = await _fetch_via_pdf_parser(
+            "https://arxiv.org/pdf/2006.16668.pdf", paper_id="2006.16668"
+        )
+        assert out.startswith(
+            "Error: failed to extract full content from PDF "
+            "(https://arxiv.org/pdf/2006.16668.pdf)."
+        )
+        assert "Reason: PDF parsing failed: 文件格式不支持" in out
+        assert "Error: Error:" not in out
+        assert "Underlying error:" not in out
+        assert 'paper_fetch(mode="metadata")' in out
+
+    @pytest.mark.asyncio
+    async def test_success_truncates_and_no_error_prefix(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agent_app.tools.paper.paper_fetch import _fetch_via_pdf_parser
+
+        pdf_mod = sys.modules["agent_app.tools.pdf_parser"]
+
+        async def _exec(url: str) -> str:
+            _ = url
+            return "full paper body text"
+
+        monkeypatch.setattr(pdf_mod.pdf_parser, "execute", _exec)
+        out = await _fetch_via_pdf_parser("https://arxiv.org/pdf/x.pdf")
+        assert out == "full paper body text"
+        assert not out.startswith("Error:")
 
 
 class TestArxivIdCheck:

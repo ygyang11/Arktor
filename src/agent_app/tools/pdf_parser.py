@@ -26,13 +26,30 @@ class PdfParserConfig:
     """Configuration for the pdf_parser tool."""
 
     max_output_tokens: int = 15_000
-    poll_interval: float = 3.0
-    max_poll_attempts: int = 100
+    # PaddleOCR's official sample polls every 5s with no upper bound and
+    # MinerU's sample uses a 300s client timeout -- 60 * 5s = 300s
+    poll_interval: float = 5.0
+    max_poll_attempts: int = 60
     request_max_attempts: int = 3
     request_base_delay: float = 1.0
+    # Single source of truth for per-call HTTP timeouts (submit / poll /
+    # get-upload-url use request_timeout_s; the file PUT/upload uses
+    # upload_timeout_s). The executor ceiling is derived from these.
+    request_timeout_s: int = 30
+    upload_timeout_s: int = 120
+    executor_slack_s: float = 60.0
 
 
 _CFG = PdfParserConfig()
+
+# Executor ceiling must exceed the worst single run: poll budget + local
+# file upload + submission request + slack.
+_PDF_EXECUTOR_TIMEOUT = (
+    _CFG.max_poll_attempts * _CFG.poll_interval
+    + _CFG.upload_timeout_s
+    + _CFG.request_timeout_s
+    + _CFG.executor_slack_s
+)
 
 _MINERU_BASE = "https://mineru.net"
 _PADDLEOCR_JOB_URL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
@@ -49,7 +66,7 @@ async def _get_json_with_retry(
     url: str,
     *,
     headers: dict[str, str] | None = None,
-    timeout: int = 30,
+    timeout: int = _CFG.request_timeout_s,
 ) -> tuple[int, dict[str, object] | None, str]:
     status, body = await http_get_with_retry(
         url,
@@ -69,7 +86,7 @@ async def _post_json_with_retry(
     *,
     headers: dict[str, str] | None = None,
     json_body: object | None = None,
-    timeout: int = 30,
+    timeout: int = _CFG.request_timeout_s,
 ) -> tuple[int, dict[str, object] | None, str]:
     status, body = await http_post_json_with_retry(
         url,
@@ -114,7 +131,7 @@ async def _upload_to_mineru(file_name: str, file_bytes: bytes, api_key: str) -> 
             f"{_MINERU_BASE}/api/v4/file-urls/batch",
             headers=headers,
             json={"file_names": [file_name]},
-            timeout=aiohttp.ClientTimeout(total=30),
+            timeout=aiohttp.ClientTimeout(total=_CFG.request_timeout_s),
         ) as resp:
             if resp.status != 200:
                 body = await resp.text()
@@ -138,7 +155,7 @@ async def _upload_to_mineru(file_name: str, file_bytes: bytes, api_key: str) -> 
             upload_url,
             data=file_bytes,
             headers={"Content-Type": "application/octet-stream"},
-            timeout=_aio.ClientTimeout(total=120),
+            timeout=_aio.ClientTimeout(total=_CFG.upload_timeout_s),
         ) as resp:
             if resp.status not in (200, 201):
                 raise RuntimeError(f"File upload failed (HTTP {resp.status})")
@@ -154,7 +171,7 @@ async def _upload_to_mineru_lightweight(file_name: str, file_bytes: bytes) -> st
         async with session.post(
             f"{_MINERU_BASE}/api/v1/agent/parse/file",
             json={"file_name": file_name},
-            timeout=aiohttp.ClientTimeout(total=30),
+            timeout=aiohttp.ClientTimeout(total=_CFG.request_timeout_s),
         ) as resp:
             if resp.status != 200:
                 body = await resp.text()
@@ -173,7 +190,7 @@ async def _upload_to_mineru_lightweight(file_name: str, file_bytes: bytes) -> st
             file_url,
             data=file_bytes,
             headers={"Content-Type": "application/octet-stream"},
-            timeout=aiohttp.ClientTimeout(total=120),
+            timeout=aiohttp.ClientTimeout(total=_CFG.upload_timeout_s),
         ) as resp:
             if resp.status not in (200, 201):
                 raise RuntimeError(f"File upload failed (HTTP {resp.status})")
@@ -211,7 +228,7 @@ async def _parse_paddleocr_file_with_model(
                 _PADDLEOCR_JOB_URL,
                 headers=headers,
                 data=form,
-                timeout=aiohttp.ClientTimeout(total=120),
+                timeout=aiohttp.ClientTimeout(total=_CFG.upload_timeout_s),
             ) as resp:
                 status = resp.status
                 body = await resp.text()
@@ -560,7 +577,7 @@ async def _download_paddleocr_markdown(json_url: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@tool(approval_resource_key="url")
+@tool(approval_resource_key="url", executor_timeout=_PDF_EXECUTOR_TIMEOUT)
 async def pdf_parser(url: str) -> str:
     """Extract text from a PDF document and return structured Markdown text.
 

@@ -9,6 +9,8 @@ import pytest
 
 from agent_harness.core.config import PdfConfig
 from agent_app.tools.pdf_parser import (
+    _CFG,
+    _PDF_EXECUTOR_TIMEOUT,
     _download_mineru_markdown,
     _download_paddleocr_markdown,
     _get_json_with_retry,
@@ -17,6 +19,32 @@ from agent_app.tools.pdf_parser import (
     _read_local_file,
     pdf_parser,
 )
+
+
+class TestPdfTimeoutConfig:
+    def test_poll_budget_is_300s_wall(self) -> None:
+        # PaddleOCR official sample interval = 5s; MinerU sample = 300s.
+        assert _CFG.poll_interval == 5.0
+        assert _CFG.max_poll_attempts == 60
+        assert _CFG.max_poll_attempts * _CFG.poll_interval == 300.0
+
+    def test_pdf_parser_executor_timeout_exceeds_poll_budget(self) -> None:
+        assert pdf_parser.executor_timeout == _PDF_EXECUTOR_TIMEOUT
+        assert _PDF_EXECUTOR_TIMEOUT > 300.0
+        assert pdf_parser.executor_timeout > 30  # not the global default
+
+    def test_paper_fetch_full_timeout_covers_pdf_poll_budget(self) -> None:
+        from agent_app.tools.paper.paper_fetch import (
+            _FULL_EXECUTOR_TIMEOUT,
+            paper_fetch,
+        )
+
+        assert paper_fetch.executor_timeout == _FULL_EXECUTOR_TIMEOUT
+        assert paper_fetch.executor_timeout >= 360.0
+        assert (
+            paper_fetch.executor_timeout
+            >= _CFG.max_poll_attempts * _CFG.poll_interval
+        )
 
 
 class TestPdfParserValidation:

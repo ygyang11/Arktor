@@ -24,6 +24,11 @@ class PaperFetchConfig:
 
 _CFG = PaperFetchConfig()
 
+# full mode delegates to pdf_parser (URL path: no local upload). The
+# executor ceiling must cover pdf_parser's poll budget + submission +
+# the cheap pre-PDF probes
+_FULL_EXECUTOR_TIMEOUT = 300.0 + 30.0 + 30.0
+
 
 class _ArxivIdCheck(Enum):
     MISSING = "missing"    # arXiv returned 0 entries -> confirmed absent
@@ -245,7 +250,10 @@ async def _fetch_full_content(
 
         # 3) PDF; pdf_parser already carries a metadata hint on failure,
         #    so its result is returned verbatim (no soft-landing).
-        pdf_url = f"https://arxiv.org/pdf/{clean_id}.pdf"
+        #    No `.pdf` suffix: arxiv.org/pdf/<id>.pdf 301-redirects with a
+        #    text/html body that PaddleOCR's URL fetcher rejects as
+        #    "unsupported format"; the bare URL serves application/pdf.
+        pdf_url = f"https://arxiv.org/pdf/{clean_id}"
         return await _fetch_via_pdf_parser(pdf_url, paper_id=clean_id)
 
     pdf_url = await _resolve_pdf_url(paper_id, source, api_key)
@@ -291,14 +299,16 @@ async def _fetch_via_pdf_parser(
     result = await _pdf_parser.execute(url=pdf_url)
 
     if result.startswith("Error:"):
-        msg = f"Error: failed to extract full content from PDF.\nPDF URL: {pdf_url}"
+        reason = result.removeprefix("Error:").strip()
+        msg = (
+            f"Error: failed to extract full content from PDF ({pdf_url}). \n"
+            f"Reason: {reason}"
+        )
         if paper_id:
             msg += (
-                "\nIf you have not retrieved the paper metadata yet, "
-                'use `paper_fetch` with mode="metadata" to get the '
-                "title, authors, and abstract."
+                "\nMetadata (title, authors, abstract) is still available "
+                'via paper_fetch(mode="metadata").'
             )
-        msg += f"\nUnderlying error: {result}"
         return msg
 
     return truncate_text_by_tokens(
@@ -352,7 +362,9 @@ async def _resolve_pdf_url(
     external: dict[str, str] = data.get("externalIds") or {}
     arxiv_id = external.get("ArXiv")
     if arxiv_id:
-        return f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+        # Bare URL (no `.pdf`): the suffixed form 301-redirects to a
+        # text/html body that PaddleOCR's URL fetcher rejects.
+        return f"https://arxiv.org/pdf/{arxiv_id}"
 
     doi = external.get("DOI")
     if doi:
@@ -398,7 +410,7 @@ async def _try_unpaywall(doi: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@tool
+@tool(executor_timeout=_FULL_EXECUTOR_TIMEOUT)
 async def paper_fetch(
     paper_id: str,
     mode: Literal["metadata", "full"] = "metadata",
