@@ -1,10 +1,8 @@
 """Web content fetching tool with automatic HTML text extraction."""
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import json
-import socket
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
@@ -27,7 +25,6 @@ class WebFetchConfig:
     max_response_tokens: int = 25_000
     max_response_bytes: int = 5 * 1024 * 1024
     max_redirects: int = 5
-    dns_resolve_timeout: float = 5.0
     default_timeout: int = 30
     retry_max_attempts: int = 3
     retry_base_delay: float = 0.5
@@ -109,38 +106,20 @@ class _TextExtractor(HTMLParser):
         return "\n".join(line for line in lines if line)
 
 
-async def _reject_internal_host(host: str) -> None:
-    """Best-effort SSRF guard: block loopback / private / link-local /
-    multicast hosts and the cloud metadata endpoints.
-
-    DNS resolution runs off the event loop with a bounded timeout so a
-    slow/hung resolver cannot block other coroutines or defeat the
-    caller's timeout. Unresolvable / slow DNS fails open (aiohttp then
-    surfaces the real connection error).
+def _reject_internal_host(host: str) -> None:
+    """SSRF guard on the URL host literal only; no DNS resolution by
+    design — pre-flight resolve-then-classify breaks transparent-proxy /
+    fake-IP environments and never closed DNS-rebinding regardless.
     """
     lower = host.lower()
     if lower in {"localhost", "metadata.google.internal"}:
         raise ValueError(f"internal/private host blocked: {host!r}")
-
     try:
-        infos = await asyncio.wait_for(
-            asyncio.to_thread(socket.getaddrinfo, host, None),
-            timeout=_CFG.dns_resolve_timeout,
-        )
-    except (socket.gaierror, TimeoutError):
-        return  # unresolvable / slow DNS -> aiohttp will surface the real error
-    for info in infos:
-        addr = info[4][0]
-        if not isinstance(addr, str):
-            continue
-        try:
-            ip = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
-        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast:
-            raise ValueError(
-                f"internal/private host blocked: {host!r} -> {addr}"
-            )
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return
+    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast:
+        raise ValueError(f"internal/private host blocked: {host!r}")
 
 
 async def _validate_url(url: str) -> None:
@@ -154,7 +133,7 @@ async def _validate_url(url: str) -> None:
         )
     if not parsed.netloc:
         raise ValueError("invalid URL: missing host")
-    await _reject_internal_host(parsed.hostname or "")
+    _reject_internal_host(parsed.hostname or "")
 
 
 def _extract_text_from_html(html: str) -> str:
@@ -333,7 +312,7 @@ async def web_fetch(url: str, timeout: int = 30) -> str:
             f"Error: {url} exceeds web_fetch's {limit_mb} MB limit; "
             f"nothing was returned. "
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return f"Error: request timed out after {timeout}s"
     except UnicodeDecodeError:
         return "Error: failed to decode response (binary or non-UTF-8 content)"

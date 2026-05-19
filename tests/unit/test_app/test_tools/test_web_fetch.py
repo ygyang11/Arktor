@@ -1,10 +1,7 @@
 """Tests for web_fetch tool."""
 from __future__ import annotations
 
-import dataclasses
-import socket
 import sys
-import time
 
 import pytest
 
@@ -23,7 +20,7 @@ from agent_app.tools.web.web_fetch import (
 )
 
 
-async def _async_noop(host: str) -> None:
+def _noop_host(host: str) -> None:
     return None
 
 
@@ -70,7 +67,7 @@ class TestWebFetchExecution:
     @pytest.fixture(autouse=True)
     def _bypass_ssrf(self, monkeypatch: pytest.MonkeyPatch) -> None:
         module = sys.modules["agent_app.tools.web.web_fetch"]
-        monkeypatch.setattr(module, "_reject_internal_host", _async_noop)
+        monkeypatch.setattr(module, "_reject_internal_host", _noop_host)
 
     @pytest.mark.asyncio
     async def test_html_response_uses_retry_helper(
@@ -281,7 +278,7 @@ class TestMaxBytesWiring:
     @pytest.fixture(autouse=True)
     def _bypass_ssrf(self, monkeypatch: pytest.MonkeyPatch) -> None:
         module = sys.modules["agent_app.tools.web.web_fetch"]
-        monkeypatch.setattr(module, "_reject_internal_host", _async_noop)
+        monkeypatch.setattr(module, "_reject_internal_host", _noop_host)
 
     @pytest.mark.asyncio
     async def test_passes_max_response_bytes_to_helper(
@@ -335,7 +332,7 @@ class TestCloudflareUaFlip:
     @pytest.fixture(autouse=True)
     def _bypass_ssrf(self, monkeypatch: pytest.MonkeyPatch) -> None:
         module = sys.modules["agent_app.tools.web.web_fetch"]
-        monkeypatch.setattr(module, "_reject_internal_host", _async_noop)
+        monkeypatch.setattr(module, "_reject_internal_host", _noop_host)
 
     @pytest.mark.asyncio
     async def test_cf_challenge_triggers_honest_ua_retry(
@@ -401,69 +398,30 @@ class TestCloudflareUaFlip:
 
 
 class TestSsrfGuard:
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "host",
         ["localhost", "metadata.google.internal", "LocalHost"],
     )
-    async def test_blacklisted_hosts_blocked(self, host: str) -> None:
+    def test_blacklisted_hosts_blocked(self, host: str) -> None:
         with pytest.raises(ValueError, match="internal/private host blocked"):
-            await _reject_internal_host(host)
+            _reject_internal_host(host)
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "ip",
         ["127.0.0.1", "10.0.0.1", "192.168.1.1", "172.16.0.1", "169.254.169.254"],
     )
-    async def test_private_and_metadata_ips_blocked(self, ip: str) -> None:
+    def test_private_and_metadata_ips_blocked(self, ip: str) -> None:
         with pytest.raises(ValueError, match="internal/private host blocked"):
-            await _reject_internal_host(ip)
+            _reject_internal_host(ip)
 
-    @pytest.mark.asyncio
-    async def test_public_ip_passes(self) -> None:
-        await _reject_internal_host("1.1.1.1")  # no raise
+    def test_public_ip_passes(self) -> None:
+        _reject_internal_host("1.1.1.1")  # no raise
 
-    @pytest.mark.asyncio
-    async def test_unresolvable_host_does_not_block(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def _boom(*a: object, **k: object) -> object:
-            raise socket.gaierror("name resolution failed")
+    def test_public_hostname_passes_without_resolution(self) -> None:
+        _reject_internal_host("nonexistent.invalid")  # no raise
 
-        monkeypatch.setattr(socket, "getaddrinfo", _boom)
-        await _reject_internal_host("nonexistent.invalid")  # no raise
-
-    @pytest.mark.asyncio
-    async def test_dns_resolving_to_private_is_blocked(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def _fake(*a: object, **k: object) -> list[object]:
-            return [(0, 0, 0, "", ("10.1.2.3", 0))]
-
-        monkeypatch.setattr(socket, "getaddrinfo", _fake)
-        with pytest.raises(ValueError, match="internal/private host blocked"):
-            await _reject_internal_host("sneaky.example.com")
-
-    @pytest.mark.asyncio
-    async def test_slow_dns_does_not_exceed_timeout_and_fails_open(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        module = sys.modules["agent_app.tools.web.web_fetch"]
-        monkeypatch.setattr(
-            module,
-            "_CFG",
-            dataclasses.replace(_CFG, dns_resolve_timeout=0.1),
-        )
-
-        def _slow(*a: object, **k: object) -> list[object]:
-            time.sleep(1.0)
-            return [(0, 0, 0, "", ("10.0.0.1", 0))]
-
-        monkeypatch.setattr(socket, "getaddrinfo", _slow)
-        start = time.monotonic()
-        await module._reject_internal_host("slow.example.com")  # no raise
-        elapsed = time.monotonic() - start
-        assert elapsed < 0.6  # bounded by dns_resolve_timeout, not 1.0s
+    def test_hostname_resolving_private_is_not_blocked(self) -> None:
+        _reject_internal_host("sneaky.example.com")  # no raise
 
     @pytest.mark.asyncio
     async def test_web_fetch_blocks_localhost(self) -> None:
@@ -517,7 +475,7 @@ class TestSsrfGuard:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         module = sys.modules["agent_app.tools.web.web_fetch"]
-        monkeypatch.setattr(module, "_reject_internal_host", _async_noop)
+        monkeypatch.setattr(module, "_reject_internal_host", _noop_host)
 
         async def _fake(
             url: str,
