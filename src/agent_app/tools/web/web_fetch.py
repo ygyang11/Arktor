@@ -26,6 +26,7 @@ class WebFetchConfig:
     max_response_bytes: int = 5 * 1024 * 1024
     max_redirects: int = 5
     default_timeout: int = 30
+    max_timeout: int = 120
     retry_max_attempts: int = 3
     retry_base_delay: float = 0.5
     executor_timeout_slack: float = 5.0
@@ -52,7 +53,7 @@ class WebFetchConfig:
 
 _CFG = WebFetchConfig()
 _EXECUTOR_TIMEOUT = (
-    _CFG.default_timeout * _CFG.retry_max_attempts
+    _CFG.max_timeout * _CFG.retry_max_attempts
     + _CFG.retry_base_delay * max(0, _CFG.retry_max_attempts - 1)
     + _CFG.executor_timeout_slack
 )
@@ -216,7 +217,7 @@ async def web_fetch(url: str, timeout: int = 30) -> str:
 
     Args:
         url: The URL to fetch (http or https only).
-        timeout: Maximum request time in seconds (positive integer, default 30).
+        timeout: Per-attempt request time in seconds (positive integer, default 30, capped at 120).
 
     Returns:
         Page content as readable text, truncated to token budget.
@@ -227,6 +228,7 @@ async def web_fetch(url: str, timeout: int = 30) -> str:
 
     if timeout <= 0:
         return "Error: timeout must be greater than 0"
+    timeout = min(timeout, _CFG.max_timeout)
 
     try:
         await _validate_url(url)
@@ -313,7 +315,7 @@ async def web_fetch(url: str, timeout: int = 30) -> str:
             f"nothing was returned. "
         )
     except TimeoutError:
-        return f"Error: request timed out after {timeout}s"
+        return "Error: request timed out"
     except UnicodeDecodeError:
         return "Error: failed to decode response (binary or non-UTF-8 content)"
     except aiohttp.ClientError as exc:

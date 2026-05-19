@@ -58,9 +58,12 @@ class TestWebFetchValidation:
         result = await web_fetch.execute(url="not-a-url")
         assert result.startswith("Error:")
 
-    def test_executor_timeout_allows_internal_retries(self) -> None:
+    def test_executor_timeout_covers_worst_case_timeout(self) -> None:
         assert web_fetch.executor_timeout is not None
-        assert web_fetch.executor_timeout > 30
+        assert (
+            web_fetch.executor_timeout
+            >= _CFG.max_timeout * _CFG.retry_max_attempts
+        )
 
 
 class TestWebFetchExecution:
@@ -128,7 +131,7 @@ class TestWebFetchExecution:
         monkeypatch.setattr(module, "http_get_text_with_retry", _fake_http_get_text_with_retry)
 
         result = await web_fetch.execute(url="https://example.com", timeout=7)
-        assert result == "Error: request timed out after 7s"
+        assert result == "Error: request timed out"
 
     @pytest.mark.asyncio
     async def test_pdf_content_type_still_short_circuits(
