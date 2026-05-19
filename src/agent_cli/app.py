@@ -52,7 +52,7 @@ async def _async_main(args: argparse.Namespace) -> int:
     from agent_cli.approval_handler import CliApprovalHandler
     from agent_cli.commands.builtin import register_builtin, register_dynamic
     from agent_cli.commands.registry import CommandRegistry
-    from agent_cli.config import load_config
+    from agent_cli.config import attach_rich_logging, load_config
     from agent_cli.hooks import CliHooks
     from agent_cli.render.ui import print_exit_reminder, render_welcome
     from agent_cli.repl.loop import run_repl
@@ -64,6 +64,7 @@ async def _async_main(args: argparse.Namespace) -> int:
 
     theme = load_saved_theme()
     console = Console(theme=theme.rich)
+    attach_rich_logging(console)
     adapter = CliAdapter(console, theme, effort=config_result.effort)
     color_depth = (
         ColorDepth.DEPTH_1_BIT if console.no_color
