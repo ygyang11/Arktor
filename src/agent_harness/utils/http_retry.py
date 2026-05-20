@@ -220,6 +220,7 @@ async def _request_bytes_with_retry(
     json_body: object | None = None,
     retry: HttpRetryConfig = DEFAULT_HTTP_RETRY,
     max_bytes: int | None = None,
+    allow_redirects: bool = False,
 ) -> tuple[int, bytes]:
     import aiohttp  # noqa: PLC0415
 
@@ -237,6 +238,7 @@ async def _request_bytes_with_retry(
                 request_kwargs: dict[str, object] = {
                     "headers": hdrs,
                     "timeout": aiohttp.ClientTimeout(total=timeout),
+                    "allow_redirects": allow_redirects,
                 }
                 if json_body is not None:
                     request_kwargs["json"] = json_body
@@ -352,6 +354,7 @@ async def http_get_bytes_with_retry(
     timeout: int = 30,
     retry: HttpRetryConfig = DEFAULT_HTTP_RETRY,
     max_bytes: int | None = None,
+    allow_redirects: bool = False,
 ) -> tuple[int, bytes]:
     """GET bytes with retries on 429/5xx and transient transport failures."""
     return await _request_bytes_with_retry(
@@ -361,4 +364,5 @@ async def http_get_bytes_with_retry(
         timeout=timeout,
         retry=retry,
         max_bytes=max_bytes,
+        allow_redirects=allow_redirects,
     )

@@ -3,18 +3,23 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import mimetypes
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 from agent_harness import __version__ as _HARNESS_VERSION
 from agent_harness.core.errors import HttpResponseTooLargeError
+from agent_harness.core.message import ToolOutput
 from agent_harness.tool.decorator import tool
+from agent_harness.utils.blob import make_attachment
 from agent_harness.utils.http_retry import (
     HttpRetryConfig,
     HttpTextResponse,
+    http_get_bytes_with_retry,
     http_get_text_with_retry,
 )
+from agent_harness.utils.media import is_image_mime, is_pdf_mime
 from agent_harness.utils.token_counter import truncate_text_by_tokens
 
 
@@ -46,9 +51,12 @@ class WebFetchConfig:
         "video/",
         "font/",
     })
-    # PDF detection: Content-Type values and URL suffixes
-    pdf_content_types: frozenset[str] = frozenset({"application/pdf"})
+    # PDF detection: URL suffixes (Content-Type uses is_pdf_mime).
     pdf_url_suffixes: frozenset[str] = frozenset({".pdf"})
+    # Image URL-suffix fallback (Content-Type uses is_image_mime).
+    image_url_suffixes: frozenset[str] = frozenset(
+        {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    )
 
 
 _CFG = WebFetchConfig()
@@ -171,13 +179,26 @@ def _is_binary_content_type(content_type: str) -> bool:
     return any(ct.startswith(prefix) for prefix in _CFG.binary_content_types)
 
 
-def _is_pdf(content_type: str, url: str) -> bool:
+def _pdf_mime(content_type: str, url: str) -> str | None:
     ct = content_type.lower().split(";")[0].strip()
-    if ct in _CFG.pdf_content_types:
-        return True
-    # Fallback: check URL path suffix (handles octet-stream or missing Content-Type)
+    if is_pdf_mime(ct):
+        return ct
     path = urlparse(url).path.lower()
-    return any(path.endswith(suffix) for suffix in _CFG.pdf_url_suffixes)
+    if any(path.endswith(s) for s in _CFG.pdf_url_suffixes):
+        return "application/pdf"
+    return None
+
+
+def _image_mime(content_type: str, url: str) -> str | None:
+    ct = content_type.lower().split(";")[0].strip()
+    if is_image_mime(ct):
+        return ct
+    path = urlparse(url).path.lower()
+    if any(path.endswith(s) for s in _CFG.image_url_suffixes):
+        guessed, _ = mimetypes.guess_type(path)
+        if guessed and is_image_mime(guessed):
+            return guessed
+    return None
 
 
 def _format_response(body: str, content_type: str) -> str:
@@ -208,7 +229,7 @@ def _retry_policy() -> HttpRetryConfig:
 
 
 @tool(approval_resource_key="url", executor_timeout=_EXECUTOR_TIMEOUT)
-async def web_fetch(url: str, timeout: int = 30) -> str:
+async def web_fetch(url: str, timeout: int = 30) -> str | ToolOutput:
     """Fetch content from a URL and return readable text.
 
     Fetches the given URL via GET. HTML pages are converted to plain
@@ -290,12 +311,37 @@ async def web_fetch(url: str, timeout: int = 30) -> str:
             return f"Error: HTTP {response.status} for {current}"
 
         content_type = response.headers.get("Content-Type", "")
+        
+        pdf_mime = _pdf_mime(content_type, current)
+        img_mime = None if pdf_mime else _image_mime(content_type, current)
 
-        if _is_pdf(content_type, current):
-            return (
-                "Error: URL is a PDF document. "
-                "Use `pdf_parser` tool to extract text from this PDF "
-                "if needed and the tool is available."
+        if pdf_mime or img_mime:
+            status, body = await http_get_bytes_with_retry(
+                current,
+                headers=headers,
+                timeout=timeout,
+                retry=_retry_policy(),
+                max_bytes=_CFG.max_response_bytes,
+                allow_redirects=False,
+            )
+            if status >= 400:
+                return f"Error: HTTP {status} for {current}"
+            mime = pdf_mime or img_mime
+            assert mime is not None
+            basename = unquote(urlparse(current).path).rsplit("/", 1)[-1]
+            name: str | None
+            if pdf_mime:
+                name = basename or "document.pdf"
+                kind = "PDF"
+            else:
+                name = basename or None
+                kind = "image"
+            return ToolOutput(
+                content=(
+                    f"Fetched {kind} from {current}; the {kind} is provided "
+                    f"as an attachment in the following message."
+                ),
+                attachments=[make_attachment(body, mime, name)],
             )
 
         if _is_binary_content_type(content_type):

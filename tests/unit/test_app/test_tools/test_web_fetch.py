@@ -12,8 +12,9 @@ from agent_app.tools.web.web_fetch import (
     _extract_from_html,
     _extract_text_from_html,
     _format_response,
+    _image_mime,
     _is_binary_content_type,
-    _is_pdf,
+    _pdf_mime,
     _reject_internal_host,
     _validate_url,
     web_fetch,
@@ -134,20 +135,20 @@ class TestWebFetchExecution:
         assert result == "Error: request timed out"
 
     @pytest.mark.asyncio
-    async def test_pdf_content_type_still_short_circuits(
+    async def test_pdf_content_type_returns_native_attachment(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
     ) -> None:
+        from agent_harness.core.message import ToolOutput
+        from agent_harness.utils import blob as blob_module
+
+        monkeypatch.setattr(blob_module, "_BLOB_DIR", tmp_path / "blobs")
         module = sys.modules["agent_app.tools.web.web_fetch"]
 
-        async def _fake_http_get_text_with_retry(
-            url: str,
-            *,
-            headers: dict[str, str] | None = None,
-            timeout: int = 30,
-            retry: HttpRetryConfig,
-            max_bytes: int | None = None,
-            allow_redirects: bool = True,
+        async def _fake_text(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=True,
         ) -> HttpTextResponse:
             _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
             return HttpTextResponse(
@@ -156,10 +157,217 @@ class TestWebFetchExecution:
                 body="ignored",
             )
 
-        monkeypatch.setattr(module, "http_get_text_with_retry", _fake_http_get_text_with_retry)
+        async def _fake_bytes(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=False,
+        ):
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return 200, b"%PDF-1.4 fake pdf bytes"
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake_text)
+        monkeypatch.setattr(module, "http_get_bytes_with_retry", _fake_bytes)
 
         result = await web_fetch.execute(url="https://example.com/file.pdf")
-        assert "URL is a PDF document" in result
+        assert isinstance(result, ToolOutput)
+        assert result.attachments is not None
+        assert len(result.attachments) == 1
+        assert result.attachments[0].mime == "application/pdf"
+        assert result.attachments[0].filename == "file.pdf"
+        assert "Fetched PDF" in result.content
+        assert "attachment" in result.content.lower()
+
+    @pytest.mark.asyncio
+    async def test_image_content_type_returns_native_attachment(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        from agent_harness.core.message import ToolOutput
+        from agent_harness.utils import blob as blob_module
+
+        monkeypatch.setattr(blob_module, "_BLOB_DIR", tmp_path / "blobs")
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+
+        async def _fake_text(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=True,
+        ) -> HttpTextResponse:
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return HttpTextResponse(
+                status=200,
+                headers={"Content-Type": "image/png"},
+                body="",
+            )
+
+        async def _fake_bytes(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=False,
+        ):
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return 200, b"\x89PNG\r\n\x1a\n" + b"X" * 16
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake_text)
+        monkeypatch.setattr(module, "http_get_bytes_with_retry", _fake_bytes)
+
+        result = await web_fetch.execute(url="https://example.com/x.png")
+        assert isinstance(result, ToolOutput)
+        assert result.attachments is not None
+        assert result.attachments[0].mime == "image/png"
+        assert "Fetched image" in result.content
+
+    @pytest.mark.asyncio
+    async def test_octet_stream_pdf_suffix_fallback(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        from agent_harness.core.message import ToolOutput
+        from agent_harness.utils import blob as blob_module
+
+        monkeypatch.setattr(blob_module, "_BLOB_DIR", tmp_path / "blobs")
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+
+        async def _fake_text(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=True,
+        ) -> HttpTextResponse:
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return HttpTextResponse(
+                status=200,
+                headers={"Content-Type": "application/octet-stream"},
+                body="",
+            )
+
+        async def _fake_bytes(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=False,
+        ):
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return 200, b"%PDF-1.4 fake"
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake_text)
+        monkeypatch.setattr(module, "http_get_bytes_with_retry", _fake_bytes)
+
+        result = await web_fetch.execute(url="https://example.com/cdn/doc.pdf")
+        assert isinstance(result, ToolOutput)
+        assert result.attachments is not None
+        assert result.attachments[0].mime == "application/pdf"
+
+    @pytest.mark.asyncio
+    async def test_attachment_filename_sanitized_from_url(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        from agent_harness.core.message import ToolOutput
+        from agent_harness.utils import blob as blob_module
+
+        monkeypatch.setattr(blob_module, "_BLOB_DIR", tmp_path / "blobs")
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+
+        async def _fake_text(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=True,
+        ) -> HttpTextResponse:
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return HttpTextResponse(
+                status=200,
+                headers={"Content-Type": "application/pdf"},
+                body="",
+            )
+
+        async def _fake_bytes(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=False,
+        ):
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return 200, b"%PDF"
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake_text)
+        monkeypatch.setattr(module, "http_get_bytes_with_retry", _fake_bytes)
+
+        result = await web_fetch.execute(
+            url="https://example.com/path/photo%20file.pdf?token=secret#frag",
+        )
+        assert isinstance(result, ToolOutput)
+        assert result.attachments is not None
+        # Filename has query/fragment stripped and %20 decoded.
+        assert result.attachments[0].filename == "photo file.pdf"
+
+    @pytest.mark.asyncio
+    async def test_attachment_filename_falls_back_when_empty(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        from agent_harness.core.message import ToolOutput
+        from agent_harness.utils import blob as blob_module
+
+        monkeypatch.setattr(blob_module, "_BLOB_DIR", tmp_path / "blobs")
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+
+        async def _fake_text(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=True,
+        ) -> HttpTextResponse:
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return HttpTextResponse(
+                status=200,
+                headers={"Content-Type": "application/pdf"},
+                body="",
+            )
+
+        async def _fake_bytes(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=False,
+        ):
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return 200, b"%PDF"
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake_text)
+        monkeypatch.setattr(module, "http_get_bytes_with_retry", _fake_bytes)
+
+        # URL with no path/basename → fallback to "document.pdf".
+        result = await web_fetch.execute(url="https://example.com/?q=x")
+        assert isinstance(result, ToolOutput)
+        assert result.attachments is not None
+        assert result.attachments[0].filename == "document.pdf"
+
+    @pytest.mark.asyncio
+    async def test_bytes_get_passes_no_redirects(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        from agent_harness.utils import blob as blob_module
+
+        monkeypatch.setattr(blob_module, "_BLOB_DIR", tmp_path / "blobs")
+        module = sys.modules["agent_app.tools.web.web_fetch"]
+        captured: dict[str, object] = {}
+
+        async def _fake_text(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=True,
+        ) -> HttpTextResponse:
+            _ = (url, headers, timeout, retry, max_bytes, allow_redirects)
+            return HttpTextResponse(
+                status=200,
+                headers={"Content-Type": "application/pdf"},
+                body="",
+            )
+
+        async def _fake_bytes(
+            url: str, *, headers=None, timeout=30, retry=None,
+            max_bytes=None, allow_redirects=False,
+        ):
+            captured["allow_redirects"] = allow_redirects
+            return 200, b"%PDF"
+
+        monkeypatch.setattr(module, "http_get_text_with_retry", _fake_text)
+        monkeypatch.setattr(module, "http_get_bytes_with_retry", _fake_bytes)
+
+        await web_fetch.execute(url="https://example.com/file.pdf")
+        assert captured["allow_redirects"] is False
 
 
 class TestTextExtractor:
@@ -532,28 +740,28 @@ class TestBinaryContentTypeDetection:
 
 class TestPdfDetection:
     def test_pdf_content_type(self) -> None:
-        assert _is_pdf("application/pdf", "https://example.com/report") is True
+        assert (_pdf_mime("application/pdf", "https://example.com/report") is not None) is True
 
     def test_pdf_content_type_with_charset(self) -> None:
-        assert _is_pdf("application/pdf; charset=utf-8", "https://example.com/r") is True
+        assert (_pdf_mime("application/pdf; charset=utf-8", "https://example.com/r") is not None) is True
 
     def test_pdf_url_suffix(self) -> None:
-        assert _is_pdf("application/octet-stream", "https://example.com/report.pdf") is True
+        assert (_pdf_mime("application/octet-stream", "https://example.com/report.pdf") is not None) is True
 
     def test_pdf_url_suffix_case_insensitive(self) -> None:
-        assert _is_pdf("application/octet-stream", "https://example.com/Report.PDF") is True
+        assert (_pdf_mime("application/octet-stream", "https://example.com/Report.PDF") is not None) is True
 
     def test_pdf_url_suffix_with_query_params(self) -> None:
-        assert _is_pdf("", "https://cdn.example.com/file.pdf?token=abc") is True
+        assert (_pdf_mime("", "https://cdn.example.com/file.pdf?token=abc") is not None) is True
 
     def test_pdf_empty_content_type_with_pdf_suffix(self) -> None:
-        assert _is_pdf("", "https://example.com/doc.pdf") is True
+        assert (_pdf_mime("", "https://example.com/doc.pdf") is not None) is True
 
     def test_html_not_pdf(self) -> None:
-        assert _is_pdf("text/html", "https://example.com/page") is False
+        assert (_pdf_mime("text/html", "https://example.com/page") is not None) is False
 
     def test_octet_stream_without_pdf_suffix(self) -> None:
-        assert _is_pdf("application/octet-stream", "https://example.com/data.bin") is False
+        assert (_pdf_mime("application/octet-stream", "https://example.com/data.bin") is not None) is False
 
     def test_json_not_pdf(self) -> None:
-        assert _is_pdf("application/json", "https://api.example.com/data") is False
+        assert (_pdf_mime("application/json", "https://api.example.com/data") is not None) is False

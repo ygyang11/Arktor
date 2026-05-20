@@ -79,6 +79,7 @@ class _FakeResponse:
 class _FakeSession:
     def __init__(self, response: _FakeResponse) -> None:
         self._response = response
+        self.last_kwargs: dict[str, object] = {}
 
     async def __aenter__(self) -> _FakeSession:
         return self
@@ -87,7 +88,8 @@ class _FakeSession:
         return False
 
     def request(self, method: str, url: str, **kwargs: object) -> _FakeResponse:
-        _ = (method, url, kwargs)
+        _ = (method, url)
+        self.last_kwargs = kwargs
         return self._response
 
 
@@ -99,9 +101,11 @@ class _FakeAiohttpModule:
 
     def __init__(self, response: _FakeResponse) -> None:
         self._response = response
+        self.last_session: _FakeSession | None = None
 
     def ClientSession(self) -> _FakeSession:  # noqa: N802
-        return _FakeSession(self._response)
+        self.last_session = _FakeSession(self._response)
+        return self.last_session
 
 
 class TestHttpTextRetry:
@@ -254,3 +258,31 @@ class TestReadCapped:
             await http_retry_module.http_get_text_with_retry(
                 "https://example.com", max_bytes=1024
             )
+
+
+class TestBytesAllowRedirects:
+    @pytest.mark.asyncio
+    async def test_default_allow_redirects_is_false(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        resp = _FakeResponse(status=200, body="", headers={})
+        module = _FakeAiohttpModule(resp)
+        monkeypatch.setitem(sys.modules, "aiohttp", module)
+        await http_retry_module.http_get_bytes_with_retry("https://example.com")
+        assert module.last_session is not None
+        assert module.last_session.last_kwargs.get("allow_redirects") is False
+
+    @pytest.mark.asyncio
+    async def test_allow_redirects_true_threaded(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        resp = _FakeResponse(status=200, body="", headers={})
+        module = _FakeAiohttpModule(resp)
+        monkeypatch.setitem(sys.modules, "aiohttp", module)
+        await http_retry_module.http_get_bytes_with_retry(
+            "https://example.com", allow_redirects=True,
+        )
+        assert module.last_session is not None
+        assert module.last_session.last_kwargs.get("allow_redirects") is True
