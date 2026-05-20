@@ -1,4 +1,7 @@
+import asyncio
+import inspect
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 from prompt_toolkit.buffer import Buffer, CompletionState
@@ -8,6 +11,12 @@ from prompt_toolkit.keys import Keys
 
 from agent_cli.repl.keybindings import build_keybindings
 from agent_cli.repl.paste import CHAR_THRESHOLD, PasteStore
+
+
+def _run_handler(handler: Any, event: Any) -> None:
+    result = handler(event)
+    if inspect.iscoroutine(result):
+        asyncio.run(result)
 
 
 def _kb():
@@ -101,7 +110,7 @@ def test_bracketed_paste_below_threshold_inserts_verbatim() -> None:
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
-    handler(_bp_event("hello", buf))
+    _run_handler(handler, _bp_event("hello", buf))
 
     assert buf.text == "hello"
     assert store._contents == {}
@@ -114,7 +123,7 @@ def test_bracketed_paste_above_char_threshold_inserts_placeholder() -> None:
     buf = Buffer()
     big = "x" * (CHAR_THRESHOLD + 1)
 
-    handler(_bp_event(big, buf))
+    _run_handler(handler, _bp_event(big, buf))
 
     assert buf.text == "[Pasted text #1]"
     assert store._contents[1] == big
@@ -127,7 +136,7 @@ def test_bracketed_paste_above_line_threshold_inserts_placeholder() -> None:
     buf = Buffer()
     text = "a\nb\nc\nd"
 
-    handler(_bp_event(text, buf))
+    _run_handler(handler, _bp_event(text, buf))
 
     assert buf.text == "[Pasted text #1 +3 lines]"
     assert store._contents[1] == text
@@ -139,7 +148,7 @@ def test_bracketed_paste_normalizes_crlf() -> None:
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
-    handler(_bp_event("a\r\nb\r\nc", buf))
+    _run_handler(handler, _bp_event("a\r\nb\r\nc", buf))
 
     assert buf.text == "a\nb\nc"
     assert store._contents == {}
@@ -151,7 +160,7 @@ def test_bracketed_paste_normalizes_lone_cr() -> None:
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
-    handler(_bp_event("a\rb\rc", buf))
+    _run_handler(handler, _bp_event("a\rb\rc", buf))
 
     assert buf.text == "a\nb\nc"
 
@@ -163,7 +172,7 @@ def test_bracketed_paste_registers_normalized_for_threshold() -> None:
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
-    handler(_bp_event("\r\n" * 4, buf))
+    _run_handler(handler, _bp_event("\r\n" * 4, buf))
 
     assert buf.text.startswith("[Pasted text #1")
     assert store._contents[1] == "\n" * 4
@@ -175,7 +184,7 @@ def test_bracketed_paste_empty_data_no_op() -> None:
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
-    handler(_bp_event("", buf))
+    _run_handler(handler, _bp_event("", buf))
 
     assert buf.text == ""
     assert store._contents == {}
@@ -187,7 +196,7 @@ def test_bracketed_paste_none_data_no_op() -> None:
     handler = _find_handler(kb, Keys.BracketedPaste)
     buf = Buffer()
 
-    handler(SimpleNamespace(data=None, current_buffer=buf))
+    _run_handler(handler, SimpleNamespace(data=None, current_buffer=buf))
 
     assert buf.text == ""
 

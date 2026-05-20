@@ -5,6 +5,7 @@ import pytest
 
 from agent_cli.adapter import CliAdapter
 from agent_cli.render import status_lines as status_lines_mod
+from agent_cli.render.tool_display import attachment_summary
 from agent_cli.theme import FLEXOKI_DARK
 from agent_harness.core.errors import LLMConnectionError
 from agent_harness.llm.types import LLMRetryInfo
@@ -438,7 +439,7 @@ async def test_render_attachments_header_and_rows() -> None:
     a, _ = _real_console_adapter()
     pair = _attachment_pair("read_file", file_path="src/foo.py")
 
-    await a.render_attachments([pair])
+    await a.render_attachments([attachment_summary(*pair)])
     out = a.console.file.getvalue()
 
     assert "Loaded into context" in out
@@ -453,7 +454,7 @@ async def test_render_attachments_error_styling() -> None:
     tc.name = "read_file"
     tr = MagicMock(tool_call_id="t1", content="Error: not found", is_error=False)
 
-    await a.render_attachments([(tc, tr)])
+    await a.render_attachments([attachment_summary(tc, tr)])
     out = a.console.file.getvalue()
 
     assert "Error" in out
@@ -465,7 +466,7 @@ async def test_render_attachments_multiple_rows() -> None:
     p1 = _attachment_pair("read_file", file_path="a.py")
     p2 = _attachment_pair("list_dir", path="src/")
 
-    await a.render_attachments([p1, p2])
+    await a.render_attachments([attachment_summary(*p1), attachment_summary(*p2)])
     out = a.console.file.getvalue()
 
     assert "a.py" in out
@@ -479,7 +480,7 @@ async def test_render_attachments_path_with_brackets_safe() -> None:
     tc.name = "read_file"
     tr = MagicMock(tool_call_id="t1", content="x\ny", is_error=False)
 
-    await a.render_attachments([(tc, tr)])
+    await a.render_attachments([attachment_summary(tc, tr)])
     out = a.console.file.getvalue()
 
     assert "[gen]" in out
@@ -491,7 +492,7 @@ async def test_render_attachments_multibyte_path_safe() -> None:
     tc.name = "read_file"
     tr = MagicMock(tool_call_id="t1", content="x", is_error=False)
 
-    await a.render_attachments([(tc, tr)])
+    await a.render_attachments([attachment_summary(tc, tr)])
     out = a.console.file.getvalue()
 
     assert "中文/foo.py" in out

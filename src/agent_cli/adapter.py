@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Literal
+from typing import Any, Literal
 
 from rich.console import Console, RenderableType
 from rich.markup import escape as rich_escape
@@ -170,16 +170,12 @@ class CliAdapter:
 
     async def render_attachments(
         self,
-        items: list[tuple[ToolCall, ToolResult]],
+        summaries: list[dict[str, Any]],
     ) -> None:
-        if not items:
+        if not summaries:
             return
-        from agent_cli.render.tool_display import (  # noqa: PLC0415
-            attachment_summary,
-            format_attachments,
-        )
+        from agent_cli.render.tool_display import format_attachments  # noqa: PLC0415
 
-        summaries = [attachment_summary(tc, tr) for tc, tr in items]
         async with self._console_lock:
             self._thinking_line.clear_no_lock()
             self._subagent_line.clear_no_lock()

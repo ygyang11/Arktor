@@ -76,19 +76,19 @@ class TestRegisterThresholds:
 
 class TestExpand:
     def test_empty_string_returns_empty_and_no_missing(self) -> None:
-        text, missing = PasteStore().expand("")
+        text, missing, _ = PasteStore().resolve("")
         assert text == ""
         assert missing == []
 
     def test_no_placeholder(self) -> None:
-        text, missing = PasteStore().expand("hello world")
+        text, missing, _ = PasteStore().resolve("hello world")
         assert text == "hello world"
         assert missing == []
 
     def test_single_known(self) -> None:
         store = PasteStore()
         store._contents[1] = "ORIGINAL"
-        text, missing = store.expand("see [Pasted text #1 +2 lines] here")
+        text, missing, _ = store.resolve("see [Pasted text #1 +2 lines] here")
         assert text == "see ORIGINAL here"
         assert missing == []
 
@@ -96,19 +96,19 @@ class TestExpand:
         store = PasteStore()
         store._contents[1] = "AAA"
         store._contents[2] = "BBB"
-        text, missing = store.expand(
+        text, missing, _ = store.resolve(
             "first [Pasted text #1] mid [Pasted text #2] end",
         )
         assert text == "first AAA mid BBB end"
         assert missing == []
 
     def test_unknown_id_rewrites_unavailable(self) -> None:
-        text, missing = PasteStore().expand("x [Pasted text #5] y")
+        text, missing, _ = PasteStore().resolve("x [Pasted text #5] y")
         assert text == "x [Pasted text unavailable] y"
         assert missing == [5]
 
     def test_dedupes_missing_ids(self) -> None:
-        text, missing = PasteStore().expand(
+        text, missing, _ = PasteStore().resolve(
             "[Pasted text #7] and [Pasted text #7]",
         )
         assert missing == [7]
@@ -117,7 +117,7 @@ class TestExpand:
     def test_mixed_known_unknown_preserves_source_order(self) -> None:
         store = PasteStore()
         store._contents[1] = "K"
-        text, missing = store.expand(
+        text, missing, _ = store.resolve(
             "[Pasted text #1] [Pasted text #9] [Pasted text #7]",
         )
         assert text == "K [Pasted text unavailable] [Pasted text unavailable]"
@@ -125,7 +125,7 @@ class TestExpand:
 
     def test_interleaved_missing_preserves_source_order(self) -> None:
         # Regression: 单遍反向 + seen + reverse() 会得到 [7, 9]，源顺序应是 [9, 7]
-        text, missing = PasteStore().expand(
+        text, missing, _ = PasteStore().resolve(
             "[Pasted text #9] x [Pasted text #7] y [Pasted text #9]",
         )
         assert missing == [9, 7]

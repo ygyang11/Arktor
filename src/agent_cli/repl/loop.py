@@ -50,7 +50,7 @@ from agent_cli.runtime.sigint import bind_work
 from agent_cli.render.replay import render_post_switch
 from agent_cli.theme import APPROVAL, COMPRESSION, CliTheme
 from agent_harness.agent.base import BaseAgent
-from agent_harness.core.message import Message, Role
+from agent_harness.core.message import Attachment, Message, Role
 from agent_harness.session.base import BaseSession
 
 _ToolbarText = Callable[[], HTML]
@@ -218,16 +218,19 @@ async def run_repl(
                 # Expand paste placeholders before strip / dispatch so slash
                 # commands receive real argv and whitespace-only pastes are
                 # caught by the empty-check.
-                raw, expired = paste_store.expand(raw)
+                raw, expired, pending_atts = paste_store.resolve(raw)
                 if expired:
                     console.print()
                     await adapter.print_inline(format_expired_notice(expired))
                 # strip() only for the empty-check; pass raw to preserve
                 # indentation / multiline structure for pasted code blocks.
-                if raw.strip():
+                # Attachments-only turns (empty raw + pending media) still
+                # dispatch so the user message carries the media.
+                if raw.strip() or pending_atts:
                     if await _handle_line(
                         raw, agent, console, registry, session_id, save, adapter, handler,
                         shell_state, pt_session, cli_hooks, session_backend, theme,
+                        pending_atts,
                     ):
                         break
                 continue
@@ -301,6 +304,7 @@ async def _handle_line(
     cli_hooks: CliHooks,
     session_backend: BaseSession,
     theme: CliTheme,
+    pending_atts: list[Attachment] | None = None,
 ) -> bool:
     console.print()
 
@@ -372,12 +376,14 @@ async def _handle_line(
             await _run(
                 agent, result.agent_input, session_backend.session_id,
                 console, adapter, cli_hooks, session_backend, save,
+                pending_atts,
             )
         return False
 
     await _run(
         agent, line, session_id, console, adapter,
         cli_hooks, session_backend, save,
+        pending_atts,
     )
     return False
 
@@ -391,6 +397,7 @@ async def _run(
     cli_hooks: CliHooks,
     session_backend: BaseSession,
     save: SaveSession,
+    pending_atts: list[Attachment] | None = None,
 ) -> None:
     cancelled = False
     adapter.begin_run()
@@ -402,6 +409,8 @@ async def _run(
             if msg.role != Role.USER:
                 return
             await expand_mentions(a, adapter, t)
+            if pending_atts:
+                msg.attachments = list(msg.attachments or []) + pending_atts
 
     turn_ctx = take_snapshot(agent)
     cli_hooks.begin_turn(turn_ctx)

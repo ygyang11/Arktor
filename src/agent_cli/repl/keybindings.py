@@ -2,6 +2,7 @@
 BracketedPaste, Backspace."""
 from __future__ import annotations
 
+import asyncio
 import time
 
 from prompt_toolkit.application import run_in_terminal
@@ -10,9 +11,16 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.keys import Keys
 
-from agent_cli.repl.paste import PasteStore, trailing_placeholder_length
-from agent_cli.runtime import plan_mode, session as sess_rt
+from agent_cli.repl.paste import (
+    PasteStore,
+    path_to_attachment,
+    read_clipboard_image,
+    trailing_placeholder_length,
+)
+from agent_cli.runtime import plan_mode
+from agent_cli.runtime import session as sess_rt
 from agent_harness.agent.base import BaseAgent
+from agent_harness.utils.blob import make_attachment
 
 _CTRL_C_DOUBLE_WINDOW_S = 2.0
 
@@ -33,15 +41,22 @@ def build_keybindings(
     kb = KeyBindings()
 
     @kb.add(Keys.BracketedPaste)
-    def _(event: KeyPressEvent) -> None:
-        # Preserve prompt_toolkit default \r\n/\r → \n normalization before
-        # register, so threshold check and stored content use unified \n.
-        data = event.data or ""
-        if not data:
+    async def _(event: KeyPressEvent) -> None:
+        data = (event.data or "").replace("\r\n", "\n").replace("\r", "\n")
+        if data:
+            att = path_to_attachment(data)
+            if att is not None:
+                event.current_buffer.insert_text(paste_store.register_media(att))
+                return
+            ph = paste_store.register(data)
+            event.current_buffer.insert_text(ph if ph else data)
             return
-        data = data.replace("\r\n", "\n").replace("\r", "\n")
-        placeholder = paste_store.register(data)
-        event.current_buffer.insert_text(placeholder if placeholder else data)
+        img = await asyncio.to_thread(read_clipboard_image)
+        if img is not None:
+            mime, raw = img
+            event.current_buffer.insert_text(
+                paste_store.register_media(make_attachment(raw, mime)),
+            )
 
     def _backspace_atomic_placeholder(event: KeyPressEvent) -> None:
         # Filter excludes selection; default has_selection binding still runs.

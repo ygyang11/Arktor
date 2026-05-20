@@ -26,7 +26,7 @@ from agent_cli.theme import (
     TOOL_DONE,
 )
 from agent_harness.approval.types import ApprovalResult
-from agent_harness.core.message import ToolCall, ToolResult
+from agent_harness.core.message import Attachment, ToolCall, ToolResult
 
 RowStatus = Literal["running", "done", "error", "denied"]
 
@@ -137,7 +137,9 @@ def _args_preview(name: str, arguments: dict[str, object]) -> str:
     parts = []
     for v in values:
         flat = str(v).replace("\n", " ").replace("\r", " ").replace("\t", " ")
-        parts.append(_truncate(flat, 50))
+        if name == "terminal_tool":
+            flat = _truncate(flat, 60)
+        parts.append(flat)
     return ", ".join(parts)
 
 
@@ -319,20 +321,33 @@ def _summarize_result(tc: ToolCall, tr: ToolResult) -> str:
 
 
 def format_attachments(items: list[dict[str, Any]]) -> list[RenderableType]:
-    """Renderables for a ``@file`` mention expansion: a 'Loaded into context'
-    header followed by one continuation-glyph row per attachment, built from
-    the :func:`attachment_summary` dict shape."""
+    """Renderables for an attachment row: a 'Loaded into context' header
+    followed by one continuation-glyph row per attachment. Handles both the
+    text-tool shape (:func:`attachment_summary`) and the media shape
+    (:func:`media_attachment_summary`)."""
+    from agent_cli.render.tool_formatters import _human_size  # noqa: PLC0415
+
     rows: list[RenderableType] = []
     header = Text()
     header.append(f"{TOOL_DONE}  ", style="primary")
     header.append("Loaded into context", style="muted")
     rows.append(header)
     for it in items:
-        label = _DISPLAY_NAMES.get(it["tool_name"], it["tool_name"])
-        args = it["arguments"]
-        target = str(args.get("file_path") or args.get("path") or "")
         line = Text()
         line.append(f"{CONTINUATION}  ", style="muted")
+        if it.get("kind") == "media":
+            label = "PDF" if it.get("mime") == "application/pdf" else "Image"
+            target = str(it.get("filename") or it.get("mime") or "")
+            line.append(f"{label} ", style="muted")
+            line.append(target, style="muted bold")
+            size = it.get("size")
+            if isinstance(size, int) and size > 0:
+                line.append(f" ({_human_size(size)})", style="muted")
+            rows.append(line)
+            continue
+        label = _DISPLAY_NAMES.get(it["tool_name"], it["tool_name"])
+        args = it.get("arguments", {})
+        target = str(args.get("file_path") or args.get("path") or "")
         if it["is_error"]:
             line.append(f"{label} ", style="error")
             line.append(target, style="error bold")
@@ -348,6 +363,16 @@ def format_attachments(items: list[dict[str, Any]]) -> list[RenderableType]:
                 line.append(f" ({summary})", style="muted")
         rows.append(line)
     return rows
+
+
+def media_attachment_summary(att: Attachment) -> dict[str, Any]:
+    return {
+        "kind": "media",
+        "mime": att.mime,
+        "filename": att.filename,
+        "size": att.size,
+        "is_error": False,
+    }
 
 
 def attachment_summary(tc: ToolCall, tr: ToolResult) -> dict[str, Any]:

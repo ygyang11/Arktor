@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent_cli.repl.mentions import (
-    _build_calls,
+    AttachmentItem,
+    _build_items,
+    _CallSpec,
     _within,
     embed_attachments_into_last_user,
     expand_mentions,
@@ -62,129 +64,108 @@ class TestWithin:
         assert _within(other, tmp_path) is False
 
 
-class TestBuildCalls:
+class TestBuildItems:
     def _agent_with_tools(self, *names: str) -> Any:
         agent = MagicMock()
         registered = set(names)
         agent.tool_registry.has = lambda n: n in registered
         return agent
 
-    def test_skips_home_paths(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.chdir(tmp_path)
+    def test_skips_home_paths(self, tmp_path: Path) -> None:
         agent = self._agent_with_tools("read_file", "list_dir")
-
-        out = _build_calls(agent, ["~/anything"])
-
+        out = _build_items(agent, ["~/anything"], tmp_path.resolve())
         assert out == []
 
-    def test_skips_nonexistent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.chdir(tmp_path)
+    def test_skips_nonexistent(self, tmp_path: Path) -> None:
         agent = self._agent_with_tools("read_file", "list_dir")
-
-        out = _build_calls(agent, ["nope.py"])
-
+        out = _build_items(agent, ["nope.py"], tmp_path.resolve())
         assert out == []
 
-    def test_skips_outside_workspace(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def test_skips_outside_workspace(self, tmp_path: Path) -> None:
         outside = tmp_path.parent / "outside_xyz.py"
         outside.write_text("x")
         try:
-            monkeypatch.chdir(tmp_path)
             agent = self._agent_with_tools("read_file", "list_dir")
-
-            out = _build_calls(agent, [str(outside)])
-
+            out = _build_items(agent, [str(outside)], tmp_path.resolve())
             assert out == []
         finally:
             outside.unlink(missing_ok=True)
 
-    def test_file_routes_to_read_file_with_limit(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def test_file_routes_to_read_file_call_spec(self, tmp_path: Path) -> None:
         (tmp_path / "foo.py").write_text("x")
-        monkeypatch.chdir(tmp_path)
         agent = self._agent_with_tools("read_file", "list_dir")
+        out = _build_items(agent, ["foo.py"], tmp_path.resolve())
+        assert len(out) == 1
+        assert isinstance(out[0], _CallSpec)
+        assert out[0].name == "read_file"
+        assert out[0].args == {"file_path": "foo.py", "limit": 500}
 
-        out = _build_calls(agent, ["foo.py"])
-
-        assert out == [("read_file", {"file_path": "foo.py", "limit": 500})]
-
-    def test_dir_routes_to_list_dir(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def test_dir_routes_to_list_dir_call_spec(self, tmp_path: Path) -> None:
         (tmp_path / "src").mkdir()
-        monkeypatch.chdir(tmp_path)
         agent = self._agent_with_tools("read_file", "list_dir")
+        out = _build_items(agent, ["src"], tmp_path.resolve())
+        assert len(out) == 1
+        assert isinstance(out[0], _CallSpec)
+        assert out[0].name == "list_dir"
+        assert out[0].args == {"path": "src"}
 
-        out = _build_calls(agent, ["src"])
-
-        assert out == [("list_dir", {"path": "src"})]
-
-    def test_dedupe_canonicalizes(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def test_dedupe_canonicalizes(self, tmp_path: Path) -> None:
         (tmp_path / "foo.py").write_text("x")
-        monkeypatch.chdir(tmp_path)
         agent = self._agent_with_tools("read_file", "list_dir")
-
-        out = _build_calls(agent, ["foo.py", "./foo.py"])
-
+        out = _build_items(agent, ["foo.py", "./foo.py"], tmp_path.resolve())
         assert len(out) == 1
 
-    def test_skips_unknown_tool(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def test_skips_unknown_tool(self, tmp_path: Path) -> None:
         (tmp_path / "foo.py").write_text("x")
-        monkeypatch.chdir(tmp_path)
         agent = self._agent_with_tools()
-
-        out = _build_calls(agent, ["foo.py"])
-
+        out = _build_items(agent, ["foo.py"], tmp_path.resolve())
         assert out == []
 
-    def test_mixed_file_and_dir(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def test_mixed_file_and_dir(self, tmp_path: Path) -> None:
         (tmp_path / "foo.py").write_text("x")
         (tmp_path / "src").mkdir()
-        monkeypatch.chdir(tmp_path)
         agent = self._agent_with_tools("read_file", "list_dir")
-
-        out = _build_calls(agent, ["foo.py", "src"])
-
+        out = _build_items(agent, ["foo.py", "src"], tmp_path.resolve())
         assert len(out) == 2
-        assert out[0][0] == "read_file"
-        assert out[1][0] == "list_dir"
+        assert isinstance(out[0], _CallSpec) and out[0].name == "read_file"
+        assert isinstance(out[1], _CallSpec) and out[1].name == "list_dir"
+
+    def test_image_routes_to_media_attachment_item(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from agent_harness.utils import blob as blob_module
+
+        monkeypatch.setattr(blob_module, "_BLOB_DIR", tmp_path / "blobs")
+        png = tmp_path / "x.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+        agent = self._agent_with_tools("read_file", "list_dir")
+        out = _build_items(agent, ["x.png"], tmp_path.resolve())
+        assert len(out) == 1
+        assert isinstance(out[0], AttachmentItem)
+        assert out[0].media is not None
+        assert out[0].media.mime == "image/png"
+        assert out[0].text is None
 
     def test_completer_suggestion_resolves_to_same_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self, tmp_path: Path,
     ) -> None:
         from agent_cli.runtime.file_index import list_project_files
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "app.py").write_text("x")
         (tmp_path / "top.py").write_text("y")
-        monkeypatch.chdir(tmp_path)
-
         cache = list_project_files(tmp_path)
         agent = self._agent_with_tools("read_file", "list_dir")
-
         for entry in cache:
             if entry.endswith("/"):
                 continue
-            out = _build_calls(agent, [entry])
-            assert len(out) == 1, f"completer entry {entry!r} not resolvable"
-            _, args = out[0]
-            raw = args.get("file_path") or args.get("path")
+            out = _build_items(agent, [entry], tmp_path.resolve())
+            assert len(out) == 1
+            spec = out[0]
+            assert isinstance(spec, _CallSpec)
+            raw = spec.args.get("file_path") or spec.args.get("path")
             assert raw is not None
             tool_resolved = (
-                Path(raw) if Path(raw).is_absolute()
-                else tmp_path / raw
+                Path(raw) if Path(raw).is_absolute() else tmp_path / raw
             ).resolve()
             assert tool_resolved == (tmp_path / entry).resolve()
 
