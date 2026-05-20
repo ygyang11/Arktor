@@ -50,6 +50,7 @@ from agent_cli.runtime.sigint import bind_work
 from agent_cli.render.replay import render_post_switch
 from agent_cli.theme import APPROVAL, COMPRESSION, CliTheme
 from agent_harness.agent.base import BaseAgent
+from agent_harness.core.errors import LLMUnsupportedContentError
 from agent_harness.core.message import Attachment, Message, Role
 from agent_harness.session.base import BaseSession
 
@@ -400,6 +401,8 @@ async def _run(
     pending_atts: list[Attachment] | None = None,
 ) -> None:
     cancelled = False
+    media_rejected = False
+    media_rolled_back = False
     adapter.begin_run()
 
     cb = None
@@ -430,6 +433,12 @@ async def _run(
                 cancelled = True
                 if should_rollback(turn_ctx, get_messages(agent)):
                     await rollback(agent, turn_ctx, save)
+            except LLMUnsupportedContentError:
+                agent.context.state.reset()
+                media_rejected = True
+                if should_rollback(turn_ctx, get_messages(agent)):
+                    await rollback(agent, turn_ctx, save)
+                    media_rolled_back = True
             except Exception:
                 # hooks.on_error already rendered; just keep REPL alive.
                 pass
@@ -440,4 +449,18 @@ async def _run(
         await adapter.end_step()
     if cancelled:
         console.print("[dim]⎯⎯ Interrupted · what should the agent do differently? ⎯⎯[/dim]")
+        console.print()
+    if media_rejected:
+        if media_rolled_back:
+            console.print(
+                "[dim]⚠ Current model/provider can't read this media type. "
+                "Your message was reverted — resend without it or try another "
+                "model.[/dim]"
+            )
+        else:
+            console.print(
+                "[dim]⚠ Current model/provider can't read media the agent "
+                "fetched, partial recovery only — continue with text or /clear "
+                "to reset.[/dim]"
+            )
         console.print()

@@ -295,6 +295,13 @@ class TracingHooks(DefaultHooks):
             f"{'  ' * indent}{ICONS['summary']} Compressing context...\n"
         )
 
+    async def on_self_heal(self, agent_name: str, summary: str) -> None:
+        if _streaming_active.get(False):
+            print("", file=sys.stderr)
+            _streaming_active.set(False)
+        indent = self._depth
+        self._cwrite(f"{'  ' * indent}{ICONS['heal']} {summary}\n")
+
     async def on_compression_end(
         self,
         agent_name: str,

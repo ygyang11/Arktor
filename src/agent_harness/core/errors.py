@@ -57,6 +57,9 @@ class LLMContextLengthError(LLMError):
 class LLMResponseError(LLMError):
     """Failed to parse LLM response."""
 
+class LLMUnsupportedContentError(LLMError):
+    """Provider rejected a media content part (image/PDF/etc.)."""
+
 
 # --- Tool Errors ---
 

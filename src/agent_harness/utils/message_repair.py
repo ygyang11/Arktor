@@ -9,6 +9,39 @@ logger = logging.getLogger(__name__)
 
 _DANGLING_CONTENT = "[Tool result missing due to internal error]"
 
+_STRIPPED_NOTE = (
+    "<system-reminder>\n"
+    "Media attachment(s) here were stripped because the current model/provider "
+    "does not support this content type. The text above is preserved verbatim; "
+    "the binary media is no longer available to you.\n"
+    "</system-reminder>"
+)
+
+
+def strip_last_tool_run_attachments(messages: list[Message]) -> int:
+    """Reverse-scan ``messages`` for the most recent contiguous TOOL run when
+    the latest message is itself a TOOL, then clear every
+    ``tool_result.attachments`` in that run and append ``_STRIPPED_NOTE`` to
+    ``tool_result.content``. Mutates ``messages`` in place."""
+    if not messages or messages[-1].role != Role.TOOL:
+        return 0
+    end = len(messages) - 1
+    start = end
+    while start - 1 >= 0 and messages[start - 1].role == Role.TOOL:
+        start -= 1
+    n = 0
+    for j in range(start, end + 1):
+        tr = messages[j].tool_result
+        if tr and tr.attachments:
+            n += len(tr.attachments)
+            tr.attachments = None
+            base = (tr.content or "").rstrip()
+            tr.content = (
+                base + "\n\n" + _STRIPPED_NOTE
+                if base else _STRIPPED_NOTE
+            )
+    return n
+
 
 def patch_dangling_tool_calls(messages: list[Message]) -> list[Message]:
     """Ensure every tool_call has a matching tool_result, and vice versa.

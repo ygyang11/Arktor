@@ -202,3 +202,131 @@ class TestBaseLLMHooks:
             llm._image_block(a, "b64")
         with pytest.raises(NotImplementedError):
             llm._pdf_block(a, "b64")
+
+
+# -- Media rejection → LLMUnsupportedContentError mapping --
+
+
+import openai as _openai_sdk  # noqa: E402
+import anthropic as _anthropic_sdk  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from agent_harness.core.errors import (  # noqa: E402
+    LLMContextLengthError,
+    LLMError,
+    LLMUnsupportedContentError,
+)
+
+
+class _FakeOpenAIBadRequest(_openai_sdk.BadRequestError):
+    def __init__(self, msg: str) -> None:
+        Exception.__init__(self, msg)
+
+
+class _FakeAnthropicBadRequest(_anthropic_sdk.BadRequestError):
+    def __init__(self, msg: str) -> None:
+        Exception.__init__(self, msg)
+
+
+def _wire_openai(p: OpenAIProvider, raiser: Any) -> None:
+    p._additive_semantics = False
+    p._strip_reasoning_details = False
+
+    async def fake_create(**req: Any) -> Any:
+        return raiser()
+
+    p._build_request = lambda *a, **k: {"messages": []}  # type: ignore[method-assign]
+    p._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))
+    )
+    p._parse_response = lambda r: r  # type: ignore[method-assign]
+
+
+def _wire_anthropic(p: AnthropicProvider, raiser: Any) -> None:
+    async def fake_create(**req: Any) -> Any:
+        return raiser()
+
+    p._build_request = lambda *a, **k: {"messages": []}  # type: ignore[method-assign]
+    p._client = SimpleNamespace(messages=SimpleNamespace(create=fake_create))
+    p._parse_response = lambda r: r  # type: ignore[method-assign]
+
+
+class TestOpenAIMediaRejection:
+    async def test_media_phrase_raises_unsupported_content(self) -> None:
+        p = _openai()
+        msg = (
+            "the message at position 5 with role 'user' contains an "
+            "invalid part type: file"
+        )
+
+        def raiser() -> Any:
+            raise _FakeOpenAIBadRequest(msg)
+
+        _wire_openai(p, raiser)
+        with pytest.raises(LLMUnsupportedContentError):
+            await p.generate([])
+
+    async def test_deepseek_unknown_variant_image_url(self) -> None:
+        p = _openai()
+        msg = "messages[3]: unknown variant `image_url`, expected `text`"
+
+        def raiser() -> Any:
+            raise _FakeOpenAIBadRequest(msg)
+
+        _wire_openai(p, raiser)
+        with pytest.raises(LLMUnsupportedContentError):
+            await p.generate([])
+
+    async def test_context_length_still_raises_context_error(self) -> None:
+        p = _openai()
+
+        def raiser() -> Any:
+            raise _FakeOpenAIBadRequest("maximum context length exceeded")
+
+        _wire_openai(p, raiser)
+        with pytest.raises(LLMContextLengthError):
+            await p.generate([])
+
+    async def test_unrelated_400_still_llm_error(self) -> None:
+        p = _openai()
+
+        def raiser() -> Any:
+            raise _FakeOpenAIBadRequest("some unrelated 400")
+
+        _wire_openai(p, raiser)
+        with pytest.raises(LLMError) as ei:
+            await p.generate([])
+        assert not isinstance(ei.value, LLMUnsupportedContentError)
+
+
+class TestAnthropicMediaRejection:
+    async def test_media_phrase_raises_unsupported_content(self) -> None:
+        p = _anthropic()
+
+        def raiser() -> Any:
+            raise _FakeAnthropicBadRequest("Could not process image")
+
+        _wire_anthropic(p, raiser)
+        with pytest.raises(LLMUnsupportedContentError):
+            await p.generate([])
+
+    async def test_context_length_still_raises_context_error(self) -> None:
+        p = _anthropic()
+
+        def raiser() -> Any:
+            raise _FakeAnthropicBadRequest("prompt too long for context")
+
+        _wire_anthropic(p, raiser)
+        with pytest.raises(LLMContextLengthError):
+            await p.generate([])
+
+    async def test_unrelated_400_still_llm_error(self) -> None:
+        p = _anthropic()
+
+        def raiser() -> Any:
+            raise _FakeAnthropicBadRequest("invalid argument: temperature out of range")
+
+        _wire_anthropic(p, raiser)
+        with pytest.raises(LLMError) as ei:
+            await p.generate([])
+        assert not isinstance(ei.value, LLMUnsupportedContentError)

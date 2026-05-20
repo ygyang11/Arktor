@@ -31,7 +31,7 @@ from agent_harness.approval.rules import extract_resource
 from agent_harness.context.context import AgentContext
 from agent_harness.context.state import AgentState
 from agent_harness.core.config import HarnessConfig
-from agent_harness.core.errors import MaxStepsExceededError
+from agent_harness.core.errors import LLMUnsupportedContentError, MaxStepsExceededError
 from agent_harness.core.event import EventEmitter
 from agent_harness.core.message import Message, Role, ToolCall, ToolResult
 from agent_harness.hooks import DefaultHooks, resolve_hooks
@@ -42,6 +42,7 @@ from agent_harness.memory.short_term import CallSnapshot, SectionWeights
 from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.tool.executor import ToolExecutor
 from agent_harness.tool.registry import ToolRegistry
+from agent_harness.utils.message_repair import strip_last_tool_run_attachments
 from agent_harness.utils.token_counter import count_tokens
 
 logger = logging.getLogger(__name__)
@@ -436,7 +437,19 @@ class BaseAgent(ABC, EventEmitter):
                 await self.hooks.on_step_start(self.name, step_num)
                 await self.emit("agent.step.start", agent=self.name, step=step_num)
 
-                step_result = await self.step()
+                try:
+                    step_result = await self.step()
+                except LLMUnsupportedContentError:
+                    msgs = await self.context.short_term_memory.get_context_messages()
+                    stripped = strip_last_tool_run_attachments(msgs)
+                    if stripped == 0:
+                        raise
+                    await self.hooks.on_self_heal(
+                        self.name,
+                        f"Stripped {stripped} unsupported media attachment(s) "
+                        f"agent fetched.",
+                    )
+                    step_result = await self.step()
                 steps.append(step_result)
 
                 await self.hooks.on_step_end(self.name, step_num)

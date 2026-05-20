@@ -57,6 +57,10 @@ class CompositeHooks(DefaultHooks):
         for h in self._hooks:
             await h.on_error(agent_name, error)
 
+    async def on_self_heal(self, agent_name: str, summary: str) -> None:
+        for h in self._hooks:
+            await h.on_self_heal(agent_name, summary)
+
     async def on_pipeline_start(self, pipeline_name: str) -> None:
         for h in self._hooks:
             await h.on_pipeline_start(pipeline_name)

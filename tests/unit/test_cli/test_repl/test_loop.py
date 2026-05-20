@@ -814,3 +814,66 @@ async def test_run_end_turn_called_in_finally_after_cancel() -> None:
     )
 
     assert cli_hooks.turn is None
+
+
+# ---- LLMUnsupportedContentError handling ---------------------------------
+
+from agent_harness.core.errors import LLMUnsupportedContentError  # noqa: E402
+
+
+async def test_run_media_rejection_with_rollback() -> None:
+    """User-side rejection: nothing committed → rollback + reverted notice."""
+    agent = _agent_with_stm()
+    agent.context.state.reset = MagicMock()
+    agent.run = AsyncMock(side_effect=LLMUnsupportedContentError("invalid part type: file"))
+    adapter = MagicMock()
+    adapter.end_step = AsyncMock()
+    adapter.begin_run = MagicMock()
+    console = MagicMock()
+    save = AsyncMock()
+    cli_hooks = _make_real_cli_hooks()
+
+    await _run(
+        agent, "text", "sid", console, adapter,
+        cli_hooks, MagicMock(), save,
+    )
+
+    agent.context.state.reset.assert_called_once()
+    printed = "".join(
+        str(call.args[0]) if call.args else "" for call in console.print.call_args_list
+    )
+    assert "reverted" in printed
+    assert "/clear" not in printed
+
+
+async def test_run_media_rejection_without_rollback() -> None:
+    """Committed state → no rollback; partial-recovery notice with /clear."""
+    agent = _agent_with_stm()
+    agent.context.state.reset = MagicMock()
+    agent.run = AsyncMock(side_effect=LLMUnsupportedContentError("invalid part type: file"))
+    adapter = MagicMock()
+    adapter.end_step = AsyncMock()
+    adapter.begin_run = MagicMock()
+    console = MagicMock()
+    save = AsyncMock()
+    cli_hooks = _make_real_cli_hooks()
+
+    real_begin = cli_hooks.begin_turn
+
+    def begin(ctx: _TurnContext) -> None:
+        real_begin(ctx)
+        ctx.committed = True
+
+    cli_hooks.begin_turn = begin  # type: ignore[method-assign]
+
+    await _run(
+        agent, "text", "sid", console, adapter,
+        cli_hooks, MagicMock(), save,
+    )
+
+    agent.context.state.reset.assert_called_once()
+    printed = "".join(
+        str(call.args[0]) if call.args else "" for call in console.print.call_args_list
+    )
+    assert "partial recovery" in printed
+    assert "/clear" in printed

@@ -132,6 +132,26 @@ async def test_on_error_calls_end_step_first_then_prints() -> None:
     a.print_inline.assert_called_once()
 
 
+async def test_on_error_suppresses_render_for_media_rejection_but_still_ends_step() -> None:
+    from agent_harness.core.errors import LLMUnsupportedContentError
+
+    a = _mock_adapter()
+    hooks = CliHooks(a)
+    await hooks.on_error("cli", LLMUnsupportedContentError("invalid part type: file"))
+    a.end_step.assert_awaited_once()
+    a.print_inline.assert_not_called()
+
+
+async def test_on_self_heal_renders_muted_line() -> None:
+    a = _mock_adapter()
+    hooks = CliHooks(a)
+    await hooks.on_self_heal("cli", "Stripped 1 unsupported attachment.")
+    a.print_inline.assert_awaited_once()
+    rendered = a.print_inline.await_args_list[0].args[0]
+    assert "muted" in rendered
+    assert "Stripped 1" in rendered
+
+
 async def test_on_error_appends_traceback_when_debug_enabled() -> None:
     from agent_cli import hooks as hooks_mod
 

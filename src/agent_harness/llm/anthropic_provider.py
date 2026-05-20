@@ -15,11 +15,13 @@ from agent_harness.core.errors import (
     LLMContextLengthError,
     LLMError,
     LLMRateLimitError,
+    LLMUnsupportedContentError,
 )
 from agent_harness.core.message import Attachment, Message, MessageChunk, Role, ToolCall
 from agent_harness.llm.base import BaseLLM
 from agent_harness.llm.types import FinishReason, LLMResponse, StreamDelta, Usage
 from agent_harness.tool.base import ToolSchema
+from agent_harness.utils.media import is_media_rejection
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +66,12 @@ class AnthropicProvider(BaseLLM):
         except anthropic.AuthenticationError as e:
             raise LLMAuthenticationError(str(e)) from e
         except anthropic.BadRequestError as e:
-            if "context" in str(e).lower() or "too long" in str(e).lower():
-                raise LLMContextLengthError(str(e)) from e
-            raise LLMError(str(e)) from e
+            s = str(e)
+            if is_media_rejection(s):
+                raise LLMUnsupportedContentError(s) from e
+            if "context" in s.lower() or "too long" in s.lower():
+                raise LLMContextLengthError(s) from e
+            raise LLMError(s) from e
         except anthropic.APIConnectionError as e:
             raise LLMConnectionError(str(e)) from e
         except anthropic.APIError as e:
@@ -234,6 +239,11 @@ class AnthropicProvider(BaseLLM):
             raise LLMRateLimitError(str(e)) from e
         except anthropic.AuthenticationError as e:
             raise LLMAuthenticationError(str(e)) from e
+        except anthropic.BadRequestError as e:
+            s = str(e)
+            if is_media_rejection(s):
+                raise LLMUnsupportedContentError(s) from e
+            raise LLMError(s) from e
         except anthropic.APIConnectionError as e:
             raise LLMConnectionError(str(e)) from e
         except anthropic.APIError as e:

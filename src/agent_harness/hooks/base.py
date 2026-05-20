@@ -42,6 +42,9 @@ class DefaultHooks:
     async def on_error(self, agent_name: str, error: Exception) -> None:
         pass
 
+    async def on_self_heal(self, agent_name: str, summary: str) -> None:
+        pass
+
     async def on_pipeline_start(self, pipeline_name: str) -> None:
         pass
 

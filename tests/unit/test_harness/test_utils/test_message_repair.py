@@ -6,11 +6,21 @@ fixed, but that the patch NEVER corrupts, reorders, or drops normal messages.
 """
 from __future__ import annotations
 
-from agent_harness.core.message import Message, Role, ToolCall
+from agent_harness.core.message import Attachment, Message, Role, ToolCall
 from agent_harness.utils.message_repair import (
     _DANGLING_CONTENT,
+    _STRIPPED_NOTE,
     patch_dangling_tool_calls,
+    strip_last_tool_run_attachments,
 )
+
+
+def _att(filename: str = "x.png", mime: str = "image/png", size: int = 100) -> Attachment:
+    return Attachment(digest="a" * 64, mime=mime, size=size, filename=filename)
+
+
+def _tool_with_attachments(tc: ToolCall, content: str, atts: list[Attachment]) -> Message:
+    return Message.tool(tool_call_id=tc.id, content=content, attachments=atts)
 
 
 def _assistant_with_calls(*names: str) -> tuple[Message, list[ToolCall]]:
@@ -214,3 +224,97 @@ class TestMessageIntegrity:
         ]
         result = patch_dangling_tool_calls(msgs)
         assert result is msgs
+
+
+# -- strip_last_tool_run_attachments --
+
+
+class TestStripLastToolRunAttachments:
+    def test_empty_list(self) -> None:
+        msgs: list[Message] = []
+        assert strip_last_tool_run_attachments(msgs) == 0
+
+    def test_last_is_user_returns_zero(self) -> None:
+        ast, calls = _assistant_with_calls("web_fetch")
+        msgs = [
+            Message.user("fetch"),
+            ast,
+            _tool_with_attachments(calls[0], "ok", [_att()]),
+            Message.user("follow-up"),
+        ]
+        assert strip_last_tool_run_attachments(msgs) == 0
+        # Tool attachments must remain untouched
+        assert msgs[2].tool_result.attachments is not None
+        assert len(msgs[2].tool_result.attachments) == 1
+
+    def test_last_is_assistant_returns_zero(self) -> None:
+        ast1, calls1 = _assistant_with_calls("web_fetch")
+        msgs = [
+            ast1,
+            _tool_with_attachments(calls1[0], "ok", [_att()]),
+            Message.assistant("explained"),
+        ]
+        assert strip_last_tool_run_attachments(msgs) == 0
+        assert msgs[1].tool_result.attachments is not None
+
+    def test_single_tool_run_with_attachments(self) -> None:
+        ast, calls = _assistant_with_calls("web_fetch")
+        tool = _tool_with_attachments(
+            calls[0], "Downloaded PDF (108KB)", [_att("a.pdf", "application/pdf", 108)],
+        )
+        msgs = [Message.user("fetch"), ast, tool]
+        n = strip_last_tool_run_attachments(msgs)
+        assert n == 1
+        assert msgs[2].tool_result.attachments is None
+        assert msgs[2].tool_result.content.endswith(_STRIPPED_NOTE)
+        # Original content preserved
+        assert "Downloaded PDF (108KB)" in msgs[2].tool_result.content
+
+    def test_parallel_tool_run_aggregates(self) -> None:
+        ast, calls = _assistant_with_calls("a", "b", "c")
+        msgs = [
+            Message.user("hi"),
+            ast,
+            _tool_with_attachments(calls[0], "r0", [_att("x.png"), _att("y.png")]),
+            _tool_with_attachments(calls[1], "r1", [_att("z.pdf", "application/pdf")]),
+            Message.tool(tool_call_id=calls[2].id, content="r2"),
+        ]
+        n = strip_last_tool_run_attachments(msgs)
+        assert n == 3
+        assert msgs[2].tool_result.attachments is None
+        assert msgs[3].tool_result.attachments is None
+        # tool without attachments stays untouched
+        assert msgs[4].tool_result.content == "r2"
+        assert msgs[2].tool_result.content.endswith(_STRIPPED_NOTE)
+        assert msgs[3].tool_result.content.endswith(_STRIPPED_NOTE)
+
+    def test_only_strips_latest_run(self) -> None:
+        ast1, calls1 = _assistant_with_calls("a")
+        ast2, calls2 = _assistant_with_calls("b")
+        old_tool = _tool_with_attachments(calls1[0], "old", [_att("old.png")])
+        new_tool = _tool_with_attachments(calls2[0], "new", [_att("new.png")])
+        msgs = [Message.user("hi"), ast1, old_tool, ast2, new_tool]
+        n = strip_last_tool_run_attachments(msgs)
+        assert n == 1
+        # Old run untouched
+        assert msgs[2].tool_result.attachments is not None
+        assert msgs[2].tool_result.content == "old"
+        # New run stripped
+        assert msgs[4].tool_result.attachments is None
+        assert msgs[4].tool_result.content.endswith(_STRIPPED_NOTE)
+
+    def test_empty_content_gets_note_without_leading_blank(self) -> None:
+        ast, calls = _assistant_with_calls("a")
+        tool = _tool_with_attachments(calls[0], "", [_att()])
+        msgs = [ast, tool]
+        n = strip_last_tool_run_attachments(msgs)
+        assert n == 1
+        assert msgs[1].tool_result.content == _STRIPPED_NOTE
+
+    def test_idempotent_second_strip_returns_zero(self) -> None:
+        ast, calls = _assistant_with_calls("a")
+        tool = _tool_with_attachments(calls[0], "ok", [_att()])
+        msgs = [ast, tool]
+        assert strip_last_tool_run_attachments(msgs) == 1
+        assert strip_last_tool_run_attachments(msgs) == 0
+

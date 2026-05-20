@@ -25,4 +25,5 @@ ICONS: dict[str, str] = {
     "todo_active": "●",
     "todo_pending": "○",
     "subagent": "🤖",
+    "heal": "↻",
 }

@@ -16,11 +16,13 @@ from agent_harness.core.errors import (
     LLMError,
     LLMRateLimitError,
     LLMResponseError,
+    LLMUnsupportedContentError,
 )
 from agent_harness.core.message import Attachment, Message, MessageChunk, Role, ToolCall
 from agent_harness.llm.base import BaseLLM
 from agent_harness.llm.types import FinishReason, LLMResponse, StreamDelta, Usage
 from agent_harness.tool.base import ToolSchema
+from agent_harness.utils.media import is_media_rejection
 
 logger = logging.getLogger(__name__)
 
@@ -78,14 +80,17 @@ class OpenAIProvider(BaseLLM):
             except openai.AuthenticationError as e:
                 raise LLMAuthenticationError(str(e)) from e
             except openai.BadRequestError as e:
+                s = str(e)
+                if is_media_rejection(s):
+                    raise LLMUnsupportedContentError(s) from e
                 if not retried and _is_reasoning_details_rejection(e):
                     self._strip_reasoning_details = True
                     _normalize_reasoning_for_strict_input(request_kwargs)
                     retried = True
                     continue
-                if "context_length" in str(e).lower() or "maximum context" in str(e).lower():
-                    raise LLMContextLengthError(str(e)) from e
-                raise LLMError(str(e)) from e
+                if "context_length" in s.lower() or "maximum context" in s.lower():
+                    raise LLMContextLengthError(s) from e
+                raise LLMError(s) from e
             except openai.APIConnectionError as e:
                 raise LLMConnectionError(str(e)) from e
             except openai.APIError as e:
@@ -123,12 +128,15 @@ class OpenAIProvider(BaseLLM):
             except openai.AuthenticationError as e:
                 raise LLMAuthenticationError(str(e)) from e
             except openai.BadRequestError as e:
+                s = str(e)
+                if is_media_rejection(s):
+                    raise LLMUnsupportedContentError(s) from e
                 if not retried and _is_reasoning_details_rejection(e):
                     self._strip_reasoning_details = True
                     _normalize_reasoning_for_strict_input(request_kwargs)
                     retried = True
                     continue
-                raise LLMError(str(e)) from e
+                raise LLMError(s) from e
             except openai.APIConnectionError as e:
                 raise LLMConnectionError(str(e)) from e
             except openai.APIError as e:

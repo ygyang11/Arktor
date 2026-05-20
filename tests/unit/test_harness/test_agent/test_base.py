@@ -602,3 +602,136 @@ class TestExecuteToolsTwoPhase:
         assert len(tool_msgs) == 2
         assert tool_msgs[0].tool_result is not None
         assert tool_msgs[1].tool_result is not None
+
+
+class _SelfHealTracker(DefaultHooks):
+    def __init__(self) -> None:
+        self.heals: list[str] = []
+        self.errors: list[Exception] = []
+
+    async def on_self_heal(self, agent_name: str, summary: str) -> None:
+        self.heals.append(summary)
+
+    async def on_error(self, agent_name: str, error: Exception) -> None:
+        self.errors.append(error)
+
+
+class _RejectOnNthCallLLM(MockLLM):
+    """Raises LLMUnsupportedContentError on the N-th generate() invocation;
+    other calls fall through to the parent's pre-queued responses."""
+
+    def __init__(self, reject_at: int) -> None:
+        super().__init__()
+        self._reject_at = reject_at
+        self._calls = 0
+
+    async def generate(self, messages: list[Message], **kwargs: Any) -> Any:
+        self._calls += 1
+        if self._calls == self._reject_at:
+            from agent_harness.core.errors import LLMUnsupportedContentError
+            raise LLMUnsupportedContentError("invalid part type: file")
+        return await super().generate(messages, **kwargs)
+
+
+class _MediaReturningTool(MockTool):
+    """Mock tool that returns a ToolOutput carrying a PDF attachment."""
+
+    def __init__(self) -> None:
+        super().__init__(response="downloaded")
+
+    async def execute(self, **kwargs: Any) -> Any:
+        from agent_harness.core.message import Attachment, ToolOutput
+        att = Attachment(
+            digest="a" * 64, mime="application/pdf", size=1, filename="x.pdf",
+        )
+        return ToolOutput(content="Downloaded PDF (108KB)", attachments=[att])
+
+
+class TestMediaRejectionSelfHeal:
+    """Agent retries step once after stripping tool-side media attachments."""
+
+    @pytest.mark.asyncio
+    async def test_tool_side_strip_and_retry(self) -> None:
+        from agent_harness.agent.react import ReActAgent
+        from agent_harness.core.message import Role
+
+        # Step 1: tool_call (call 1) → tool runs, adds TOOL with attachments
+        # Step 2: LLM call rejects (call 2) → strip + retry
+        # Step 2 retry: text response (call 3)
+        llm = _RejectOnNthCallLLM(reject_at=2)
+        llm.add_tool_call_response("mock_tool", {"query": "fetch"})
+        llm.add_text_response("answered after recovery")
+
+        tracker = _SelfHealTracker()
+        tool = _MediaReturningTool()
+        agent = ReActAgent(
+            name="test", llm=llm, tools=[tool], system_prompt="", hooks=tracker,
+        )
+
+        result = await agent.run("fetch and describe")
+
+        assert result.output == "answered after recovery"
+        assert len(tracker.heals) == 1
+        assert "1 unsupported media attachment" in tracker.heals[0]
+        # Tool attachments cleared, note appended
+        tool_msgs = [
+            m for m in agent.context.short_term_memory._messages
+            if m.role == Role.TOOL
+        ]
+        assert tool_msgs[-1].tool_result.attachments is None
+        assert "<system-reminder>" in tool_msgs[-1].tool_result.content
+
+    @pytest.mark.asyncio
+    async def test_user_side_propagates_no_strip(self) -> None:
+        """First LLM call rejects with no prior tool messages — propagate."""
+        from agent_harness.core.errors import LLMUnsupportedContentError
+
+        llm = _RejectOnNthCallLLM(reject_at=1)
+        tracker = _SelfHealTracker()
+        agent = ConversationalAgent(
+            name="test", llm=llm, system_prompt="", hooks=tracker,
+        )
+
+        with pytest.raises(LLMUnsupportedContentError):
+            await agent.run("hello")
+
+        assert tracker.heals == []
+        assert len(tracker.errors) == 1
+        assert isinstance(tracker.errors[0], LLMUnsupportedContentError)
+
+    @pytest.mark.asyncio
+    async def test_persistent_rejection_after_strip_propagates(self) -> None:
+        """Second LLM call after strip also rejects → single retry only."""
+        from agent_harness.agent.react import ReActAgent
+        from agent_harness.core.errors import LLMUnsupportedContentError
+        from agent_harness.core.message import Role
+
+        class _AlwaysRejectAfterToolCall(MockLLM):
+            def __init__(self) -> None:
+                super().__init__()
+                self._calls = 0
+
+            async def generate(self, messages: list[Message], **kwargs: Any) -> Any:
+                self._calls += 1
+                if self._calls == 1:
+                    return await super().generate(messages, **kwargs)
+                raise LLMUnsupportedContentError("invalid part type: file")
+
+        llm = _AlwaysRejectAfterToolCall()
+        llm.add_tool_call_response("mock_tool", {"query": "fetch"})
+
+        tracker = _SelfHealTracker()
+        tool = _MediaReturningTool()
+        agent = ReActAgent(
+            name="test", llm=llm, tools=[tool], system_prompt="", hooks=tracker,
+        )
+
+        with pytest.raises(LLMUnsupportedContentError):
+            await agent.run("go")
+
+        assert len(tracker.heals) == 1
+        tool_msgs = [
+            m for m in agent.context.short_term_memory._messages
+            if m.role == Role.TOOL
+        ]
+        assert tool_msgs[-1].tool_result.attachments is None

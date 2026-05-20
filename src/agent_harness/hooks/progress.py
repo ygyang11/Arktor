@@ -51,6 +51,16 @@ class ProgressHooks(DefaultHooks):
             prefix = f"{yellow}⏺{reset2} " if self._tool_call_count == 1 else "  "
             self._write(f"{prefix}⚡ {bold}{tool_call.name}{reset}({args_preview})\n")
 
+    async def on_self_heal(self, agent_name: str, summary: str) -> None:
+        if _subagent_active.get(False):
+            return
+        if self._streaming:
+            self._output.write("\n")
+            self._output.flush()
+            self._streaming = False
+        dim, reset = self._c("dim"), self._c("reset")
+        self._write(f"  {ICONS['heal']} {dim}{summary}{reset}\n")
+
     async def on_compression_start(self, agent_name: str) -> None:
         if _subagent_active.get(False):
             return

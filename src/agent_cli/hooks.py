@@ -12,6 +12,7 @@ from agent_cli.render.status_lines import fmt_duration
 from agent_cli.runtime.session import _TurnContext
 from agent_cli.theme import COMPRESSION, SUBAGENT, SUBAGENT_DONE
 from agent_harness.approval.types import ApprovalRequest, ApprovalResult
+from agent_harness.core.errors import LLMUnsupportedContentError
 from agent_harness.core.message import ToolCall
 from agent_harness.hooks.base import DefaultHooks
 from agent_harness.hooks.progress import _subagent_active
@@ -114,12 +115,19 @@ class CliHooks(DefaultHooks):
         if _subagent_active.get(False):
             return
         await self.adapter.end_step()
+        if isinstance(error, LLMUnsupportedContentError):
+            return  # _run owns rendering for this class
         await self.adapter.print_inline(f"[error]! Error: {error}[/error]")
         if _debug_enabled[0]:
             tb = "".join(
                 traceback.format_exception(type(error), error, error.__traceback__)
             )
             await self.adapter.print_inline(f"[dim]{rich_escape(tb)}[/dim]")
+
+    async def on_self_heal(self, agent_name: str, summary: str) -> None:
+        if _subagent_active.get(False):
+            return
+        await self.adapter.print_inline(f"[muted]{COMPRESSION} {summary}[/muted]")
 
     async def on_approval_request(
         self, agent_name: str, request: ApprovalRequest
