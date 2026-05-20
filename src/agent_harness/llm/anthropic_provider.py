@@ -16,7 +16,7 @@ from agent_harness.core.errors import (
     LLMError,
     LLMRateLimitError,
 )
-from agent_harness.core.message import Message, MessageChunk, Role, ToolCall
+from agent_harness.core.message import Attachment, Message, MessageChunk, Role, ToolCall
 from agent_harness.llm.base import BaseLLM
 from agent_harness.llm.types import FinishReason, LLMResponse, StreamDelta, Usage
 from agent_harness.tool.base import ToolSchema
@@ -249,6 +249,7 @@ class AnthropicProvider(BaseLLM):
         **kwargs: Any,
     ) -> dict[str, Any]:
         # Extract system message (Anthropic takes it as top-level param)
+        messages = self._expand_tool_result_media(messages)
         system_content, api_messages = self._split_system_message(messages)
 
         request: dict[str, Any] = {
@@ -280,8 +281,8 @@ class AnthropicProvider(BaseLLM):
         request.update(kwargs)
         return request
 
-    @staticmethod
     def _split_system_message(
+        self,
         messages: list[Message],
     ) -> tuple[str | None, list[dict[str, Any]]]:
         """Separate system messages and format remaining for Anthropic API."""
@@ -331,6 +332,13 @@ class AnthropicProvider(BaseLLM):
                 })
                 continue
 
+            if msg.role == Role.USER and msg.attachments:
+                api_messages.append({
+                    "role": "user",
+                    "content": self._render_user_content(msg),
+                })
+                continue
+
             api_messages.append({
                 "role": msg.role.value,
                 "content": msg.content or "",
@@ -343,6 +351,22 @@ class AnthropicProvider(BaseLLM):
                 len(system_parts),
             )
         return system_content, api_messages
+
+    def _image_block(self, att: Attachment, b64: str) -> dict[str, Any]:
+        return {
+            "type": "image",
+            "source": {"type": "base64", "media_type": att.mime, "data": b64},
+        }
+
+    def _pdf_block(self, att: Attachment, b64: str) -> dict[str, Any]:
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": b64,
+            },
+        }
 
     @staticmethod
     def _parse_response(response: Any) -> LLMResponse:

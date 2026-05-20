@@ -51,7 +51,7 @@ class TestThinkingBlockRoundTrip:
                 },
             },
         )
-        _, api_msgs = AnthropicProvider._split_system_message([msg])
+        _, api_msgs = AnthropicProvider.__new__(AnthropicProvider)._split_system_message([msg])
         assert len(api_msgs) == 1
         blocks = api_msgs[0]["content"]
         assert blocks[0]["type"] == "thinking"
@@ -148,7 +148,7 @@ class TestThinkingBlockRoundTrip:
             content="hi",
             provider_metadata={"openai_chat": {"reasoning_content": "ignored"}},
         )
-        _, api_msgs = AnthropicProvider._split_system_message([msg])
+        _, api_msgs = AnthropicProvider.__new__(AnthropicProvider)._split_system_message([msg])
         blocks = api_msgs[0]["content"]
         for block in blocks:
             assert block["type"] not in ("thinking", "redacted_thinking")

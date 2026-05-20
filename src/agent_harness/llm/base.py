@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -11,7 +12,7 @@ from typing import Any, AsyncIterator, Callable, Coroutine, TypeVar
 from agent_harness.core.config import LLMConfig
 from agent_harness.core.errors import LLMConnectionError, LLMError, LLMRateLimitError
 from agent_harness.core.event import EventEmitter
-from agent_harness.core.message import Message, Role, ToolCall
+from agent_harness.core.message import Attachment, Message, Role, ToolCall
 from agent_harness.llm.types import (
     FinishReason,
     LLMResponse,
@@ -20,6 +21,8 @@ from agent_harness.llm.types import (
     Usage,
 )
 from agent_harness.tool.base import ToolSchema
+from agent_harness.utils.blob import get_bytes
+from agent_harness.utils.media import is_image_mime, is_pdf_mime
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,11 @@ class BaseLLM(ABC, EventEmitter):
         - Event emission for observability
         - Token counting
     """
+
+    _TOOL_MEDIA_PREAMBLE = (
+        "Attachments returned by the preceding tool call(s), in the order "
+        "the calls produced them:"
+    )
 
     def __init__(self, config: LLMConfig, rate_limit: dict[str, Any] | None = None) -> None:
         self.config = config
@@ -332,6 +340,58 @@ class BaseLLM(ABC, EventEmitter):
 
     def _resolve_max_tokens(self, max_tokens: int | None) -> int:
         return max_tokens if max_tokens is not None else self.config.max_tokens
+
+    def _expand_tool_result_media(
+        self, messages: list[Message],
+    ) -> list[Message]:
+        out: list[Message] = []
+        i = 0
+        n = len(messages)
+        while i < n:
+            m = messages[i]
+            out.append(m)
+            if m.tool_result is None:
+                i += 1
+                continue
+            media: list[Attachment] = list(m.tool_result.attachments or [])
+            j = i + 1
+            while j < n and messages[j].tool_result is not None:
+                out.append(messages[j])
+                nxt = messages[j].tool_result
+                if nxt and nxt.attachments:
+                    media.extend(nxt.attachments)
+                j += 1
+            if media:
+                out.append(
+                    Message(
+                        role=Role.USER,
+                        content=self._TOOL_MEDIA_PREAMBLE,
+                        attachments=media,
+                    )
+                )
+            i = j
+        return out
+
+    def _render_user_content(self, msg: Message) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = []
+        if msg.content:
+            parts.append(self._text_block(msg.content))
+        for a in msg.attachments or []:
+            b64 = base64.b64encode(get_bytes(a.digest)).decode()
+            if is_pdf_mime(a.mime):
+                parts.append(self._pdf_block(a, b64))
+            elif is_image_mime(a.mime):
+                parts.append(self._image_block(a, b64))
+        return parts
+
+    def _text_block(self, text: str) -> dict[str, Any]:
+        return {"type": "text", "text": text}
+
+    def _image_block(self, att: Attachment, b64: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def _pdf_block(self, att: Attachment, b64: str) -> dict[str, Any]:
+        raise NotImplementedError
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} model={self.model_name}>"

@@ -291,7 +291,7 @@ class TestProviderMetadataRoundTrip:
             tool_calls=[ToolCall(id="x", name="Glob", arguments={})],
             provider_metadata={"openai_chat": {"reasoning_content": "thinking..."}},
         )
-        wire = OpenAIProvider._format_message(msg)
+        wire = OpenAIProvider.__new__(OpenAIProvider)._format_message(msg)
         assert wire["reasoning_content"] == "thinking..."
         assert "reasoning_details" not in wire
 
@@ -303,7 +303,7 @@ class TestProviderMetadataRoundTrip:
             content="answer",
             provider_metadata={"openai_chat": {"reasoning_details": [{"text": "x"}]}},
         )
-        wire = OpenAIProvider._format_message(msg)
+        wire = OpenAIProvider.__new__(OpenAIProvider)._format_message(msg)
         assert wire["reasoning_details"] == [{"text": "x"}]
         assert "reasoning_content" not in wire
 
@@ -315,14 +315,14 @@ class TestProviderMetadataRoundTrip:
             content="answer",
             provider_metadata={"openai_chat": {"reasoning_content": ""}},
         )
-        wire = OpenAIProvider._format_message(msg)
+        wire = OpenAIProvider.__new__(OpenAIProvider)._format_message(msg)
         assert wire["reasoning_content"] == ""
 
     def test_format_message_omits_field_when_no_sidecar(self) -> None:
         from agent_harness.llm.openai_provider import OpenAIProvider
 
         msg = Message(role=Role.ASSISTANT, content="hi")
-        wire = OpenAIProvider._format_message(msg)
+        wire = OpenAIProvider.__new__(OpenAIProvider)._format_message(msg)
         assert "reasoning_content" not in wire
         assert "reasoning_details" not in wire
 
@@ -334,7 +334,7 @@ class TestProviderMetadataRoundTrip:
             content="hi",
             provider_metadata={"anthropic": {"thinking_blocks": [{"type": "thinking", "thinking": "x", "signature": "s"}]}},
         )
-        wire = OpenAIProvider._format_message(msg)
+        wire = OpenAIProvider.__new__(OpenAIProvider)._format_message(msg)
         assert "thinking_blocks" not in wire
         assert "reasoning_content" not in wire
 
@@ -363,7 +363,7 @@ class TestReasoningRoundTripFidelity:
 
         sidecar = parsed.message.provider_metadata["openai_chat"]
         assert sidecar["reasoning_content"] == "step by step"
-        wire = OpenAIProvider._format_message(parsed.message)
+        wire = OpenAIProvider.__new__(OpenAIProvider)._format_message(parsed.message)
         assert wire["reasoning_content"] == "step by step"
 
     def test_reasoning_details_roundtrip_fidelity_unchanged(self) -> None:
@@ -379,7 +379,7 @@ class TestReasoningRoundTripFidelity:
         assert parsed.message.provider_metadata["openai_chat"][
             "reasoning_details"
         ] == details
-        wire = OpenAIProvider._format_message(parsed.message)
+        wire = OpenAIProvider.__new__(OpenAIProvider)._format_message(parsed.message)
         assert wire["reasoning_details"] == details
 
     def test_no_synthetic_reasoning_fields_after_turn_removal(self) -> None:

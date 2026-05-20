@@ -17,7 +17,7 @@ from agent_harness.core.errors import (
     LLMRateLimitError,
     LLMResponseError,
 )
-from agent_harness.core.message import Message, MessageChunk, Role, ToolCall
+from agent_harness.core.message import Attachment, Message, MessageChunk, Role, ToolCall
 from agent_harness.llm.base import BaseLLM
 from agent_harness.llm.types import FinishReason, LLMResponse, StreamDelta, Usage
 from agent_harness.tool.base import ToolSchema
@@ -213,6 +213,7 @@ class OpenAIProvider(BaseLLM):
         stream: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        messages = self._expand_tool_result_media(messages)
         request: dict[str, Any] = {
             "model": self.config.model,
             "messages": [self._format_message(m) for m in messages],
@@ -241,8 +242,7 @@ class OpenAIProvider(BaseLLM):
         request.update(kwargs)
         return request
 
-    @staticmethod
-    def _format_message(msg: Message) -> dict[str, Any]:
+    def _format_message(self, msg: Message) -> dict[str, Any]:
         """Convert a Message to OpenAI API format."""
         result: dict[str, Any] = {"role": msg.role.value}
 
@@ -251,7 +251,9 @@ class OpenAIProvider(BaseLLM):
             result["content"] = msg.tool_result.content
             return result
 
-        if msg.content is not None:
+        if msg.role == Role.USER and msg.attachments:
+            result["content"] = self._render_user_content(msg)
+        elif msg.content is not None:
             result["content"] = msg.content
 
         if msg.tool_calls:
@@ -360,6 +362,21 @@ class OpenAIProvider(BaseLLM):
             cache_creation_tokens=0,
             reasoning_tokens=reasoning,
         )
+
+    def _image_block(self, att: Attachment, b64: str) -> dict[str, Any]:
+        return {
+            "type": "image_url",
+            "image_url": {"url": f"data:{att.mime};base64,{b64}"},
+        }
+
+    def _pdf_block(self, att: Attachment, b64: str) -> dict[str, Any]:
+        return {
+            "type": "file",
+            "file": {
+                "filename": att.filename or "document.pdf",
+                "file_data": f"data:application/pdf;base64,{b64}",
+            },
+        }
 
 
 def _is_reasoning_details_rejection(e: openai.BadRequestError) -> bool:
