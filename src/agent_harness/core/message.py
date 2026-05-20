@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Role(str, Enum):
@@ -22,6 +22,17 @@ class Role(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
+
+
+class Attachment(BaseModel):
+    """Immutable reference to a media payload in the blob store."""
+
+    model_config = ConfigDict(frozen=True)
+
+    digest: str
+    mime: str
+    filename: str | None = None
+    size: int
 
 
 class ToolCall(BaseModel):
@@ -38,17 +49,26 @@ class ToolCall(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class ToolOutput(BaseModel):
+    """Rich tool return: text content plus optional media attachments."""
+
+    content: str
+    attachments: list[Attachment] | None = None
+
+
 class ToolResult(BaseModel):
     """
     Represents the result from executing a tool call.
-    
+
     Attributes:
         tool_call_id: Reference to the ToolCall that produced this result
         content: The output/result from the tool execution
         is_error: Whether the tool execution resulted in an error
+        attachments: Optional media attachments produced by the tool
     """
     tool_call_id: str
     content: str
+    attachments: list[Attachment] | None = None
     is_error: bool = False
 
 
@@ -74,6 +94,7 @@ class Message(BaseModel):
     name: str | None = None
     tool_calls: list[ToolCall] | None = None
     tool_result: ToolResult | None = None
+    attachments: list[Attachment] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     provider_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now())
@@ -105,13 +126,17 @@ class Message(BaseModel):
         tool_call_id: str,
         content: str,
         is_error: bool = False,
+        attachments: list[Attachment] | None = None,
         **kwargs: Any,
     ) -> Message:
         """Create a tool result message."""
         return cls(
             role=Role.TOOL,
             tool_result=ToolResult(
-                tool_call_id=tool_call_id, content=content, is_error=is_error
+                tool_call_id=tool_call_id,
+                content=content,
+                attachments=attachments,
+                is_error=is_error,
             ),
             content=content,
             **kwargs,

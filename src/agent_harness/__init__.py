@@ -13,7 +13,7 @@ from agent_harness.approval import (
     ApprovalResult,
     StdinApprovalHandler,
 )
-from agent_harness.core.message import Message, Role, ToolCall, ToolResult
+from agent_harness.core.message import Attachment, Message, Role, ToolCall, ToolOutput, ToolResult
 from agent_harness.core.config import (
     ApprovalConfig,
     DockerConfig,
@@ -57,9 +57,11 @@ __all__ = [
     "ApprovalResult",
     "StdinApprovalHandler",
     # Core
+    "Attachment",
     "Message",
     "Role",
     "ToolCall",
+    "ToolOutput",
     "ToolResult",
     "DockerConfig",
     "HarnessConfig",

@@ -4,6 +4,7 @@ All framework exceptions inherit from HarnessError, enabling broad catch
 while allowing fine-grained handling of specific error categories.
 """
 from __future__ import annotations
+
 from typing import Any
 
 
@@ -19,6 +20,13 @@ class HarnessError(Exception):
 
 class LLMError(HarnessError):
     """Error during LLM interaction."""
+
+    def __init__(
+        self, message: str = "", *, details: dict[str, Any] | None = None,
+    ) -> None:
+        from agent_harness.utils.blob import scrub_base64  # noqa: PLC0415
+
+        super().__init__(scrub_base64(message), details=details)
 
 class LLMRateLimitError(LLMError):
     """LLM API rate limit exceeded. Retryable."""

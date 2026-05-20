@@ -13,7 +13,7 @@ from agent_harness.core.errors import (
     ToolValidationError,
 )
 from agent_harness.core.event import EventEmitter
-from agent_harness.core.message import ToolCall, ToolResult
+from agent_harness.core.message import ToolCall, ToolOutput, ToolResult
 from agent_harness.tool.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -74,15 +74,23 @@ class ToolExecutor(EventEmitter):
 
             # Execute with concurrency limit and timeout
             async with self._semaphore:
-                result_str = await asyncio.wait_for(
+                raw = await asyncio.wait_for(
                     tool.execute(**tool_call.arguments),
                     timeout=effective_timeout,
                 )
+
+            if isinstance(raw, ToolOutput):
+                result_str = raw.content
+                attachments = raw.attachments
+            else:
+                result_str = raw
+                attachments = None
 
             result = ToolResult(
                 tool_call_id=tool_call.id,
                 content=result_str,
                 is_error=False,
+                attachments=attachments,
             )
 
             await self.emit(

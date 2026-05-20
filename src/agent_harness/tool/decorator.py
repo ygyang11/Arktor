@@ -10,6 +10,7 @@ import logging
 import re
 from typing import Any, Callable, Coroutine, Literal, Union, get_args, get_origin, get_type_hints
 
+from agent_harness.core.message import ToolOutput
 from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.utils.async_utils import ensure_async
 
@@ -156,8 +157,10 @@ class FunctionTool(BaseTool):
         self._fn = ensure_async(fn)
         self._schema = schema
 
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str | ToolOutput:
         result = await self._fn(**kwargs)
+        if isinstance(result, ToolOutput):
+            return result
         return str(result) if result is not None else ""
 
     def get_schema(self) -> ToolSchema:

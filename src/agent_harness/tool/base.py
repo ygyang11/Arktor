@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 from pydantic import BaseModel, Field
 
+from agent_harness.core.message import ToolOutput
+
 
 @runtime_checkable
 class AgentAware(Protocol):
@@ -99,14 +101,15 @@ class BaseTool(ABC):
         self.context_order: int = 0
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str | ToolOutput:
         """Execute the tool with given arguments.
 
         Args:
             **kwargs: Tool-specific arguments matching the schema.
 
         Returns:
-            String result to be passed back to the LLM.
+            String result to be passed back to the LLM, or a ToolOutput
+            carrying text plus optional media attachments.
         """
         ...
 

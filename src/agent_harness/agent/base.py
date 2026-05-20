@@ -846,6 +846,7 @@ class BaseAgent(ABC, EventEmitter):
                 Message.tool(
                     tool_call_id=r.tool_call_id,
                     content=r.content,
+                    attachments=r.attachments,
                     is_error=r.is_error,
                 )
             )

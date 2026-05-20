@@ -310,3 +310,50 @@ class TestToolExecutorStream:
         results = await executor.execute_batch(calls)
         assert len(results) == 2
         assert all(r.content == "batch_ok" for r in results)
+
+
+class _ToolOutputTool(BaseTool):
+    def __init__(self, output: Any) -> None:
+        super().__init__(name="tool_output_tool", description="Returns ToolOutput")
+        self._output = output
+
+    async def execute(self, **kwargs: Any) -> Any:
+        return self._output
+
+
+class TestToolExecutorToolOutput:
+    @pytest.mark.asyncio
+    async def test_str_return_is_normalized_without_attachments(self) -> None:
+        tool = _ToolOutputTool("plain text")
+        executor = _make_executor(tool)
+        tc = ToolCall(name="tool_output_tool", arguments={})
+        result = await executor.execute(tc)
+        assert result.content == "plain text"
+        assert result.attachments is None
+        assert result.is_error is False
+
+    @pytest.mark.asyncio
+    async def test_tool_output_with_attachments_threads_through(self) -> None:
+        from agent_harness.core.message import Attachment, ToolOutput
+
+        att = Attachment(
+            digest="a" * 64, mime="image/png", size=4, filename="x.png",
+        )
+        tool = _ToolOutputTool(ToolOutput(content="see image", attachments=[att]))
+        executor = _make_executor(tool)
+        tc = ToolCall(name="tool_output_tool", arguments={})
+        result = await executor.execute(tc)
+        assert result.content == "see image"
+        assert result.attachments == [att]
+        assert result.is_error is False
+
+    @pytest.mark.asyncio
+    async def test_tool_output_without_attachments(self) -> None:
+        from agent_harness.core.message import ToolOutput
+
+        tool = _ToolOutputTool(ToolOutput(content="just text"))
+        executor = _make_executor(tool)
+        tc = ToolCall(name="tool_output_tool", arguments={})
+        result = await executor.execute(tc)
+        assert result.content == "just text"
+        assert result.attachments is None
