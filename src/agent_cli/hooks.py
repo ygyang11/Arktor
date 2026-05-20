@@ -165,8 +165,6 @@ class CliHooks(DefaultHooks):
     async def on_compression_start(self, agent_name: str) -> None:
         if _subagent_active.get(False):
             return
-        if self._turn is not None:
-            self._turn.committed = True
         await self.adapter.print_inline(
             f"[info]{COMPRESSION} Compressing context...[/info]"
         )

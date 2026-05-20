@@ -234,28 +234,52 @@ class TestStripLastToolRunAttachments:
         msgs: list[Message] = []
         assert strip_last_tool_run_attachments(msgs) == 0
 
-    def test_last_is_user_returns_zero(self) -> None:
+    def test_user_with_attachments_blocks_strip(self) -> None:
+        """USER message with attachments is user-side; return 0 to defer to
+        REPL rollback even if an earlier TOOL also carries attachments."""
         ast, calls = _assistant_with_calls("web_fetch")
         msgs = [
-            Message.user("fetch"),
+            Message.user("hi"),
             ast,
-            _tool_with_attachments(calls[0], "ok", [_att()]),
-            Message.user("follow-up"),
+            _tool_with_attachments(calls[0], "ok", [_att("old.png")]),
+            Message.assistant("done"),
+            Message.user("look @x.pdf", attachments=[_att("x.pdf", "application/pdf")]),
         ]
         assert strip_last_tool_run_attachments(msgs) == 0
         # Tool attachments must remain untouched
         assert msgs[2].tool_result.attachments is not None
-        assert len(msgs[2].tool_result.attachments) == 1
+        # User attachments must remain untouched (REPL rollback handles them)
+        assert msgs[4].attachments is not None
 
-    def test_last_is_assistant_returns_zero(self) -> None:
-        ast1, calls1 = _assistant_with_calls("web_fetch")
+    def test_skips_trailing_non_attachment_messages_to_find_tool(self) -> None:
+        """Trailing ASSISTANT / SYSTEM / USER-without-attachments must not
+        block recovery — scan back to the most recent attachment-bearing
+        TOOL run."""
+        ast, calls = _assistant_with_calls("web_fetch")
         msgs = [
-            ast1,
-            _tool_with_attachments(calls1[0], "ok", [_att()]),
+            ast,
+            _tool_with_attachments(calls[0], "ok", [_att()]),
             Message.assistant("explained"),
         ]
-        assert strip_last_tool_run_attachments(msgs) == 0
-        assert msgs[1].tool_result.attachments is not None
+        assert strip_last_tool_run_attachments(msgs) == 1
+        assert msgs[1].tool_result.attachments is None
+        assert msgs[1].tool_result.content.endswith(_STRIPPED_NOTE)
+
+    def test_skips_trailing_background_system_to_find_tool(self) -> None:
+        """Background-task SYSTEM notifications appended by
+        ``_collect_background_results`` must not break tool-side recovery."""
+        ast, calls = _assistant_with_calls("web_fetch")
+        msgs = [
+            Message.user("hi"),
+            ast,
+            _tool_with_attachments(calls[0], "ok", [_att()]),
+            Message.system(
+                "[Background Task Notification] done",
+                metadata={"is_background_result": True},
+            ),
+        ]
+        assert strip_last_tool_run_attachments(msgs) == 1
+        assert msgs[2].tool_result.attachments is None
 
     def test_single_tool_run_with_attachments(self) -> None:
         ast, calls = _assistant_with_calls("web_fetch")

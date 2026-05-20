@@ -454,7 +454,10 @@ def test_end_turn_idempotent() -> None:
     assert hooks.turn is None
 
 
-async def test_compression_start_flips_commit_when_turn_bound() -> None:
+async def test_compression_start_does_not_commit_turn() -> None:
+    """Auto-compression is invisible to the user and rollback-safe (snapshot
+    captures compressor state too), so it must not block Ctrl+C or
+    media-rejection rollback paths."""
     a = _mock_adapter()
     hooks = CliHooks(a)
     ctx = _empty_turn()
@@ -462,7 +465,7 @@ async def test_compression_start_flips_commit_when_turn_bound() -> None:
 
     await hooks.on_compression_start("main")
 
-    assert ctx.committed is True
+    assert ctx.committed is False
     a.print_inline.assert_awaited_once()
 
 

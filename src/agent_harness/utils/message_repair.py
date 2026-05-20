@@ -19,13 +19,27 @@ _STRIPPED_NOTE = (
 
 
 def strip_last_tool_run_attachments(messages: list[Message]) -> int:
-    """Reverse-scan ``messages`` for the most recent contiguous TOOL run when
-    the latest message is itself a TOOL, then clear every
-    ``tool_result.attachments`` in that run and append ``_STRIPPED_NOTE`` to
-    ``tool_result.content``. Mutates ``messages`` in place."""
-    if not messages or messages[-1].role != Role.TOOL:
+    """Reverse-scan ``messages`` for the most recent attachment-bearing entry,
+    skipping non-attachment-bearing trailing messages (e.g., background
+    ``SYSTEM`` notifications, plain ``ASSISTANT`` turns).
+
+    - If the first attachment-bearing hit is a ``USER`` message, returns 0
+      so the caller treats it as user-side and propagates for rollback.
+    - If it's a ``TOOL`` message with ``tool_result.attachments``, clears
+      every ``tool_result.attachments`` in the contiguous TOOL run anchored
+      at that index and appends ``_STRIPPED_NOTE`` to each
+      ``tool_result.content``; returns the count stripped.
+    - Returns 0 when no attachment-bearing message is found at all."""
+    end = -1
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if m.role == Role.USER and m.attachments:
+            return 0
+        if m.role == Role.TOOL and m.tool_result and m.tool_result.attachments:
+            end = i
+            break
+    if end < 0:
         return 0
-    end = len(messages) - 1
     start = end
     while start - 1 >= 0 and messages[start - 1].role == Role.TOOL:
         start -= 1

@@ -846,6 +846,44 @@ async def test_run_media_rejection_with_rollback() -> None:
     assert "/clear" not in printed
 
 
+async def test_run_media_rejection_after_auto_compression_still_rolls_back() -> None:
+    """Regression: auto-compression mid-turn must NOT block rollback when the
+    failure is user-side media rejection (compression is invisible/clean-undo)."""
+    agent = _agent_with_stm()
+    agent.context.state.reset = MagicMock()
+
+    captured_hooks: list = []
+
+    async def fake_run(*args: object, **kwargs: object) -> None:
+        # Simulate the compressor firing its hook before the main LLM call.
+        await captured_hooks[0].on_compression_start("test")
+        raise LLMUnsupportedContentError("invalid part type: file")
+
+    agent.run = fake_run
+
+    adapter = MagicMock()
+    adapter.end_step = AsyncMock()
+    adapter.print_inline = AsyncMock()
+    adapter.begin_run = MagicMock()
+    console = MagicMock()
+    save = AsyncMock()
+    cli_hooks = _make_real_cli_hooks()
+    captured_hooks.append(cli_hooks)
+
+    await _run(
+        agent, "text", "sid", console, adapter,
+        cli_hooks, MagicMock(), save,
+    )
+
+    agent.context.state.reset.assert_called_once()
+    printed = "".join(
+        str(call.args[0]) if call.args else "" for call in console.print.call_args_list
+    )
+    # Rollback path (not partial-recovery) must be taken
+    assert "reverted" in printed
+    assert "/clear" not in printed
+
+
 async def test_run_media_rejection_without_rollback() -> None:
     """Committed state → no rollback; partial-recovery notice with /clear."""
     agent = _agent_with_stm()
