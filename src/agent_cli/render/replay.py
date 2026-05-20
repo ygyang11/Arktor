@@ -359,12 +359,12 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
     while i < len(messages):
         m = messages[i]
         step = 1
-        if m.role == Role.USER and m.content:
+        if m.role == Role.USER and (m.content or (m.metadata or {}).get("attachments")):
             in_bg_block = False
+            _render_user(console, peel_attachment_reminders(m.content or ""))
             attachments = (m.metadata or {}).get("attachments")
             if attachments:
                 _render_attachment_indicator(console, attachments)
-            _render_user(console, peel_attachment_reminders(m.content or ""))
         elif m.role == Role.ASSISTANT:
             in_bg_block = False
             _render_assistant(console, theme, m, results)
