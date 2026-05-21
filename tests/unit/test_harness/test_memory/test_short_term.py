@@ -245,6 +245,44 @@ class TestCompressorAttribute:
         # Messages untouched
         assert ctx.short_term_memory._messages == original_messages
 
+    @pytest.mark.asyncio
+    async def test_auto_compress_swallows_prune_io_failure(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A failing prune IO must not break the LLM turn — log and continue."""
+        from agent_harness.context.context import AgentContext
+        from agent_harness.hooks.base import DefaultHooks
+
+        compressor = ContextCompressor(
+            llm=AsyncMock(),
+            threshold=0.0,
+            retain_count=4,
+            model="gpt-4o",
+        )
+        ctx = AgentContext()
+        ctx.short_term_memory = ShortTermMemory(
+            max_tokens=50, compressor=compressor, model="gpt-4o",
+        )
+        await ctx.short_term_memory.add_message(Message.user("u1"))
+
+        target = logging.getLogger("agent_harness.context.context")
+        target.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.DEBUG, logger="agent_harness.context.context"):
+                with patch.object(
+                    compressor,
+                    "prune_tool_outputs",
+                    side_effect=OSError("disk full"),
+                ):
+                    # Should NOT raise — failure is swallowed at context layer.
+                    await ctx.maybe_auto_compress(
+                        DefaultHooks(), "test", authoritative_input=10_000,
+                    )
+        finally:
+            target.removeHandler(caplog.handler)
+
+        assert "Pruning failed" in caplog.text
+
 
 class TestDisplayedInputTokens:
     """displayed_input_tokens combines snapshot truth with delta of new messages."""

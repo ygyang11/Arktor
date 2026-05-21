@@ -73,9 +73,11 @@ def _format_tool_group(
 
 
 async def _handler(ctx: CommandContext, args: str) -> CommandResult:
-    out_dir = Path.home() / ".agent-harness" / "sessions" / ctx.session_id
+    out_dir = (
+        Path.home() / ".agent-harness" / "sessions" / ctx.session_id / "export"
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
-    fp = out_dir / f"export-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+    fp = out_dir / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
     msgs = await ctx.agent.context.short_term_memory.get_context_messages()
 
     blocks: list[str] = []

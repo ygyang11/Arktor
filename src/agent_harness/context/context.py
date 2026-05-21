@@ -188,7 +188,20 @@ class AgentContext:
     ) -> None:
         stm = self.short_term_memory
         compressor = stm.compressor
-        if compressor is None or not compressor.should_compress(
+        if compressor is None:
+            return
+
+        try:
+            reclaimed = compressor.prune_tool_outputs(stm._messages)
+        except Exception as e:
+            logger.debug("Pruning failed: %s — continuing", e, exc_info=True)
+            reclaimed = 0
+        if reclaimed > 0:
+            logger.debug("Pruned %d tokens from tool outputs", reclaimed)
+            if authoritative_input is not None:
+                authoritative_input -= reclaimed
+
+        if not compressor.should_compress(
             stm._messages, stm.max_tokens, authoritative_input=authoritative_input,
         ):
             return

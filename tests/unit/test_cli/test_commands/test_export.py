@@ -79,8 +79,8 @@ async def test_export_writes_file_and_reports_path(tmp_path: Path, monkeypatch: 
     ctx = _ctx_with_messages(msgs, session_id="abc")
     result = await CMD.handler(ctx, "")
 
-    out_dir = tmp_path / ".agent-harness" / "sessions" / "abc"
-    files = list(out_dir.glob("export-*.md"))
+    out_dir = tmp_path / ".agent-harness" / "sessions" / "abc" / "export"
+    files = list(out_dir.glob("*.md"))
     assert len(files) == 1
     body = files[0].read_text(encoding="utf-8")
     assert "## User" in body and "ping" in body
@@ -88,7 +88,7 @@ async def test_export_writes_file_and_reports_path(tmp_path: Path, monkeypatch: 
     rendered = render_output(result.output)
     assert "Exported" in rendered
     # path shown is home-relative
-    assert "~/.agent-harness/sessions/abc/export-" in rendered
+    assert "~/.agent-harness/sessions/abc/export/" in rendered
 
 
 async def test_export_groups_consecutive_tool_messages(
@@ -109,8 +109,8 @@ async def test_export_groups_consecutive_tool_messages(
     ctx = _ctx_with_messages(msgs, session_id="grp")
     await CMD.handler(ctx, "")
 
-    out_dir = tmp_path / ".agent-harness" / "sessions" / "grp"
-    body = next(out_dir.glob("export-*.md")).read_text()
+    out_dir = tmp_path / ".agent-harness" / "sessions" / "grp" / "export"
+    body = next(out_dir.glob("*.md")).read_text()
     # one ## Tool block, both results inside
     assert body.count("## Tool") == 1
     assert "A content" in body and "B content" in body

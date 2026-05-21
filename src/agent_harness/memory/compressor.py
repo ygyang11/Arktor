@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agent_harness.core.message import Message, Role
+from agent_harness.core.message import Message, Role, ToolResult
 from agent_harness.llm.types import Usage
 from agent_harness.utils.media import (
     describe_attachment_full,
@@ -20,6 +21,9 @@ if TYPE_CHECKING:
     from agent_harness.llm.base import BaseLLM
 
 logger = logging.getLogger(__name__)
+
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+_FILENAME_ID_MAX = 96
 
 _SUMMARY_SYSTEM_PROMPT = """\
 You are a context compressor for an AI agent conversation. The conversation is \
@@ -144,6 +148,8 @@ class ContextCompressor:
         model: str,
         session_id: str | None = None,
         scope: str = "main",
+        prune_per_output_threshold: int = 10_000,
+        prune_tail_turns: int = 3,
     ) -> None:
         self._llm = llm
         self._threshold = threshold
@@ -152,6 +158,8 @@ class ContextCompressor:
         self._model = model
         self._session_id = session_id
         self._scope = self._normalize_scope(scope)
+        self._prune_per_output_threshold = prune_per_output_threshold
+        self._prune_tail_turns = prune_tail_turns
         self._compression_count: int = 0
         self._archive_paths: list[str] = []
         self._last_result: CompressionResult | None = None
@@ -173,6 +181,8 @@ class ContextCompressor:
             model=self._model,
             session_id=self._session_id,
             scope=scope or self._scope,
+            prune_per_output_threshold=self._prune_per_output_threshold,
+            prune_tail_turns=self._prune_tail_turns,
         )
 
     def bind_session(self, session_id: str | None) -> None:
@@ -489,7 +499,8 @@ class ContextCompressor:
     def _archive(self, messages: list[Message], round_num: int) -> Path:
         """Write compressed messages to session-bound archive file."""
         archive_dir = (
-            Path.home() / ".agent-harness" / "sessions" / str(self._session_id)
+            Path.home() / ".agent-harness" / "sessions"
+            / str(self._session_id) / "compact"
         )
         archive_dir.mkdir(parents=True, exist_ok=True)
         path = archive_dir / self._archive_filename(round_num)
@@ -531,6 +542,83 @@ class ContextCompressor:
                     lines.append("")
             lines.append("---")
             lines.append("")
+
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
+    # -- Pruning --
+
+    def prune_tool_outputs(self, messages: list[Message]) -> int:
+        """Replace oversized tool_result with archive stubs.
+
+        Scans messages outside the last ``prune_tail_turns`` user turns; each
+        unpruned TOOL message whose content estimates
+        ≥ ``prune_per_output_threshold`` tokens has its
+        ``tool_result.content`` swapped for a stub. Originals are archived to
+        ``sessions/{sid}/compact/pruned/{tool_call_id}.md``.
+
+        Mutates ``messages`` in place. Returns total tokens reclaimed.
+        """
+        if not self._session_id:
+            return 0
+        user_indices = [
+            i for i, m in enumerate(messages) if m.role == Role.USER
+        ]
+        if len(user_indices) < self._prune_tail_turns:
+            return 0
+        boundary = user_indices[-self._prune_tail_turns]
+
+        reclaimed = 0
+        for msg in messages[:boundary]:
+            tr = msg.tool_result
+            if msg.role != Role.TOOL or tr is None:
+                continue
+            if msg.metadata.get("tool_pruned"):
+                continue
+            n_tokens = count_tokens(tr.content, self._model)
+            if n_tokens < self._prune_per_output_threshold:
+                continue
+            archive_path = self._archive_pruned(tr)
+            stub = (
+                f"[Pruned tool output: ~{n_tokens} tokens reclaimed. "
+                f"Original archived at `{archive_path}`]"
+            )
+            tr.content = stub
+            # count_messages_tokens sums both msg.content AND tool_result.content;
+            # zero out the duplicate so accounting actually drops.
+            msg.content = None
+            msg.metadata["tool_pruned"] = {
+                "tokens": n_tokens,
+                "archive": str(archive_path),
+            }
+            reclaimed += n_tokens
+        return reclaimed
+
+    def _archive_pruned(self, tr: ToolResult) -> Path:
+        """Write original tool_result content under sessions/{sid}/compact/pruned/."""
+        archive_dir = (
+            Path.home() / ".agent-harness" / "sessions"
+            / str(self._session_id) / "compact" / "pruned"
+        )
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        safe_id = (
+            _UNSAFE_FILENAME_CHARS.sub("_", tr.tool_call_id)[:_FILENAME_ID_MAX]
+            or "unknown"
+        )
+        path = archive_dir / f"{safe_id}.md"
+
+        lines = [
+            f"# Pruned tool result — `{tr.tool_call_id}`",
+            f"Timestamp: {datetime.now().isoformat()}",
+            f"Status: {'ERROR' if tr.is_error else 'OK'}",
+            "",
+            "---",
+            "",
+            tr.content,
+        ]
+        if tr.attachments:
+            lines += ["", "**Attachments**:"]
+            lines += [f"- {describe_attachment_full(a)}" for a in tr.attachments]
 
         path.write_text("\n".join(lines), encoding="utf-8")
         return path
