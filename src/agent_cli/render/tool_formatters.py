@@ -28,6 +28,7 @@ from agent_cli.render.tool_display import (
     register_result_formatter,
 )
 from agent_cli.theme import SEP_DOT, SEP_ELLIPSIS
+from agent_harness.utils.media import human_size as _human_size
 from agent_harness.core.message import ToolCall, ToolResult
 
 _PREVIEW_CAP = 10
@@ -51,15 +52,6 @@ _DIFF_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _DIFF_GUTTER_DIGITS = 4
 _DIFF_GUTTER_SEP = " │ "
 _DIFF_RIGHT_PAD = 4
-
-
-def _human_size(n: int) -> str:
-    f = float(n)
-    for unit in ("B", "KB", "MB", "GB"):
-        if f < 1024:
-            return f"{int(f)}B" if unit == "B" else f"{f:.1f}{unit}"
-        f /= 1024
-    return f"{f:.1f}TB"
 
 
 def _plural(n: int, s: str, p: str | None = None) -> str:

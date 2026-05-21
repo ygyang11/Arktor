@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent_harness.core.message import Message, ToolCall
+from agent_harness.core.message import Attachment, Message, Role, ToolCall, ToolResult
 from agent_harness.memory.compressor import ContextCompressor
 
 
@@ -300,3 +300,98 @@ class TestFormatMessages:
             [Message.assistant(None)]
         )
         assert text == ""
+
+    def test_user_attachments_rendered_as_short_markers(self) -> None:
+        att = Attachment(digest="a" * 64, mime="image/png", filename="shot.png", size=512)
+        text = ContextCompressor._format_messages(
+            [Message.user("look at this", attachments=[att])]
+        )
+        assert "[USER]: look at this" in text
+        assert "  └─ [Attached image/png: shot.png]" in text
+
+    def test_media_only_user_emits_role_marker(self) -> None:
+        att = Attachment(digest="a" * 64, mime="image/png", filename="shot.png", size=512)
+        text = ContextCompressor._format_messages([
+            Message.assistant("previous turn"),
+            Message(role=Role.USER, content=None, attachments=[att]),
+        ])
+        lines = text.splitlines()
+        # Role marker must survive so the summarizer doesn't fuse the
+        # attachment into the prior assistant turn.
+        assert "[USER]: (Media attachment only)" in lines
+        assert "  └─ [Attached image/png: shot.png]" in lines
+
+    def test_tool_result_attachments_rendered_in_pair(self) -> None:
+        tc = ToolCall(id="call_x", name="web_fetch", arguments={"url": "u"})
+        tr = ToolResult(
+            tool_call_id="call_x",
+            content="fetched ok",
+            attachments=[
+                Attachment(digest="b" * 64, mime="application/pdf", filename="doc.pdf", size=2048),
+            ],
+        )
+        text = ContextCompressor._format_messages([
+            Message.assistant(None, tool_calls=[tc]),
+            Message(role=Role.TOOL, tool_result=tr, content="fetched ok"),
+        ])
+        assert "└─ [OK]: fetched ok" in text
+        assert "     └─ [Attached application/pdf: doc.pdf]" in text
+
+    def test_orphan_tool_attachments_rendered(self) -> None:
+        tr = ToolResult(
+            tool_call_id="orphan",
+            content="stray",
+            attachments=[
+                Attachment(digest="c" * 64, mime="image/jpeg", filename=None, size=1024),
+            ],
+        )
+        text = ContextCompressor._format_messages(
+            [Message(role=Role.TOOL, tool_result=tr, content="stray")]
+        )
+        assert "[TOOL OK]: stray" in text
+        # default filename derived from mime: image
+        assert "  └─ [Attached image/jpeg: image]" in text
+
+
+class TestArchive:
+    def test_archive_includes_user_and_tool_attachments(
+        self, mock_llm: AsyncMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        comp = ContextCompressor(
+            llm=mock_llm, threshold=0.75, retain_count=2,
+            model="gpt-4o", session_id="s1",
+        )
+        user_att = Attachment(
+            digest="a" * 64, mime="image/png", filename="hello.png", size=300_000,
+        )
+        tool_att = Attachment(
+            digest="b" * 64, mime="application/pdf", filename="paper.pdf", size=1_500_000,
+        )
+        tc = ToolCall(id="call_q", name="web_fetch", arguments={"url": "u"})
+        tr = ToolResult(
+            tool_call_id="call_q", content="paper text", attachments=[tool_att],
+        )
+        msgs = [
+            Message.user("look", attachments=[user_att]),
+            Message.assistant(None, tool_calls=[tc]),
+            Message(role=Role.TOOL, tool_result=tr, content="paper text"),
+        ]
+        path = comp._archive(msgs, round_num=1)
+        text = path.read_text(encoding="utf-8")
+        assert "**Attachments**:" in text
+        assert "hello.png (image/png, 293.0KB, sha256:" + ("a" * 12) + "…)" in text
+        assert "**Attached media**:" in text
+        assert "paper.pdf (application/pdf, 1.4MB, sha256:" + ("b" * 12) + "…)" in text
+
+
+class TestSummaryPrompt:
+    def test_prompt_mentions_attachments_and_next_steps(self) -> None:
+        from agent_harness.memory.compressor import _SUMMARY_SYSTEM_PROMPT
+        assert "### Next Steps" in _SUMMARY_SYSTEM_PROMPT
+        assert "Media attachments" in _SUMMARY_SYSTEM_PROMPT
+        # "what is pending" was moved out of Current State into Next Steps
+        assert (
+            "Where things stand right now: what is done and what is in progress."
+            in _SUMMARY_SYSTEM_PROMPT
+        )

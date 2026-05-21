@@ -9,6 +9,10 @@ from typing import TYPE_CHECKING, Any
 
 from agent_harness.core.message import Message, Role
 from agent_harness.llm.types import Usage
+from agent_harness.utils.media import (
+    describe_attachment_full,
+    describe_attachment_short,
+)
 from agent_harness.utils.token_counter import count_messages_tokens, count_tokens
 
 if TYPE_CHECKING:
@@ -37,18 +41,22 @@ Include what was considered and rejected, and why.
 What has been accomplished:
 - Tool calls and their significant results (preserve exact data, not raw output)
 - Files read, written, or modified (preserve exact paths)
+- Media attachments supplied or fetched (preserve filename and MIME type)
 - Commands executed and their outcomes
 - Errors encountered and how they were resolved
 
 ### Current State
-Where things stand right now: what is done, what is in progress, what is pending.
+Where things stand right now: what is done and what is in progress.
+
+### Next Steps
+What is pending to continue the task, in execution order.
 
 ### Important Context
 Facts, constraints, requirements, or user preferences that affect ongoing work.
 
 ## Rules
 - Be factual and specific. Preserve exact file paths, function names, error messages, \
-URLs, and numeric values.
+URLs, numeric values, and media attachments when referenced.
 - Summarize tool results by their significance, not raw output.
 - Drop: intermediate reasoning steps, verbose tool output already captured in results, \
 superseded plans, pleasantries.
@@ -406,7 +414,8 @@ class ContextCompressor:
         """Format messages for the summary prompt.
 
         Tool call + result pairs are formatted as coherent action units.
-        """
+        User/tool attachments are rendered as short ``[Attached <mime>: <name>]``
+        markers so the summarizer knows the media existed"""
         lines: list[str] = []
         i = 0
         while i < len(messages):
@@ -428,6 +437,9 @@ class ContextCompressor:
                         ):
                             status = "ERROR" if tr.is_error else "OK"
                             lines.append(f"  └─ [{status}]: {tr.content}")
+                            if tr.attachments:
+                                for att in tr.attachments:
+                                    lines.append(f"     └─ {describe_attachment_short(att)}")
                             break
                 # Skip past processed tool result messages
                 j = i + 1
@@ -441,11 +453,19 @@ class ContextCompressor:
                 if msg.tool_result:
                     status = "ERROR" if msg.tool_result.is_error else "OK"
                     lines.append(f"[TOOL {status}]: {msg.tool_result.content}")
+                    if msg.tool_result.attachments:
+                        for att in msg.tool_result.attachments:
+                            lines.append(f"  └─ {describe_attachment_short(att)}")
                 i += 1
                 continue
 
             if msg.content:
                 lines.append(f"[{role}]: {msg.content}")
+            elif msg.attachments:
+                lines.append(f"[{role}]: (Media attachment only)")
+            if msg.attachments:
+                for att in msg.attachments:
+                    lines.append(f"  └─ {describe_attachment_short(att)}")
             i += 1
 
         return "\n".join(lines)
@@ -490,6 +510,11 @@ class ContextCompressor:
             if msg.content:
                 lines.append(msg.content)
                 lines.append("")
+            if msg.attachments:
+                lines.append("**Attachments**:")
+                for att in msg.attachments:
+                    lines.append(f"- {describe_attachment_full(att)}")
+                lines.append("")
             if msg.tool_calls:
                 for tc in msg.tool_calls:
                     lines.append(f"**Tool Call**: `{tc.name}({tc.arguments})`")
@@ -499,6 +524,11 @@ class ContextCompressor:
                 lines.append(f"**Tool Result** ({status}):")
                 lines.append(msg.tool_result.content)
                 lines.append("")
+                if msg.tool_result.attachments:
+                    lines.append("**Attached media**:")
+                    for att in msg.tool_result.attachments:
+                        lines.append(f"- {describe_attachment_full(att)}")
+                    lines.append("")
             lines.append("---")
             lines.append("")
 

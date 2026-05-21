@@ -11,6 +11,7 @@ from agent_app.tools.filesystem._security import (
     relative_to_workspace,
 )
 from agent_harness.tool.decorator import tool
+from agent_harness.utils.media import human_size as _format_size
 
 _MAX_ENTRIES = 200
 
@@ -22,16 +23,6 @@ LIST_DIR_DESCRIPTION = (
     "Returns directories first (with trailing /), then files with sizes. "
     "Symlinks are shown with their targets."
 )
-
-
-def _format_size(size: int) -> str:
-    """Human-readable file size."""
-    fsize = float(size)
-    for unit in ("B", "KB", "MB", "GB"):
-        if fsize < 1024:
-            return f"{fsize:.0f}{unit}" if unit == "B" else f"{fsize:.1f}{unit}"
-        fsize /= 1024
-    return f"{fsize:.1f}TB"
 
 
 def _list_dir_impl(resolved: Path, workspace: Path) -> str:

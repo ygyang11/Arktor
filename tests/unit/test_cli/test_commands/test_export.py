@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent_cli.commands.builtin.export import CMD, _format_message, _format_tool_group
-from agent_harness.core.message import Message, ToolCall, ToolResult
+from agent_harness.core.message import Attachment, Message, ToolCall, ToolResult
 
 from .conftest import render_output
 
@@ -165,3 +165,27 @@ def test_export_user_block_plain_text_unchanged() -> None:
 def test_export_assistant_block_unchanged() -> None:
     out = _format_message(Message.assistant("plain answer"))
     assert out == "## Assistant\n\nplain answer\n"
+
+
+def test_export_user_attachments_section() -> None:
+    att = Attachment(digest="a" * 64, mime="image/png", filename="shot.png", size=1024)
+    out = _format_message(Message.user("see this", attachments=[att]))
+    assert "## User" in out
+    assert "see this" in out
+    assert "**Attachments:**" in out
+    assert "shot.png (image/png, 1.0KB, sha256:" + ("a" * 12) + "…)" in out
+
+
+def test_export_tool_attachments_section() -> None:
+    prev = Message.assistant(content="", tool_calls=[
+        ToolCall(id="c1", name="web_fetch", arguments={"url": "u"}),
+    ])
+    att = Attachment(
+        digest="b" * 64, mime="application/pdf",
+        filename="doc.pdf", size=2 * 1024 * 1024,
+    )
+    tool_msg = Message.tool(tool_call_id="c1", content="ok", attachments=[att])
+    out = _format_tool_group(prev, [tool_msg])
+    assert "**`web_fetch`**:" in out
+    assert "**Attached media:**" in out
+    assert "doc.pdf (application/pdf, 2.0MB, sha256:" + ("b" * 12) + "…)" in out

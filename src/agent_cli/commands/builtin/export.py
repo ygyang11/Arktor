@@ -8,6 +8,7 @@ from agent_cli.commands.base import Command, CommandContext, CommandResult
 from agent_cli.commands.ui import home_relative_path, ok
 from agent_cli.render.tool_display import args_repr
 from agent_harness.core.message import Message, Role
+from agent_harness.utils.media import describe_attachment_full
 
 
 _ROLE_HEADERS: dict[Role, str] = {
@@ -32,6 +33,9 @@ def _format_message(m: Message) -> str:
         body_content = m.content or ""
     if body_content:
         parts.append(body_content)
+    if m.attachments:
+        att_lines = "\n".join(f"- {describe_attachment_full(a)}" for a in m.attachments)
+        parts.append(f"**Attachments:**\n{att_lines}")
     if m.tool_calls:
         tool_lines = "\n".join(
             f"- `{tc.name}({args_repr(tc.arguments)})`" for tc in m.tool_calls
@@ -55,10 +59,16 @@ def _format_tool_group(
         name = name_by_id.get(tr.tool_call_id) if tr else None
         err_suffix = " (error)" if tr is not None and tr.is_error else ""
         body = (tr.content if tr is not None else m.content) or ""
-        if name:
-            parts.append(f"**`{name}`**{err_suffix}:\n\n{body}")
-        else:
-            parts.append(body)
+        block = (
+            f"**`{name}`**{err_suffix}:\n\n{body}"
+            if name else body
+        )
+        if tr is not None and tr.attachments:
+            att_lines = "\n".join(
+                f"- {describe_attachment_full(a)}" for a in tr.attachments
+            )
+            block = f"{block}\n\n**Attached media:**\n{att_lines}"
+        parts.append(block)
     return "## Tool\n\n" + "\n\n".join(parts) + "\n"
 
 

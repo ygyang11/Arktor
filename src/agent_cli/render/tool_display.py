@@ -27,6 +27,7 @@ from agent_cli.theme import (
 )
 from agent_harness.approval.types import ApprovalResult
 from agent_harness.core.message import Attachment, ToolCall, ToolResult
+from agent_harness.utils.media import media_safe_filename
 
 RowStatus = Literal["running", "done", "error", "denied"]
 
@@ -325,7 +326,7 @@ def format_attachments(items: list[dict[str, Any]]) -> list[RenderableType]:
     followed by one continuation-glyph row per attachment. Handles both the
     text-tool shape (:func:`attachment_summary`) and the media shape
     (:func:`media_attachment_summary`)."""
-    from agent_cli.render.tool_formatters import _human_size  # noqa: PLC0415
+    from agent_harness.utils.media import human_size  # noqa: PLC0415
 
     rows: list[RenderableType] = []
     header = Text()
@@ -342,7 +343,7 @@ def format_attachments(items: list[dict[str, Any]]) -> list[RenderableType]:
             line.append(target, style="muted bold")
             size = it.get("size")
             if isinstance(size, int) and size > 0:
-                line.append(f" ({_human_size(size)})", style="muted")
+                line.append(f" ({human_size(size)})", style="muted")
             rows.append(line)
             continue
         label = _DISPLAY_NAMES.get(it["tool_name"], it["tool_name"])
@@ -369,7 +370,7 @@ def media_attachment_summary(att: Attachment) -> dict[str, Any]:
     return {
         "kind": "media",
         "mime": att.mime,
-        "filename": att.filename,
+        "filename": media_safe_filename(att.filename, att.mime),
         "size": att.size,
         "is_error": False,
     }

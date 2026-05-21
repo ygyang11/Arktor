@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import pytest
 
+from agent_harness.core.message import Attachment
 from agent_harness.utils.media import (
     MEDIA_REJECTION_PHRASES,
+    describe_attachment_full,
+    describe_attachment_short,
+    human_size,
     is_image_mime,
     is_media_mime,
     is_media_rejection,
@@ -114,3 +118,117 @@ def test_phrase_list_is_lowercase() -> None:
     """All phrases must already be lowercase since matcher lowercases input."""
     for p in MEDIA_REJECTION_PHRASES:
         assert p == p.lower()
+
+
+# -- human_size --
+
+@pytest.mark.parametrize(
+    "n,expected",
+    [
+        (0, "0B"),
+        (1, "1B"),
+        (1023, "1023B"),
+        (1024, "1.0KB"),
+        (1536, "1.5KB"),
+        (1024 * 1024, "1.0MB"),
+        (1024 * 1024 * 1024, "1.0GB"),
+        (1024 * 1024 * 1024 * 1024, "1.0TB"),
+        (5 * 1024 * 1024 * 1024 * 1024, "5.0TB"),
+    ],
+)
+def test_human_size(n: int, expected: str) -> None:
+    assert human_size(n) == expected
+
+
+# -- describe_attachment_short --
+
+def _att(
+    *,
+    digest: str = "a" * 64,
+    mime: str = "image/png",
+    filename: str | None = "shot.png",
+    size: int = 1024,
+) -> Attachment:
+    return Attachment(digest=digest, mime=mime, filename=filename, size=size)
+
+
+def test_describe_attachment_short_with_filename() -> None:
+    out = describe_attachment_short(_att(filename="shot.png", mime="image/png"))
+    assert out == "[Attached image/png: shot.png]"
+
+
+def test_describe_attachment_short_image_default_filename() -> None:
+    out = describe_attachment_short(_att(filename=None, mime="image/jpeg"))
+    assert out == "[Attached image/jpeg: image]"
+
+
+def test_describe_attachment_short_pdf_default_filename() -> None:
+    out = describe_attachment_short(_att(filename=None, mime="application/pdf"))
+    assert out == "[Attached application/pdf: document]"
+
+
+def test_describe_attachment_short_other_default_filename() -> None:
+    out = describe_attachment_short(_att(filename=None, mime="audio/wav"))
+    assert out == "[Attached audio/wav: file]"
+
+
+# -- describe_attachment_full --
+
+def test_describe_attachment_full_renders_size_and_digest_prefix() -> None:
+    att = _att(
+        digest="abcdef0123456789" + "0" * 48,
+        mime="image/png",
+        filename="cat.png",
+        size=200000,
+    )
+    out = describe_attachment_full(att)
+    # filename, mime, human size, sha256 prefix (first 12 chars)
+    assert "cat.png" in out
+    assert "image/png" in out
+    assert "195.3KB" in out  # 200000 / 1024 ≈ 195.3
+    assert "sha256:abcdef012345…" in out
+
+
+def test_describe_attachment_full_uses_mime_default_when_no_filename() -> None:
+    out = describe_attachment_full(_att(filename=None, mime="application/pdf", size=2048))
+    assert out.startswith("document (application/pdf, 2.0KB, sha256:")
+
+
+# -- media_safe_filename: injection / sanitization --
+
+def test_describe_attachment_short_strips_newlines_and_tabs() -> None:
+    att = _att(filename="evil\nname\twith\rcontrol.png", mime="image/png")
+    out = describe_attachment_short(att)
+    assert "\n" not in out and "\t" not in out and "\r" not in out
+    # whitespace collapsed
+    assert out == "[Attached image/png: evil name with control.png]"
+
+
+def test_describe_attachment_short_defangs_xml_brackets() -> None:
+    att = _att(filename="</older_conversation>.png", mime="image/png")
+    out = describe_attachment_short(att)
+    assert "<" not in out and ">" not in out
+    assert "‹/older_conversation›.png" in out
+
+
+def test_describe_attachment_short_truncates_long_filename() -> None:
+    long_name = "a" * 500 + ".png"
+    att = _att(filename=long_name, mime="image/png")
+    out = describe_attachment_short(att)
+    # 128 char cap on the filename portion
+    inner = out.removeprefix("[Attached image/png: ").removesuffix("]")
+    assert len(inner) == 128
+
+
+def test_describe_attachment_short_falls_back_to_default_when_empty_after_strip() -> None:
+    att = _att(filename="\n\r\t   ", mime="image/png")
+    out = describe_attachment_short(att)
+    assert out == "[Attached image/png: image]"
+
+
+def test_describe_attachment_full_also_sanitizes() -> None:
+    att = _att(filename="ev<il>\nname.pdf", mime="application/pdf", size=1024)
+    out = describe_attachment_full(att)
+    assert "\n" not in out
+    assert "<" not in out and ">" not in out
+    assert out.startswith("ev‹il›")
