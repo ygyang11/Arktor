@@ -317,25 +317,34 @@ class AnthropicProvider(BaseLLM):
         system_parts: list[str] = []
         api_messages: list[dict[str, Any]] = []
 
-        for msg in messages:
+        i = 0
+        n = len(messages)
+        while i < n:
+            msg = messages[i]
+
             if msg.role == Role.SYSTEM:
                 if msg.content:
                     system_parts.append(msg.content)
+                i += 1
                 continue
 
             if msg.role == Role.TOOL and msg.tool_result:
-                # Anthropic: tool results are user messages with tool_result content blocks
-                api_messages.append({
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": msg.tool_result.tool_call_id,
-                            "content": msg.tool_result.content,
-                            "is_error": msg.tool_result.is_error,
-                        }
-                    ],
-                })
+                # Anthropic parallel-tool-use spec: all tool_result blocks for
+                # a given assistant(tool_use ...) turn must live in ONE user
+                # message.
+                blocks: list[dict[str, Any]] = []
+                while i < n and messages[i].role == Role.TOOL:
+                    tr = messages[i].tool_result
+                    if tr is None:
+                        break
+                    blocks.append({
+                        "type": "tool_result",
+                        "tool_use_id": tr.tool_call_id,
+                        "content": tr.content,
+                        "is_error": tr.is_error,
+                    })
+                    i += 1
+                api_messages.append({"role": "user", "content": blocks})
                 continue
 
             if msg.role == Role.ASSISTANT:
@@ -358,6 +367,7 @@ class AnthropicProvider(BaseLLM):
                     "role": "assistant",
                     "content": content_blocks,
                 })
+                i += 1
                 continue
 
             if msg.role == Role.USER and msg.attachments:
@@ -365,12 +375,14 @@ class AnthropicProvider(BaseLLM):
                     "role": "user",
                     "content": self._render_user_content(msg),
                 })
+                i += 1
                 continue
 
             api_messages.append({
                 "role": msg.role.value,
                 "content": msg.content or "",
             })
+            i += 1
 
         system_content = "\n\n".join(system_parts) if system_parts else None
         if len(system_parts) > 1:

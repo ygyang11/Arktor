@@ -182,6 +182,97 @@ class TestThinkingBlockRoundTrip:
             assert block["type"] not in ("thinking", "redacted_thinking")
 
 
+class TestToolResultCoalescing:
+    """Contiguous Role.TOOL runs must serialize as ONE user message with
+    multiple tool_result blocks — required by Anthropic parallel-tool-use
+    spec and enforced by strict relays like DeepSeek."""
+
+    def test_parallel_tool_results_merge_into_single_user_message(self) -> None:
+        messages = [
+            Message(
+                role=Role.ASSISTANT,
+                content=None,
+                tool_calls=[
+                    ToolCall(id="call_00", name="a", arguments={}),
+                    ToolCall(id="call_01", name="b", arguments={}),
+                    ToolCall(id="call_02", name="c", arguments={}),
+                ],
+            ),
+            Message.tool(tool_call_id="call_00", content="r0"),
+            Message.tool(tool_call_id="call_01", content="r1"),
+            Message.tool(tool_call_id="call_02", content="r2", is_error=True),
+        ]
+
+        _, api_msgs = _make_provider()._split_system_message(messages)
+
+        # assistant turn + ONE merged user(tool_result x3)
+        assert len(api_msgs) == 2
+        assert api_msgs[0]["role"] == "assistant"
+        assert api_msgs[1]["role"] == "user"
+        blocks = api_msgs[1]["content"]
+        assert [b["tool_use_id"] for b in blocks] == ["call_00", "call_01", "call_02"]
+        assert [b["content"] for b in blocks] == ["r0", "r1", "r2"]
+        assert [b["is_error"] for b in blocks] == [False, False, True]
+        assert all(b["type"] == "tool_result" for b in blocks)
+
+    def test_single_tool_result_still_one_user_message(self) -> None:
+        messages = [
+            Message(
+                role=Role.ASSISTANT,
+                content=None,
+                tool_calls=[ToolCall(id="call_solo", name="a", arguments={})],
+            ),
+            Message.tool(tool_call_id="call_solo", content="ok"),
+        ]
+        _, api_msgs = _make_provider()._split_system_message(messages)
+        assert len(api_msgs) == 2
+        assert api_msgs[1]["role"] == "user"
+        assert len(api_msgs[1]["content"]) == 1
+        assert api_msgs[1]["content"][0]["tool_use_id"] == "call_solo"
+
+    def test_separate_tool_runs_are_not_merged_across_assistant_turn(self) -> None:
+        # Serial pattern: assistant → tool → assistant → tool. Each run
+        # should still be its own user message (not cross-merged).
+        messages = [
+            Message(
+                role=Role.ASSISTANT,
+                content=None,
+                tool_calls=[ToolCall(id="c0", name="a", arguments={})],
+            ),
+            Message.tool(tool_call_id="c0", content="r0"),
+            Message(
+                role=Role.ASSISTANT,
+                content=None,
+                tool_calls=[ToolCall(id="c1", name="b", arguments={})],
+            ),
+            Message.tool(tool_call_id="c1", content="r1"),
+        ]
+        _, api_msgs = _make_provider()._split_system_message(messages)
+        roles = [m["role"] for m in api_msgs]
+        assert roles == ["assistant", "user", "assistant", "user"]
+        assert api_msgs[1]["content"][0]["tool_use_id"] == "c0"
+        assert api_msgs[3]["content"][0]["tool_use_id"] == "c1"
+
+    def test_tool_run_then_user_message_stays_separated(self) -> None:
+        messages = [
+            Message(
+                role=Role.ASSISTANT,
+                content=None,
+                tool_calls=[
+                    ToolCall(id="c0", name="a", arguments={}),
+                    ToolCall(id="c1", name="b", arguments={}),
+                ],
+            ),
+            Message.tool(tool_call_id="c0", content="r0"),
+            Message.tool(tool_call_id="c1", content="r1"),
+            Message(role=Role.USER, content="next turn"),
+        ]
+        _, api_msgs = _make_provider()._split_system_message(messages)
+        assert [m["role"] for m in api_msgs] == ["assistant", "user", "user"]
+        assert len(api_msgs[1]["content"]) == 2  # merged tool_results
+        assert api_msgs[2]["content"] == "next turn"
+
+
 class TestStreamUsageAggregation:
     """Stream-event → response.usage aggregation under the diff-emit design."""
 

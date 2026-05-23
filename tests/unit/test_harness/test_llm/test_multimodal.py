@@ -170,6 +170,73 @@ class TestRenderUserContentAnthropic:
         }
 
 
+class TestAnthropicParallelToolResultsWithMedia:
+    """End-to-end wire shape for parallel tool calls whose results carry
+    image attachments — exercises `_expand_tool_result_media` + the
+    coalescing `_split_system_message` together."""
+
+    def test_parallel_tool_results_with_images_serialize_correctly(self) -> None:
+        p = _anthropic()
+        img1_bytes = b"png-1"
+        img2_bytes = b"png-2"
+        img1 = _att(img1_bytes, "image/png", "a.png")
+        img2 = _att(img2_bytes, "image/png", "b.png")
+
+        messages = [
+            Message(
+                role=Role.ASSISTANT,
+                content=None,
+                tool_calls=[
+                    ToolCall(id="t1", name="read", arguments={"path": "a"}),
+                    ToolCall(id="t2", name="read", arguments={"path": "b"}),
+                ],
+            ),
+            Message.tool(tool_call_id="t1", content="ok1", attachments=[img1]),
+            Message.tool(tool_call_id="t2", content="ok2", attachments=[img2]),
+        ]
+
+        expanded = p._expand_tool_result_media(messages)
+        _, api_msgs = p._split_system_message(expanded)
+
+        # Three wire messages: assistant turn, merged tool_results,
+        # synthetic media user.
+        assert len(api_msgs) == 3
+
+        # 1) Assistant with two tool_use blocks.
+        assert api_msgs[0]["role"] == "assistant"
+        assistant_blocks = api_msgs[0]["content"]
+        tool_uses = [b for b in assistant_blocks if b["type"] == "tool_use"]
+        assert [b["id"] for b in tool_uses] == ["t1", "t2"]
+
+        # 2) ONE user message with both tool_result blocks; attachments
+        #    must NOT bleed into the tool_result blocks themselves —
+        #    they're carried separately by the media user message below.
+        assert api_msgs[1]["role"] == "user"
+        tr_blocks = api_msgs[1]["content"]
+        assert all(b["type"] == "tool_result" for b in tr_blocks)
+        assert [b["tool_use_id"] for b in tr_blocks] == ["t1", "t2"]
+        assert [b["content"] for b in tr_blocks] == ["ok1", "ok2"]
+        for b in tr_blocks:
+            # tool_result schema is tool_use_id / content / is_error only.
+            assert set(b.keys()) == {"type", "tool_use_id", "content", "is_error"}
+
+        # 3) Synthetic media user message: preamble text + image blocks
+        #    for every attachment on the TOOL run, in original order.
+        assert api_msgs[2]["role"] == "user"
+        media_blocks = api_msgs[2]["content"]
+        assert media_blocks[0] == {"type": "text", "text": p._TOOL_MEDIA_PREAMBLE}
+        b64_1 = base64.b64encode(img1_bytes).decode()
+        b64_2 = base64.b64encode(img2_bytes).decode()
+        assert media_blocks[1] == {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": b64_1},
+        }
+        assert media_blocks[2] == {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": b64_2},
+        }
+
+
 class TestBaseLLMHooks:
     def test_default_text_block(self) -> None:
         class _LLM(BaseLLM):
