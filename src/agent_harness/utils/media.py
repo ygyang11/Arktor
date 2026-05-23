@@ -16,7 +16,7 @@ MEDIA_REJECTION_PHRASES: tuple[str, ...] = (
     "unknown variant `image_url`", "unknown variant `image`", "unknown variant `file`",
     "does not support image", "does not support file", "does not support video",
     "does not support audio", "does not support multimodal", "does not support vision",
-    "support image input", "support file input"
+    "support image input", "support file input",
     "could not process image", "could not process file",
     "image does not match", "media type mismatch",
     "unsupported mimetype", "unsupported image",
