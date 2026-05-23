@@ -95,6 +95,9 @@ class AnthropicProvider(BaseLLM):
         tc_buffer: dict[int, dict[str, str]] = {}
         thinking_buffer: dict[int, dict[str, Any]] = {}
         completed_thinking: list[dict[str, Any]] = []
+        last_cum_input = 0
+        last_cum_cache_read = 0
+        last_cum_cache_creation = 0
         last_cum_output = 0
 
         try:
@@ -177,20 +180,26 @@ class AnthropicProvider(BaseLLM):
                         msg = getattr(event, "message", None)
                         msg_usage = getattr(msg, "usage", None)
                         if msg_usage:
-                            input_uncached = getattr(msg_usage, "input_tokens", 0) or 0
-                            cache_read = getattr(msg_usage, "cache_read_input_tokens", 0) or 0
-                            cache_creation = getattr(msg_usage, "cache_creation_input_tokens", 0) or 0
-                            total_input = input_uncached + cache_read + cache_creation
-                            yield StreamDelta(
-                                chunk=MessageChunk(),
-                                usage=Usage(
-                                    prompt_tokens=total_input,
-                                    completion_tokens=0,
-                                    total_tokens=total_input,
-                                    cache_read_tokens=cache_read,
-                                    cache_creation_tokens=cache_creation,
-                                ),
-                            )
+                            parsed = self._parse_usage(msg_usage)
+                            d_in  = max(parsed.prompt_tokens         - last_cum_input,          0)
+                            d_cr  = max(parsed.cache_read_tokens     - last_cum_cache_read,     0)
+                            d_cc  = max(parsed.cache_creation_tokens - last_cum_cache_creation, 0)
+                            d_out = max(parsed.completion_tokens     - last_cum_output,         0)
+                            last_cum_input          = parsed.prompt_tokens
+                            last_cum_cache_read     = parsed.cache_read_tokens
+                            last_cum_cache_creation = parsed.cache_creation_tokens
+                            last_cum_output         = parsed.completion_tokens
+                            if d_in or d_cr or d_cc or d_out:
+                                yield StreamDelta(
+                                    chunk=MessageChunk(),
+                                    usage=Usage(
+                                        prompt_tokens=d_in,
+                                        completion_tokens=d_out,
+                                        total_tokens=d_in + d_out,
+                                        cache_read_tokens=d_cr,
+                                        cache_creation_tokens=d_cc,
+                                    ),
+                                )
                         continue
 
                     if event_type == "message_delta":
@@ -217,13 +226,22 @@ class AnthropicProvider(BaseLLM):
                         delta_usage: Usage | None = None
                         evt_usage = getattr(event, "usage", None)
                         if evt_usage:
-                            current_cum = getattr(evt_usage, "output_tokens", 0) or 0
-                            delta_out = current_cum - last_cum_output
-                            last_cum_output = current_cum
-                            if delta_out:
+                            parsed = self._parse_usage(evt_usage)
+                            d_in  = max(parsed.prompt_tokens         - last_cum_input,          0)
+                            d_cr  = max(parsed.cache_read_tokens     - last_cum_cache_read,     0)
+                            d_cc  = max(parsed.cache_creation_tokens - last_cum_cache_creation, 0)
+                            d_out = max(parsed.completion_tokens     - last_cum_output,         0)
+                            last_cum_input          = parsed.prompt_tokens
+                            last_cum_cache_read     = parsed.cache_read_tokens
+                            last_cum_cache_creation = parsed.cache_creation_tokens
+                            last_cum_output         = parsed.completion_tokens
+                            if d_in or d_cr or d_cc or d_out:
                                 delta_usage = Usage(
-                                    completion_tokens=delta_out,
-                                    total_tokens=delta_out,
+                                    prompt_tokens=d_in,
+                                    completion_tokens=d_out,
+                                    total_tokens=d_in + d_out,
+                                    cache_read_tokens=d_cr,
+                                    cache_creation_tokens=d_cc,
                                 )
 
                         yield StreamDelta(
@@ -378,8 +396,7 @@ class AnthropicProvider(BaseLLM):
             },
         }
 
-    @staticmethod
-    def _parse_response(response: Any) -> LLMResponse:
+    def _parse_response(self, response: Any) -> LLMResponse:
         """Convert Anthropic response to LLMResponse."""
         content_text: str | None = None
         tool_calls: list[ToolCall] = []
@@ -417,21 +434,7 @@ class AnthropicProvider(BaseLLM):
             provider_metadata=provider_metadata,
         )
 
-        if response.usage:
-            input_uncached = response.usage.input_tokens or 0
-            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
-            total_input = input_uncached + cache_read + cache_creation
-            output_tokens = response.usage.output_tokens or 0
-            usage = Usage(
-                prompt_tokens=total_input,
-                completion_tokens=output_tokens,
-                total_tokens=total_input + output_tokens,
-                cache_read_tokens=cache_read,
-                cache_creation_tokens=cache_creation,
-            )
-        else:
-            usage = Usage()
+        usage = self._parse_usage(response.usage)
 
         finish_reason = FinishReason.STOP
         if response.stop_reason == "tool_use":
@@ -447,33 +450,23 @@ class AnthropicProvider(BaseLLM):
             raw_response=response,
         )
 
-    @staticmethod
-    def _parse_stream_event(event: Any) -> StreamDelta | None:
-        """Parse an Anthropic stream event into a StreamDelta."""
-        # Handle different event types from Anthropic's streaming API
-        event_type = getattr(event, "type", None)
+    def _parse_usage(self, raw_usage: Any) -> Usage:
+        if not raw_usage:
+            return Usage()
 
-        if event_type == "content_block_delta":
-            delta = getattr(event, "delta", None)
-            if delta and getattr(delta, "type", None) == "text_delta":
-                return StreamDelta(
-                    chunk=MessageChunk(delta_content=delta.text),
-                )
-            if delta and getattr(delta, "type", None) == "input_json_delta":
-                # Partial tool input JSON
-                return None  # Accumulate externally
+        input_uncached = getattr(raw_usage, "input_tokens", 0) or 0
+        cache_read = getattr(raw_usage, "cache_read_input_tokens", 0) or 0
+        cache_creation = getattr(raw_usage, "cache_creation_input_tokens", 0) or 0
+        output_tokens = getattr(raw_usage, "output_tokens", 0) or 0
 
-        if event_type == "message_delta":
-            stop_reason = getattr(getattr(event, "delta", None), "stop_reason", None)
-            if stop_reason:
-                finish = FinishReason.STOP
-                if stop_reason == "tool_use":
-                    finish = FinishReason.TOOL_CALLS
-                elif stop_reason == "max_tokens":
-                    finish = FinishReason.LENGTH
-                return StreamDelta(
-                    chunk=MessageChunk(finish_reason=stop_reason),
-                    finish_reason=finish,
-                )
+        prompt = input_uncached + cache_read + cache_creation
+        if prompt == 0 and output_tokens == 0:
+            return Usage()
 
-        return None
+        return Usage(
+            prompt_tokens=prompt,
+            completion_tokens=output_tokens,
+            total_tokens=prompt + output_tokens,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
+        )
