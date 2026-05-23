@@ -50,8 +50,8 @@ memory:
                                 # "trim"      — hard token-based truncation only
   forget_threshold: 0.3         # Weighted score below which memories are forgotten
   compression:                  # Only effective when strategy = "summarize"
-    threshold: 0.75             # Compress when token usage > 75% of max_tokens
-    retain_count: 6             # Keep last N message groups intact (never compressed)
+    threshold: 0.9             # Compress when token usage > 75% of max_tokens
+    retain_count: 3             # Keep last N message groups intact (never compressed)
     summary_model: ""           # Model for summaries (empty = use main model)
     summary_max_tokens: null    # Max output tokens for summary (null = use LLM config default)
 

@@ -51,6 +51,8 @@ _PDF_EXECUTOR_TIMEOUT = (
     + _CFG.executor_slack_s
 )
 
+_MAX_ZIP_ENTRY_SIZE = 50 * 1024 * 1024  # 50 MB
+
 _MINERU_BASE = "https://mineru.net"
 _PADDLEOCR_JOB_URL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
 
@@ -355,9 +357,6 @@ async def _parse_mineru(url: str, api_key: str) -> str:
             return f"Error: PDF parsing failed: {err}"
 
     return "Error: PDF parsing timed out"
-
-
-_MAX_ZIP_ENTRY_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
 async def _download_mineru_markdown(zip_url: str) -> str:
