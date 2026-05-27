@@ -84,7 +84,7 @@ _PRIMARY_ARG_KEYS: dict[str, tuple[str, ...]] = {
     "read_file": ("file_path",),
     "write_file": ("file_path",),
     "edit_file": ("file_path",),
-    "pdf_parser": ("file_path",),
+    "document_parser": ("target",),
     "list_dir": ("path",),
     "glob_files": ("pattern",),
     "grep_files": ("pattern",),
@@ -113,7 +113,7 @@ _DISPLAY_NAMES: dict[str, str] = {
     "memory_tool": "Memory",
     "skill_tool": "Skill",
     "background_task": "Task",
-    "pdf_parser": "PDF",
+    "document_parser": "Document",
 }
 
 
@@ -276,11 +276,12 @@ def _format_result_line(row: _ToolRow) -> Text | None:
         summary = f"Denied {SEP_DOT} Do not run this tool."
         value_style = "error"
     elif _is_error_result(row.result):
-        content = (row.result.content if row.result is not None else "").replace("\n", " ")
-        if content.startswith("Error:"):
-            summary = _truncate(content, 72)
+        content = row.result.content if row.result is not None else ""
+        first_line = content.split("\n", 1)[0].strip()
+        if first_line.startswith("Error:"):
+            summary = _truncate(first_line, 72)
         else:
-            summary = f"Error: {_truncate(content, 56)}"
+            summary = f"Error: {_truncate(first_line, 56)}"
         value_style = "error"
     else:
         fmt = _RESULT_FORMATTERS.get(row.name, _generic_result)
@@ -300,7 +301,7 @@ def _format_result_line(row: _ToolRow) -> Text | None:
 
 def _summarize_result(tc: ToolCall, tr: ToolResult) -> str:
     if tc.name == "read_file" and tr.content:
-        if tr.content.startswith(("Binary file", "Empty file", "(empty")):
+        if tr.content.startswith(("Empty file", "(empty")):
             return tr.content.split(chr(10), 1)[0]
         from agent_cli.render.tool_formatters import _READ_HEADER_RE  # noqa: PLC0415
 

@@ -10,7 +10,7 @@ _EXPECTED_FORMATTERS = {
     "glob_files", "grep_files", "list_dir",
     "terminal_tool",
     "web_search", "web_fetch",
-    "pdf_parser",
+    "document_parser",
     "paper_search", "paper_fetch",
     "memory_tool", "skill_tool",
     "background_task",

@@ -20,7 +20,9 @@ def _mock_live_display() -> ToolDisplay:
 
 
 def _read_result(content: str) -> MagicMock:
-    return MagicMock(tool_call_id="t1", content=content, is_error=False)
+    return MagicMock(
+        tool_call_id="t1", content=content, is_error=False, attachments=None,
+    )
 
 
 def test_add_call_opens_live_and_appends_row() -> None:
@@ -31,6 +33,27 @@ def test_add_call_opens_live_and_appends_row() -> None:
     assert len(d._rows) == 1
     assert d._rows[0].status == "running"
     d._open_live.assert_called_once()
+
+
+def test_read_pdf_attachment_branch_shows_attached_pdf() -> None:
+    from agent_harness.core.message import Attachment, ToolCall, ToolResult
+
+    d = _mock_live_display()
+    tc = ToolCall(
+        id="rdf-1", name="read_file", arguments={"file_path": "doc.pdf"},
+    )
+    d.add_call(tc)
+    att = Attachment(
+        digest="d" * 64, mime="application/pdf", filename="doc.pdf", size=2_000_000,
+    )
+    tr = ToolResult(
+        tool_call_id="rdf-1", content="Read PDF", attachments=[att],
+    )
+    d.mark_result(tr)
+    row = d._rows[0]
+    line = _format_result_line(row)
+    assert line is not None
+    assert "Attached PDF" in line.plain
 
 
 def test_mark_result_done_status_and_summary_formats() -> None:
@@ -57,6 +80,34 @@ def test_mark_result_error_summary_is_error_prefixed() -> None:
     assert row.status == "error"
     line = _format_result_line(row)
     assert line is not None and line.plain.lstrip().startswith("⎿  Error:")
+
+
+def test_multiline_error_collapses_to_first_line() -> None:
+    """`document_parser` and similar multi-section errors should render their
+    headline (first line) instead of being squashed onto one line with
+    everything jammed together and then truncated mid-detail."""
+    d = _mock_live_display()
+    tc = MagicMock(id="t1", arguments={"target": "https://x/a.pdf"})
+    tc.name = "document_parser"
+    d.add_call(tc)
+    multiline = (
+        "Error: document parsing failed.\n\n"
+        "Tried:\n"
+        "  1. paddleocr-vl-1.5  url   TIMEOUT (request timeout during PaddleOCR POST)\n"
+        "\nSkipped (preflight):\n"
+        "  - mineru-lightweight size>10MB(url)\n"
+    )
+    d.mark_result(MagicMock(
+        tool_call_id="t1", content=multiline, is_error=True, attachments=None,
+    ))
+    row = d._rows[0]
+    line = _format_result_line(row)
+    assert line is not None
+    plain = line.plain
+    assert "Error: document parsing failed." in plain
+    # detail lines should NOT bleed into the inline summary
+    assert "Tried" not in plain
+    assert "paddleocr-vl-1.5" not in plain
 
 
 def test_error_content_string_without_flag_is_detected() -> None:
@@ -223,10 +274,6 @@ class TestAttachmentSummaryAndFormat:
         tr = _tr("[big.py] lines 1-500 of 1200\n" + "\n".join(f"l{i}" for i in range(500)))
         assert "(lines 1-500 of 1200)" in self._render_one(tc, tr)
 
-    def test_read_binary_branch(self) -> None:
-        tc = _tc("read_file", file_path="img.png")
-        tr = _tr("Binary file detected: img.png")
-        assert "Binary" in self._render_one(tc, tr)
 
     def test_read_empty_branch(self) -> None:
         tc = _tc("read_file", file_path="empty.txt")

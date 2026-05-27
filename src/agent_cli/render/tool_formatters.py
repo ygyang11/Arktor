@@ -44,6 +44,8 @@ _LIST_HEADER_RE = re.compile(r"^(.+)/  \((\d+) entries\)")
 _TERM_EXIT_RE = re.compile(r"^\[exit code (\d+|N/A)\]")
 _TERM_BG_RE = re.compile(r"^Background command (\S+) started:")
 _PAPER_TITLE_RE = re.compile(r"^# (.+)$", re.MULTILINE)
+_DOC_FORMAT_RE = re.compile(r"format\s*:\s*(\w+)(?:\s*\((\d+)\s*pages?)?")
+_DOC_IMAGES_RE = re.compile(r"\((\d+)\s*figures?\)")
 _SKILL_LOADED_RE = re.compile(
     r'<skill-loaded name="[^"]+">\n(.*)\n</skill-loaded>', re.DOTALL
 )
@@ -185,9 +187,11 @@ def _render_diff_lines(
 
 @register_result_formatter("read_file")
 def _fmt_read(tc: ToolCall, r: ToolResult) -> str:
+    if r.attachments:
+        att = r.attachments[0]
+        kind = "PDF" if att.mime == "application/pdf" else "image"
+        return f"Attached {kind} ({_human_size(att.size)})"
     c = r.content
-    if c.startswith("Binary file detected:"):
-        return c.rstrip(".").replace("Binary file detected: ", "Binary file ")
     if c.startswith("(empty"):
         return "Empty file"
     m = _READ_HEADER_RE.match(c)
@@ -279,14 +283,24 @@ def _fmt_websearch(tc: ToolCall, r: ToolResult) -> str:
 @register_result_formatter("web_fetch")
 def _fmt_webfetch(tc: ToolCall, r: ToolResult) -> str:
     host = urlparse(str(tc.arguments.get("url", ""))).hostname or "?"
+    if r.attachments:
+        att = r.attachments[0]
+        kind = "PDF" if att.mime == "application/pdf" else "image"
+        return f"Fetched {kind} ({_human_size(att.size)}) from {host}"
     size = _human_size(len(r.content.encode("utf-8", "ignore")))
     return f"Fetched {size} from {host}"
 
 
-@register_result_formatter("pdf_parser")
-def _fmt_pdf(tc: ToolCall, r: ToolResult) -> str:
-    size = _human_size(len(r.content.encode("utf-8", "ignore")))
-    return f"Parsed PDF ({size})"
+@register_result_formatter("document_parser")
+def _fmt_doc(tc: ToolCall, r: ToolResult) -> str:
+    fm = _DOC_FORMAT_RE.search(r.content)
+    if not fm:
+        return "Parsed"
+    fmt, pages = fm.group(1), fm.group(2)
+    im = _DOC_IMAGES_RE.search(r.content)
+    n_imgs = int(im.group(1)) if im else 0
+    head = f"Parsed {pages}p {fmt}" if pages else f"Parsed {fmt}"
+    return f"{head} (contains {n_imgs} figures)" if n_imgs > 0 else head
 
 
 @register_result_formatter("paper_search")
@@ -303,8 +317,11 @@ def _fmt_papersearch(tc: ToolCall, r: ToolResult) -> str:
 @register_result_formatter("paper_fetch")
 def _fmt_paperfetch(tc: ToolCall, r: ToolResult) -> str:
     if tc.arguments.get("mode") == "full":
-        size = _human_size(len(r.content.encode("utf-8", "ignore")))
-        return f"Downloaded paper ({size})"
+        fm = _DOC_FORMAT_RE.search(r.content)
+        if fm:
+            fmt, pages = fm.group(1), fm.group(2)
+            return f"Parsed paper: {pages}p {fmt}" if pages else f"Parsed paper: {fmt}"
+        return "Parsed paper"
     m = _PAPER_TITLE_RE.search(r.content)
     return f'Fetched metadata: "{_truncate(m[1], 60)}"' if m else "Fetched metadata"
 
@@ -461,11 +478,6 @@ def _expand_websearch(console: Console, row: _ToolRow) -> None:
 #     _print_body_lines(console, row.result.content.splitlines(), more_label="lines")
 
 
-# @register_expander("pdf_parser")
-# def _expand_pdf(console: Console, row: _ToolRow) -> None:
-#     if _is_error_result(row.result) or row.result is None:
-#         return
-#     _print_body_lines(console, row.result.content.splitlines(), cap=5, more_label="lines")
 
 
 @register_expander("paper_search")
@@ -504,13 +516,14 @@ def _expand_papersearch(console: Console, row: _ToolRow) -> None:
 
 @register_expander("paper_fetch")
 def _expand_paperfetch(console: Console, row: _ToolRow) -> None:
-    if _is_error_result(row.result) or row.result is None or row.tool_call is None:
+    if (
+        _is_error_result(row.result)
+        or row.result is None
+        or row.tool_call is None
+        or row.tool_call.arguments.get("mode") == "full"
+    ):
         return
-    lines = row.result.content.splitlines()
-    if row.tool_call.arguments.get("mode") == "full":
-        _print_body_lines(console, lines, cap=5, more_label="lines")
-    else:
-        _print_body_lines(console, lines, more_label="lines")
+    _print_body_lines(console, row.result.content.splitlines(), more_label="lines")
 
 
 @register_expander("memory_tool")
