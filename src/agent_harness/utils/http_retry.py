@@ -366,3 +366,24 @@ async def http_get_bytes_with_retry(
         max_bytes=max_bytes,
         allow_redirects=allow_redirects,
     )
+
+
+async def http_head_with_retry(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: int = 30,
+    retry: HttpRetryConfig = DEFAULT_HTTP_RETRY,
+    allow_redirects: bool = True,
+) -> tuple[int, Mapping[str, str]]:
+    """HEAD with retries on 429/5xx and transient transport failures."""
+    response = await _request_text_with_retry(
+        method="HEAD",
+        url=url,
+        headers=headers,
+        timeout=timeout,
+        retry=retry,
+        max_bytes=None,
+        allow_redirects=allow_redirects,
+    )
+    return response.status, response.headers

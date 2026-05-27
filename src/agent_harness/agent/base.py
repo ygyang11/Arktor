@@ -327,11 +327,16 @@ class BaseAgent(ABC, EventEmitter):
         schemas: list[ToolSchema] = self.tool_registry.get_schemas()
         return schemas
 
-    def _bind_session_id(self, session_id: str) -> None:
+    def _bind_session_id(self, session_id: str | None) -> None:
+        from agent_harness.tool.base import SessionAware
+
         compressor = self.context.short_term_memory.compressor
         if compressor:
             compressor.bind_session(session_id)
         self._bg_manager.bind_session(session_id)
+        for tool in self.tool_registry.list_tools():
+            if isinstance(tool, SessionAware):
+                tool.bind_session(session_id)
 
     def _reset_stateful_tools(self) -> None:
         for tool in self.tool_registry.list_tools():
@@ -397,8 +402,10 @@ class BaseAgent(ABC, EventEmitter):
         if self.context.state.is_terminal:
             self.context.state.reset()
 
+        self._bind_session_id(
+            resolved_session.session_id if resolved_session else None
+        )
         if resolved_session:
-            self._bind_session_id(resolved_session.session_id)
             if not await self.context.short_term_memory.get_context_messages():
                 state = await resolved_session.load_state()
                 if state:

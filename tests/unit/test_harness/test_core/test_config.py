@@ -278,6 +278,20 @@ class TestPaperConfig:
         cfg = PaperConfig(semantic_scholar_api_key="  ")
         assert cfg.semantic_scholar_api_key is None
 
+    def test_placeholder_to_none_allows_env_fallback(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("SEMANTIC_SCHOLAR_API_KEY", "env-key")
+        cfg = PaperConfig(semantic_scholar_api_key="__SET_API_KEY__")
+        assert cfg.semantic_scholar_api_key == "env-key"
+
+    def test_real_value_overrides_env(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("SEMANTIC_SCHOLAR_API_KEY", "env-key")
+        cfg = PaperConfig(semantic_scholar_api_key="real-key")
+        assert cfg.semantic_scholar_api_key == "real-key"
+
     def test_in_harness(self) -> None:
         cfg = HarnessConfig()
         assert isinstance(cfg.paper, PaperConfig)

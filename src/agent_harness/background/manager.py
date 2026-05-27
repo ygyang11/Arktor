@@ -51,12 +51,21 @@ class BackgroundTaskManager:
 
     def __init__(self) -> None:
         self._tasks: dict[str, BackgroundTask] = {}
-        self._output_dir = f"{self._BASE_OUTPUT_DIR}/{uuid.uuid4().hex[:8]}"
+        self._anonymous_dir = f"{self._BASE_OUTPUT_DIR}/{uuid.uuid4().hex[:8]}"
+        self._output_dir = self._anonymous_dir
         self._cleanup_output_dir()
 
-    def bind_session(self, session_id: str) -> None:
-        """Bind to a session for output directory isolation."""
-        new_dir = f"{self._BASE_OUTPUT_DIR}/{session_id}"
+    def bind_session(self, session_id: str | None) -> None:
+        """Bind to a session for output directory isolation.
+
+        ``None`` falls back to this manager's per-instance anonymous
+        directory (assigned at construction), so sessionless runs stay
+        isolated from one another and never write into the shared base.
+        """
+        new_dir = (
+            f"{self._BASE_OUTPUT_DIR}/{session_id}" if session_id
+            else self._anonymous_dir
+        )
         if new_dir == self._output_dir:
             return
         self._output_dir = new_dir

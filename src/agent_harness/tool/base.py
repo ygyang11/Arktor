@@ -29,6 +29,17 @@ class AgentAware(Protocol):
     def bind_agent(self, agent: Any) -> None: ...
 
 
+@runtime_checkable
+class SessionAware(Protocol):
+    """Protocol for tools that need the current session id.
+
+    Tools implementing this protocol will receive the session id
+    whenever it is bound, restored, or switched, via bind_session().
+    """
+
+    def bind_session(self, session_id: str | None) -> None: ...
+
+
 class ToolParameter(BaseModel):
     """Description of a single tool parameter."""
     name: str

@@ -27,6 +27,7 @@ from agent_harness.context.state import AgentState
 from agent_harness.core.config import HarnessConfig, LLMConfig, MemoryConfig, TracingConfig
 from agent_harness.core.message import Message
 from agent_harness.hooks import DefaultHooks, TracingHooks
+from agent_harness.tool.base import BaseTool
 from tests.conftest import MockLLM, MockTool
 
 
@@ -735,3 +736,50 @@ class TestMediaRejectionSelfHeal:
             if m.role == Role.TOOL
         ]
         assert tool_msgs[-1].tool_result.attachments is None
+
+
+class _SessionRecorderTool(BaseTool):
+    """Records every session id pushed via bind_session — used to verify
+    SessionAware lifecycle (binds at run start, including the sessionless
+    path that clears a previously-bound id back to None).
+    """
+
+    def __init__(self) -> None:
+        super().__init__(name="session_recorder", description="record session binds")
+        self.binds: list[str | None] = []
+
+    def bind_session(self, session_id: str | None) -> None:
+        self.binds.append(session_id)
+
+    async def execute(self, **kwargs: Any) -> str:
+        return "ok"
+
+
+class TestSessionAwareLifecycle:
+    """Issue: a sessionless run after a sessionful run must clear the
+    previously-bound session id from SessionAware tools — otherwise tools
+    keep writing into the prior session's storage."""
+
+    @pytest.mark.asyncio
+    async def test_sessionless_run_unbinds_prior_session(self) -> None:
+        from agent_harness.session.memory_session import InMemorySession
+
+        llm = MockLLM()
+        llm.add_text_response("a")
+        llm.add_text_response("b")
+
+        tool = _SessionRecorderTool()
+        agent = ConversationalAgent(
+            name="t", llm=llm, tools=[tool], system_prompt="",
+        )
+
+        # First run with a session — binds "S1"
+        await agent.run("first", session=InMemorySession(session_id="S1"))
+        bound_tool = agent.tool_registry.get("session_recorder")
+        assert isinstance(bound_tool, _SessionRecorderTool)
+        assert "S1" in bound_tool.binds
+
+        # Second run without a session — must rebind to None,
+        # otherwise tools keep using S1's session storage.
+        await agent.run("second")
+        assert bound_tool.binds[-1] is None

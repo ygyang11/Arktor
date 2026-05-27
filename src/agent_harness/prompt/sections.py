@@ -138,28 +138,33 @@ You have `paper_search` and `paper_fetch` for academic literature.
 
 ### Workflow
 1. **Search** — returns structured metadata including title, abstract, etc.
-2. **Fetch** — two modes: `metadata` for detailed info beyond search results \
-(reference count, fields of study, TL;DR, etc.), `full` for the \
-complete paper body text
-3. Search results already include core metadata — fetch `metadata` only \
-if specific fields are missing, fetch `full` when you need to deeply \
-understand a paper's methodology, results, or technical details.""",
+2. **Fetch** — two modes: `metadata` for detailed structured info beyond \
+search results (reference count, fields of study, TL;DR, etc.), `full` for \
+the paper's parsed content with on-disk artifact paths
+3. Search results already include core metadata — fetch `metadata` only if \
+specific fields are missing; fetch `full` when you need to deeply understand \
+a paper's methodology, results, or technical details, or when the user \
+explicitly requests it""",
 
 
-    "pdf": """\
-## PDF Parsing
+    "document_parser": """\
+## Document Parsing
 
-You have a `pdf_parser` tool for extracting text from PDF documents.
+You have a `document_parser` tool for extracting structured content from PDF \
+or image documents.
 
 ### When to Use
-- When `web_fetch` reports a URL is a PDF document and you need its content 
-- When the user provides a PDF url or local file directly
-- For academic papers, `paper_fetch(mode="full")` which handles \
-PDF extraction internally and provides its full content.
+- When another tool (e.g. `read_file`, `web_fetch`) returned a PDF or image \
+as media you cannot read or parse, or when you need precise structured content \
+(text, tables, formulas, layout), call `document_parser` with the same URL or path
+- When you already have an arxiv or semantic_scholar paper ID, prefer \
+`paper_fetch(mode="full")` over calling `document_parser` on the PDF directly
 
 ### Capabilities
-- Extracts text, tables, and formulas from complex layouts
-- Returns content as structured Markdown""",
+- Extracts text, tables, formulas, and figures from PDFs and images with \
+complex layouts
+- Returns a structured response pointing to on-disk artifacts for downstream \
+reading""",
 
 
     "memory_tool": """\
@@ -445,8 +450,8 @@ def make_tools_section() -> PromptSection:
             parts.append(_TOOL_SUPPLEMENTS["web"])
         if _has_any_tool(ctx, _PAPER_TOOL_NAMES):
             parts.append(_TOOL_SUPPLEMENTS["paper"])
-        if _has_tool(ctx, "pdf_parser"):
-            parts.append(_TOOL_SUPPLEMENTS["pdf"])
+        if _has_tool(ctx, "document_parser"):
+            parts.append(_TOOL_SUPPLEMENTS["document_parser"])
         if _has_tool(ctx, "memory_tool"):
             parts.append(_TOOL_SUPPLEMENTS["memory_tool"])
         if _has_tool(ctx, "todo_write"):

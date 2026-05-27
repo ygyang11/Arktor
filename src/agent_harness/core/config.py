@@ -6,6 +6,7 @@ Environment variables take highest precedence.
 from __future__ import annotations
 
 import os
+import re
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
@@ -18,6 +19,22 @@ load_dotenv()
 
 if TYPE_CHECKING:
     from agent_harness.hooks import DefaultHooks
+
+
+_PLACEHOLDER_RE = re.compile(r"^__SET_[A-Z0-9_]+__$")
+
+
+def _unset_to_none(value: str | None) -> str | None:
+    """Treat empty strings and ``__SET_*__`` placeholders as unset.
+
+    Both forms route through `model_post_init`'s env-var fallback so an
+    unfilled `config.yaml` does not override an exported credential.
+    """
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped or _PLACEHOLDER_RE.match(stripped):
+            return None
+    return value
 
 
 class _EnvVars:
@@ -54,10 +71,8 @@ class LLMConfig(BaseModel):
 
     @field_validator("api_key", "base_url", "reasoning_effort", mode="before")
     @classmethod
-    def _blank_to_none(cls, value: str | None) -> str | None:
-        if isinstance(value, str) and value.strip() == "":
-            return None
-        return value
+    def _unset_to_none(cls, value: str | None) -> str | None:
+        return _unset_to_none(value)
 
     def model_post_init(self, __context: Any) -> None:
         # Auto-resolve API keys from environment if not set
@@ -111,10 +126,8 @@ class CompressionConfig(BaseModel):
 
     @field_validator("summary_model", mode="before")
     @classmethod
-    def _blank_to_none(cls, value: str | None) -> str | None:
-        if isinstance(value, str) and value.strip() == "":
-            return None
-        return value
+    def _unset_to_none(cls, value: str | None) -> str | None:
+        return _unset_to_none(value)
 
 
 class MemoryConfig(BaseModel):
@@ -135,10 +148,8 @@ class SearchConfig(BaseModel):
 
     @field_validator("tavily_api_key", "serpapi_api_key", mode="before")
     @classmethod
-    def _blank_to_none(cls, value: str | None) -> str | None:
-        if isinstance(value, str) and value.strip() == "":
-            return None
-        return value
+    def _unset_to_none(cls, value: str | None) -> str | None:
+        return _unset_to_none(value)
 
     def model_post_init(self, __context: Any) -> None:
         if self.tavily_api_key is None:
@@ -147,25 +158,27 @@ class SearchConfig(BaseModel):
             self.serpapi_api_key = os.environ.get(_EnvVars.SERPAPI_API_KEY, "").strip() or None
 
 
-class PdfConfig(BaseModel):
-    """Configuration for PDF parsing providers."""
+class DocumentParserConfig(BaseModel):
+    """Configuration for document parsing providers."""
 
-    provider: str = "mineru"  # "mineru" | "paddleocr"
-    mineru_api_key: str | None = None
+    provider: str = "auto"
     paddleocr_api_key: str | None = None
+    mineru_api_key: str | None = None
 
-    @field_validator("mineru_api_key", "paddleocr_api_key", mode="before")
+    @field_validator("paddleocr_api_key", "mineru_api_key", mode="before")
     @classmethod
-    def _blank_to_none(cls, value: str | None) -> str | None:
-        if isinstance(value, str) and value.strip() == "":
-            return None
-        return value
+    def _unset_to_none(cls, value: str | None) -> str | None:
+        return _unset_to_none(value)
 
     def model_post_init(self, __context: Any) -> None:
         if self.mineru_api_key is None:
-            self.mineru_api_key = os.environ.get(_EnvVars.MINERU_API_KEY, "").strip() or None
+            self.mineru_api_key = (
+                os.environ.get(_EnvVars.MINERU_API_KEY, "").strip() or None
+            )
         if self.paddleocr_api_key is None:
-            self.paddleocr_api_key = os.environ.get(_EnvVars.PADDLEOCR_API_KEY, "").strip() or None
+            self.paddleocr_api_key = (
+                os.environ.get(_EnvVars.PADDLEOCR_API_KEY, "").strip() or None
+            )
 
 
 class PaperConfig(BaseModel):
@@ -175,10 +188,8 @@ class PaperConfig(BaseModel):
 
     @field_validator("semantic_scholar_api_key", mode="before")
     @classmethod
-    def _blank_to_none(cls, value: str | None) -> str | None:
-        if isinstance(value, str) and value.strip() == "":
-            return None
-        return value
+    def _unset_to_none(cls, value: str | None) -> str | None:
+        return _unset_to_none(value)
 
     def model_post_init(self, __context: Any) -> None:
         if self.semantic_scholar_api_key is None:
@@ -246,7 +257,7 @@ class HarnessConfig(BaseModel):
     tool: ToolConfig = Field(default_factory=ToolConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
-    pdf: PdfConfig = Field(default_factory=PdfConfig)
+    document_parser: DocumentParserConfig = Field(default_factory=DocumentParserConfig)
     paper: PaperConfig = Field(default_factory=PaperConfig)
     tracing: TracingConfig = Field(default_factory=TracingConfig)
     skill: SkillConfig = Field(default_factory=SkillConfig)
@@ -370,12 +381,14 @@ def resolve_search_config(config: HarnessConfig | SearchConfig | None) -> Search
     return HarnessConfig.get().search
 
 
-def resolve_pdf_config(config: HarnessConfig | PdfConfig | None) -> PdfConfig:
+def resolve_document_parser_config(
+    config: HarnessConfig | DocumentParserConfig | None,
+) -> DocumentParserConfig:
     if isinstance(config, HarnessConfig):
-        return config.pdf
-    if isinstance(config, PdfConfig):
+        return config.document_parser
+    if isinstance(config, DocumentParserConfig):
         return config
-    return HarnessConfig.get().pdf
+    return HarnessConfig.get().document_parser
 
 
 def resolve_paper_config(config: HarnessConfig | PaperConfig | None) -> PaperConfig:
