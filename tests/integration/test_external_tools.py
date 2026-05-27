@@ -1,7 +1,7 @@
 """Integration tests for external service tools with mocked APIs."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -23,18 +23,18 @@ async def test_web_search_missing_api_key() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pdf_parser_empty_url() -> None:
-    """pdf_parser returns error on empty URL."""
-    from agent_app.tools.pdf_parser import pdf_parser
+async def test_document_parser_empty_target() -> None:
+    """document_parser returns error on empty target."""
+    from agent_app.tools.document_parser import document_parser
 
-    result = await pdf_parser.execute(url="")
+    result = await document_parser.execute(target="")
     assert result.startswith("Error:")
 
 
 @pytest.mark.asyncio
-async def test_pdf_parser_whitespace_url() -> None:
-    """pdf_parser returns error on whitespace-only URL."""
-    from agent_app.tools.pdf_parser import pdf_parser
+async def test_document_parser_whitespace_target() -> None:
+    """document_parser returns error on whitespace-only target."""
+    from agent_app.tools.document_parser import document_parser
 
-    result = await pdf_parser.execute(url="   ")
+    result = await document_parser.execute(target="   ")
     assert result.startswith("Error:")

@@ -2,45 +2,32 @@
 from __future__ import annotations
 
 import logging
-import os
-import tempfile
-from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal
+from typing import Any
 from urllib.parse import urlencode
 
+from agent_app.tools.document_parser import parse_document
 from agent_harness.core.config import resolve_paper_config
-from agent_harness.tool.decorator import tool
-from agent_harness.utils.http_retry import (
-    HttpRetryConfig,
-    http_get_bytes_with_retry,
-    http_get_with_retry,
-)
+from agent_harness.tool.base import BaseTool, ToolSchema
+from agent_harness.utils.http_retry import HttpRetryConfig, http_get_with_retry
 from agent_harness.utils.json_utils import parse_json_lenient
-from agent_harness.utils.token_counter import truncate_text_by_tokens
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class PaperFetchConfig:
-    max_full_tokens: int = 15_000
-    html_fetch_timeout: int = 30
-    pdf_download_max_bytes: int = 50 * 1024 * 1024
+PAPER_FETCH_DESCRIPTION = (
+    "Fetch a specific paper by ID and source, returning either structured "
+    "metadata or parsed content of the full paper.\n\n"
+    "## Modes\n"
+    "- `metadata` (default): detailed structured info — title, authors, "
+    "full abstract, citations, fields of study, etc.\n"
+    "- `full`: routes through `document_parser` tool; the response lists on-disk "
+    "artifact paths (`content.md` body, `images/` figures, `layout.json` and "
+    "`manifest.json` — the last two usually do not need to be read). On failure, "
+    "returns the per-tier parsing trail."
+)
 
-
-_CFG = PaperFetchConfig()
-
-# full mode delegates to pdf_parser (URL path: no local upload). The
-# executor ceiling must cover pdf_parser's poll budget + submission +
-# the cheap pre-PDF probes
-_FULL_EXECUTOR_TIMEOUT = 300.0 + 30.0 + 30.0
-
-
-class _ArxivIdCheck(Enum):
-    MISSING = "missing"    # arXiv returned 0 entries -> confirmed absent
-    PRESENT = "present"    # >=1 entry -> exists
-    UNKNOWN = "unknown"    # _fetch_xml raised -> transient, undecidable
+_FULL_EXECUTOR_TIMEOUT = 720.0 + 30.0
 
 _S2_DETAIL_FIELDS = (
     "paperId,title,authors,abstract,year,venue,"
@@ -147,9 +134,7 @@ async def _fetch_arxiv_metadata(arxiv_id: str) -> str:
 
 
 async def _fetch_s2_metadata(paper_id: str, api_key: str | None) -> str:
-    from agent_app.tools.paper.paper_search import (
-        _parse_s2_paper,
-    )
+    from agent_app.tools.paper.paper_search import _parse_s2_paper
 
     url = (
         f"https://api.semanticscholar.org/graph/v1/paper/"
@@ -212,11 +197,16 @@ async def _fetch_s2_metadata(paper_id: str, api_key: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def _arxiv_id_check(clean_id: str) -> _ArxivIdCheck:
-    """Pure existence probe: distinguishes MISSING vs transient UNKNOWN.
+class _ArxivIdCheck(Enum):
+    MISSING = "missing"
+    PRESENT = "present"
+    UNKNOWN = "unknown"
 
-    Reuses paper_search._fetch_xml; does not format metadata. Only
-    MISSING is a safe fast-fail signal -- UNKNOWN must still try the PDF.
+
+async def _arxiv_id_check(clean_id: str) -> _ArxivIdCheck:
+    """Cheap existence probe. Only MISSING is a safe fast-fail signal —
+    UNKNOWN (network / API failure) must fall through to the parser so a
+    valid paper is never blocked on a probe failure.
     """
     from agent_app.tools.paper.paper_search import _fetch_xml
 
@@ -234,155 +224,35 @@ async def _arxiv_id_check(clean_id: str) -> _ArxivIdCheck:
 
 
 async def _fetch_full_content(
-    paper_id: str, source: str, api_key: str | None
+    paper_id: str, source: str, api_key: str | None,
+    *, session_id: str | None,
 ) -> str:
     if source == "arxiv":
         from agent_app.tools.paper.paper_search import _normalize_arxiv_id
-
         clean_id = _normalize_arxiv_id(paper_id)
 
-        # 1) HTML first -- a hit costs no precheck (the common modern path).
-        html_result = await _try_arxiv_html(clean_id)
-        if html_result is not None:
-            return truncate_text_by_tokens(
-                html_result,
-                max_tokens=_CFG.max_full_tokens,
-                suffix="\n... (truncated)",
-            )
-
-        # 2) HTML miss -- only a confirmed-missing ID fast-fails (skips the
-        #    expensive PDF cloud parser). UNKNOWN/PRESENT fall through.
         if await _arxiv_id_check(clean_id) is _ArxivIdCheck.MISSING:
             return f"Error: no arXiv paper found for ID: {clean_id}"
 
-        # 3) PDF; pdf_parser already carries a metadata hint on failure,
-        #    so its result is returned verbatim (no soft-landing).
-        #    No `.pdf` suffix: arxiv.org/pdf/<id>.pdf 301-redirects with a
-        #    text/html body that PaddleOCR's URL fetcher rejects as
-        #    "unsupported format"; the bare URL serves application/pdf.
         pdf_url = f"https://arxiv.org/pdf/{clean_id}"
-        return await _fetch_via_pdf_parser(pdf_url, paper_id=clean_id)
+        return await parse_document(
+            target=pdf_url,
+            session_id=session_id,
+            slug_hint=f"{source}-{clean_id}",
+        )
 
     pdf_url = await _resolve_pdf_url(paper_id, source, api_key)
     if pdf_url.startswith("Error:"):
         return pdf_url
-    return await _fetch_via_pdf_parser(pdf_url)
-
-
-async def _try_arxiv_html(arxiv_id: str) -> str | None:
-    from agent_app.tools.paper.paper_search import _USER_AGENT as _ARXIV_UA
-
-    html_url = f"https://arxiv.org/html/{arxiv_id}"
-    try:
-        status, body = await http_get_with_retry(
-            html_url,
-            headers={"User-Agent": _ARXIV_UA},
-            timeout=_CFG.html_fetch_timeout,
-            retry=HttpRetryConfig(max_attempts=3, base_delay=1.0),
-        )
-    except Exception:
-        return None
-
-    if status != 200:
-        return None
-
-    lowered = body.lower()
-    if "<html" not in lowered and "<!doctype html" not in lowered:
-        return None
-
-    from agent_app.tools.web.web_fetch import _extract_text_from_html
-
-    text = _extract_text_from_html(body)
-    if len(text.strip()) < 500:
-        return None
-    return text
-
-
-def _clean_pdf_failure_reason(raw: str) -> str:
-    """Map pdf_parser's internal errors to caller-meaningful reasons."""
-    low = raw.lower()
-    if "not configured" in low or "unknown pdf provider" in low:
-        return "PDF full-text extraction is not configured on this system"
-    if "timed out" in low:
-        return (
-            "PDF text extraction timed out — it may be large or "
-            'the service slow; retry later or use mode="metadata"'
-        )
-    if "rate limit" in low:
-        return "PDF extraction is temporarily rate-limited; retry shortly"
-    if "格式不支持" in raw or "no extractable text" in low:
-        return (
-            "the PDF itself could not be parsed (unsupported, "
-            "or corrupted) — full text is unavailable "
-            "for this specific paper"
-        )
-    return (
-        "PDF text extraction failed for this request, "
-        "retrying the same request later may succeed"
-    )
-
-
-async def _fetch_via_pdf_parser(
-    pdf_url: str, paper_id: str = ""
-) -> str:
-    from agent_app.tools.pdf_parser import pdf_parser as _pdf_parser
-
-    result = await _pdf_parser.execute(url=pdf_url)
-
-    # Silent fallback: the cloud parser's URL fetcher rejects some arXiv
-    # URLs at submission. Download the bytes and retry via the local-file
-    # path, which has no URL to misparse. Only submission-stage
-    # rejections trigger this -- not rate limits, OCR timeouts, or
-    # empty-result failures, where the local path would fare no better.
-    if (
-        result.startswith("Error:")
-        and "submission failed" in result
-        and pdf_url.startswith(("http://", "https://"))
-    ):
-        try:
-            status, data = await http_get_bytes_with_retry(
-                pdf_url,
-                timeout=_CFG.html_fetch_timeout,
-                retry=HttpRetryConfig(max_attempts=3, base_delay=1.0),
-                max_bytes=_CFG.pdf_download_max_bytes,
-            )
-        except Exception:
-            status, data = 0, b""
-        if status == 200 and data:
-            # Close the handle before pdf_parser reopens by path so this
-            # works on Windows too (an open NamedTemporaryFile cannot be
-            # reopened there).
-            fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
-            try:
-                with os.fdopen(fd, "wb") as fh:
-                    fh.write(data)
-                result = await _pdf_parser.execute(url=tmp_path)
-            finally:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-
-    if result.startswith("Error:"):
-        msg = (
-            f"Error: could not retrieve full text — it is extracted from "
-            f"this paper's PDF ({pdf_url}), which failed.\n"
-            f"Reason: {_clean_pdf_failure_reason(result)}."
-        )
-        if paper_id:
-            msg += (
-                "\nMetadata (title, authors, abstract) is still available "
-                'via paper_fetch(mode="metadata").'
-            )
-        return msg
-
-    return truncate_text_by_tokens(
-        result, max_tokens=_CFG.max_full_tokens, suffix="\n... (truncated)"
+    return await parse_document(
+        target=pdf_url,
+        session_id=session_id,
+        slug_hint=f"{source}-{paper_id}",
     )
 
 
 async def _resolve_pdf_url(
-    paper_id: str, source: str, api_key: str | None
+    paper_id: str, source: str, api_key: str | None,
 ) -> str:
     if source not in ("arxiv", "semantic_scholar"):
         return f"Error: unknown source {source!r}. Use 'arxiv' or 'semantic_scholar'."
@@ -419,19 +289,17 @@ async def _resolve_pdf_url(
         return "Error: unexpected Semantic Scholar response format"
     data = data_raw
 
-    pdf_info: dict[str, str] = data.get("openAccessPdf") or {}
-    oa_pdf_url: str = pdf_info.get("url", "")
+    pdf_info: dict[str, Any] = data.get("openAccessPdf") or {}
+    oa_pdf_url: str = pdf_info.get("url") or ""
     if oa_pdf_url:
         return oa_pdf_url
 
-    external: dict[str, str] = data.get("externalIds") or {}
-    arxiv_id = external.get("ArXiv")
+    external: dict[str, Any] = data.get("externalIds") or {}
+    arxiv_id: str = external.get("ArXiv") or ""
     if arxiv_id:
-        # Bare URL (no `.pdf`): the suffixed form 301-redirects to a
-        # text/html body that PaddleOCR's URL fetcher rejects.
         return f"https://arxiv.org/pdf/{arxiv_id}"
 
-    doi = external.get("DOI")
+    doi: str = external.get("DOI") or ""
     if doi:
         return await _try_unpaywall(doi)
 
@@ -462,8 +330,8 @@ async def _try_unpaywall(doi: str) -> str:
         return f"Error: unexpected Unpaywall response format for DOI {doi}"
     data = data_raw
 
-    best: dict[str, str] = data.get("best_oa_location") or {}
-    oa_url: str = best.get("url_for_pdf", "")
+    best: dict[str, Any] = data.get("best_oa_location") or {}
+    oa_url: str = best.get("url_for_pdf") or ""
     if oa_url:
         return oa_url
 
@@ -475,43 +343,85 @@ async def _try_unpaywall(doi: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@tool(executor_timeout=_FULL_EXECUTOR_TIMEOUT)
-async def paper_fetch(
-    paper_id: str,
-    mode: Literal["metadata", "full"] = "metadata",
-    source: Literal["arxiv", "semantic_scholar"] = "arxiv",
-) -> str:
-    """Fetch a specific paper by ID, returning full text or metadata.
+class PaperFetchTool(BaseTool):
+    def __init__(self) -> None:
+        super().__init__(
+            name="paper_fetch",
+            description=PAPER_FETCH_DESCRIPTION,
+            executor_timeout=_FULL_EXECUTOR_TIMEOUT,
+        )
+        self._session_id: str | None = None
 
-    Two modes: "metadata" returns detailed structured info (title,
-    authors, full abstract, citations, fields of study); "full"
-    returns the complete paper content from HTML or PDF.
+    def bind_session(self, session_id: str | None) -> None:
+        self._session_id = session_id
 
-    Args:
-        paper_id: arXiv ID like "2301.07041", or DOI:/ARXIV:/ACM:-prefixed ID for S2.
-        mode: "full" returns raw paper body text for downstream analysis/summarization, "metadata" returns concise paper info (e.g., title, authors, abstract, year/venue, IDs, citation/reference stats) (default).
-        source: "arxiv" (default) or "semantic_scholar" for IEEE/ACM/ScienceDirect etc.
-    """
-    if not paper_id.strip():
-        return "Error: paper_id cannot be empty"
-
-    if mode not in ("metadata", "full"):
-        return (
-            f"Error: unknown mode {mode!r}. "
-            f"Use 'metadata' for structured info or 'full' for complete content."
+    def get_schema(self) -> ToolSchema:
+        return ToolSchema(
+            name=self.name,
+            description=self.description,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "paper_id": {
+                        "type": "string",
+                        "description": (
+                            "arXiv ID like '2301.07041', or "
+                            "DOI:/ARXIV:/ACM:-prefixed ID for S2."
+                        ),
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["metadata", "full"],
+                        "description": (
+                            "'full' for parsed paper content (on-disk artifact "
+                            "paths); 'metadata' for concise paper info (title, "
+                            "authors, abstract, IDs, citations, etc.) (default)."
+                        ),
+                        "default": "metadata",
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["arxiv", "semantic_scholar"],
+                        "description": (
+                            "'arxiv' (default) or 'semantic_scholar' for "
+                            "IEEE/ACM/ScienceDirect etc."
+                        ),
+                        "default": "arxiv",
+                    },
+                },
+                "required": ["paper_id"],
+            },
         )
 
-    if source not in ("arxiv", "semantic_scholar"):
-        return (
-            f"Error: unknown source {source!r}. "
-            f"Use 'arxiv' or 'semantic_scholar'."
+    async def execute(self, **kwargs: Any) -> str:
+        paper_id: str = kwargs.get("paper_id") or ""
+        mode: str = kwargs.get("mode") or "metadata"
+        source: str = kwargs.get("source") or "arxiv"
+
+        if not paper_id.strip():
+            return "Error: paper_id cannot be empty"
+        if mode not in ("metadata", "full"):
+            return (
+                f"Error: unknown mode {mode!r}. "
+                f"Use 'metadata' for structured info or 'full' for complete content."
+            )
+        if source not in ("arxiv", "semantic_scholar"):
+            return (
+                f"Error: unknown source {source!r}. "
+                f"Use 'arxiv' or 'semantic_scholar'."
+            )
+
+        cfg = resolve_paper_config(None)
+
+        if mode == "metadata":
+            if source == "arxiv":
+                return await _fetch_arxiv_metadata(paper_id)
+            return await _fetch_s2_metadata(paper_id, cfg.semantic_scholar_api_key)
+
+        return await _fetch_full_content(
+            paper_id, source, cfg.semantic_scholar_api_key,
+            session_id=self._session_id,
         )
 
-    cfg = resolve_paper_config(None)
 
-    if mode == "metadata":
-        if source == "arxiv":
-            return await _fetch_arxiv_metadata(paper_id)
-        return await _fetch_s2_metadata(paper_id, cfg.semantic_scholar_api_key)
-
-    return await _fetch_full_content(paper_id, source, cfg.semantic_scholar_api_key)
+paper_fetch = PaperFetchTool()

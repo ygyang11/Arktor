@@ -7,14 +7,11 @@
 # --- LLM Provider ---
 llm:
   provider: "openai"            # "openai" | "anthropic"
-  model: "__SET_YOUR_MODEL__"   # Model identifier (e.g. gpt-5.4, claude-4.6-opus)
+  model: "__SET_MODEL__"   # Model identifier (e.g. gpt-5.4, claude-4.6-opus)
   temperature: 1.0              # Sampling temperature (0.0 – 2.0)
-  max_tokens: 16000             # Maximum output tokens
-  api_key: ""                   # API key (overrides env var)
-  base_url: ""                  # Custom API endpoint
-                                # Examples:
-                                #   OpenAI-compatible: "https://api.openai.com/v1"
-                                #   Azure OpenAI:     "https://<resource>.openai.azure.com/"
+  max_tokens: 32000             # Maximum output tokens
+  api_key: "__SET_API_KEY__"    # API key (overrides env var)
+  base_url: "__SET_BASE_URL__"  # Custom API endpoint
   timeout: 180.0                # Request timeout in seconds
   max_retries: 5                # Max retry attempts for rate-limit errors
   retry_delay: 1.0              # Initial retry delay in seconds (exponential backoff)
@@ -36,21 +33,15 @@ tool:
       volumes: []               # Additional mounts (e.g. "/data:/data:ro")
 
 
-# --- Memory ---
+# --- Context ---
 memory:
-  max_tokens: 100000            # Token budget for short-term memory.
-                                # MUST match the model's actual context window:
-                                # - claude-3-5-sonnet / claude-4: 200000
-                                # - claude-opus-4-7 (1M): 1000000
-                                # - gpt-4o / gpt-4-turbo: 128000
-                                # - o1-preview / o1-mini: 128000
-                                # Default 100k assumes a conservative window;
-                                # set higher for newer / 200k+ models.
+  max_tokens: 100000            # Token budget for context window.
+                                # Should match the model's actual context
   strategy: "summarize"         # "summarize" — LLM-driven compression + trim fallback (default)
                                 # "trim"      — hard token-based truncation only
   forget_threshold: 0.3         # Weighted score below which memories are forgotten
   compression:                  # Only effective when strategy = "summarize"
-    threshold: 0.9             # Compress when token usage > 75% of max_tokens
+    threshold: 0.9              # Compress when token usage > threshold of max_tokens
     retain_count: 3             # Keep last N message groups intact (never compressed)
     summary_model: ""           # Model for summaries (empty = use main model)
     summary_max_tokens: null    # Max output tokens for summary (null = use LLM config default)
@@ -58,44 +49,41 @@ memory:
 # --- Search ---
 search:
   provider: "tavily"            # "tavily" | "serpapi"
-  tavily_api_key: ""            # Tavily API key
-  serpapi_api_key: ""           # SerpAPI key
+  tavily_api_key: ""            # Tavily API key (Free credits, Request at: https://app.tavily.com/)
+  serpapi_api_key: ""           # SerpAPI key (Free credits, Request at: https://serpapi.com/)
 
-# --- PDF Parsing ---
-pdf:
-  provider: "mineru"            # "mineru" | "paddleocr"
-  mineru_api_key: ""            # MinerU API key
-  paddleocr_api_key: ""         # PaddleOCR API key
+# --- Document Parsing ---
+document_parser:
+  provider: "auto"              # "auto" | "paddleocr" | "mineru"
+                                # "auto" will route through all providers and performs best-effort parsing, recommended approach.
+                                # Without keys can still work with "auto"
+  paddleocr_api_key: ""         # PaddleOCR API key (Free, Request at: https://aistudio.baidu.com/paddleocr)
+  mineru_api_key: ""            # MinerU API key (Free, Request at: https://mineru.net/apiManage)
 
 # --- Academic Paper Search ---
 paper:
-  semantic_scholar_api_key: "" # Semantic Scholar API key (optional, for higher rate limits)
-                               # Without key: shared pool; With key: 1 req/s baseline
-                               # Request at: https://www.semanticscholar.org/product/api#api-key
+  semantic_scholar_api_key: ""  # Semantic Scholar API key (Free, Request at: https://www.semanticscholar.org/product/api#api-key)
+                                # Without key: shared pool; With key: 1 req/s
 
 # --- Skills ---
 skill:
-  dirs:                           # Skill directories to scan (must end with "skills")
-    - "skills"                    # Project root skills/ (default)
-    # - "/path/to/shared/skills"  # Team-shared skills
-    # - "~/.agent-harness/skills" # Personal skills
+  dirs:                         # Skill directories to scan (must end with "skills")
+    - "~/.agent-harness/skills" # Personal global skills
+    - "skills"                  # Project root skills
+    # - "/path/to/shared/skills"# Team-shared skills
 
 # --- Approval (Human-in-the-Loop) ---
 approval:
-  mode: "auto"                  # "never" — no approval prompts
-                                # "auto"  — ask for tools not in always_allow (recommended)
-                                # "always" — ask for every tool call
+  mode: "never"                 # "never" | "auto" | "ask" 
+                                # "auto" ask for tools not in always_allow; "ask" — ask for every tool call
   always_allow:                 # Rules: "tool_name" (tool-level) or "tool_name(pattern)" (resource-level)
     # Tool-level: all invocations auto-allowed
     - "list_dir"
-    - "glob_files"
-    - "grep_files"
     - "web_search"
     # Resource-level: only matching resources auto-allowed
     - "read_file(src/**)"               # Read files under src/
     - "terminal_tool(git *)"            # Git commands
-    - "terminal_tool(pytest *)"         # Test commands
-    - "web_fetch(domain:github.com)"       # GitHub
+    - "web_fetch(domain:github.com)"    # GitHub
 
   always_deny:                  # Rules that are always blocked (deny > allow)
     - "terminal_tool(rm -rf *)"         # Destructive removal
@@ -103,17 +91,17 @@ approval:
 
 # --- Sub-Agent ---
 sub_agent:
-  max_steps: 80                   # Max steps per sub-agent execution
-  types: {}                       # Custom types (merge with built-in: research, plan, general)
-    # Example custom type:
-    # security:
-    #   tools: ["read_file", "grep_files", "terminal_tool"]
-    #   intro: "You are a security auditor. Focus on vulnerabilities..."
+  max_steps: 100                # Max steps per sub-agent execution
+  types: {}                     # Custom types (merge with built-in: research, plan, general)
+  # Example custom type:
+  # security:
+  #   tools: ["read_file", "grep_files", "terminal_tool"]
+  #   intro: "You are a security auditor. Focus on vulnerabilities..."
 
 # --- Tracing & Observability ---
 tracing:
-  enabled: false                 # Enable tracing
-  exporter: "console"           # "console" | "json_file" ｜ "both"
+  enabled: false                # Enable tracing
+  exporter: "both"              # "both" | "console" | "json_file" 
   export_path: "./traces"       # Directory for trace exports
 
 # --- General ---

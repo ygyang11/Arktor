@@ -36,7 +36,7 @@ _BUILTIN_TYPES: dict[str, dict[str, Any]] = {
         "tools": [
             "read_file", "list_dir", "glob_files", "grep_files",
             "web_fetch", "web_search",
-            "paper_search", "paper_fetch", "pdf_parser",
+            "paper_search", "paper_fetch", "document_parser",
             "memory_tool",
         ],
         "intro": (
@@ -61,7 +61,7 @@ _BUILTIN_TYPES: dict[str, dict[str, Any]] = {
         "tools": [
             "read_file", "list_dir", "glob_files", "grep_files",
             "web_fetch", "web_search",
-            "paper_search", "paper_fetch", "pdf_parser",
+            "paper_search", "paper_fetch", "document_parser",
             "memory_tool",
         ],
         "intro": (

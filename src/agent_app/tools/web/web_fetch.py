@@ -230,7 +230,7 @@ def _retry_policy() -> HttpRetryConfig:
 
 @tool(approval_resource_key="url", executor_timeout=_EXECUTOR_TIMEOUT)
 async def web_fetch(url: str, timeout: int = 30) -> str | ToolOutput:
-    """Fetch content from a URL and return readable text.
+    """Fetch content from a URL and return readable text or media.
 
     Fetches the given URL via GET. HTML pages are converted to plain
     text automatically. JSON responses are pretty-printed. Only

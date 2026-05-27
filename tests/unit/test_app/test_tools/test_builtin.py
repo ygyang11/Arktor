@@ -13,9 +13,13 @@ class TestBuiltinTools:
         names = [t.name for t in BUILTIN_TOOLS]
         assert "terminal_tool" in names
         assert "web_fetch" in names
-        assert "pdf_parser" in names
+        assert "document_parser" in names
         assert "skill_tool" in names
         assert "memory_tool" in names
+
+    def test_pdf_parser_is_removed(self) -> None:
+        names = [t.name for t in BUILTIN_TOOLS]
+        assert "pdf_parser" not in names
 
     def test_all_tools_have_schema(self) -> None:
         for t in BUILTIN_TOOLS:

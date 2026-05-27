@@ -247,6 +247,12 @@ class TestFormatResults:
         result = _format_paper_results(papers, source="arxiv")
         assert 'mode="<metadata|full>"' in result
 
+    def test_footer_full_mode_wording_on_disk_artifacts(self) -> None:
+        papers = [{"title": "X", "authors": [], "abstract": ""}]
+        result = _format_paper_results(papers, source="arxiv")
+        assert "content.md / images / layout, on-disk artifacts" in result
+        assert "full paper body text" not in result
+
 
 class TestPaperSearchTool:
     async def test_empty_query(self) -> None:

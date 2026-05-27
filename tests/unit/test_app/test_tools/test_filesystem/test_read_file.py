@@ -44,7 +44,34 @@ class TestReadFile:
         f = tmp_path / "data.bin"
         f.write_bytes(b"\x00\x01\x02\x03")
         result = await read_file.execute(file_path=str(f))
-        assert "Binary file" in result
+        assert isinstance(result, str)
+        assert result.startswith("Error: binary file (not readable as text or media)")
+
+    @pytest.mark.asyncio
+    async def test_pdf_attachment(self, tmp_path: Path) -> None:
+        from agent_harness.core.message import ToolOutput
+        f = tmp_path / "doc.pdf"
+        f.write_bytes(b"%PDF-1.4 minimal content")
+        result = await read_file.execute(file_path=str(f))
+        assert isinstance(result, ToolOutput)
+        assert result.attachments and result.attachments[0].mime == "application/pdf"
+        assert "Read PDF" in result.content
+        assert "as an attachment" in result.content
+
+    @pytest.mark.asyncio
+    async def test_image_attachment(self, tmp_path: Path) -> None:
+        from agent_harness.core.message import ToolOutput
+        f = tmp_path / "cover.png"
+        f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+        result = await read_file.execute(file_path=str(f))
+        assert isinstance(result, ToolOutput)
+        assert result.attachments and result.attachments[0].mime == "image/png"
+        assert "Read image" in result.content
+
+    @pytest.mark.asyncio
+    async def test_default_limit_is_200(self) -> None:
+        sch = read_file.get_schema()
+        assert sch.parameters["properties"]["limit"]["default"] == 200
 
     @pytest.mark.asyncio
     async def test_empty_file(self, tmp_path: Path) -> None:

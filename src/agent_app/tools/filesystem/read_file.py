@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 from pathlib import Path
 from typing import Any
 
@@ -13,14 +14,19 @@ from agent_app.tools.filesystem._security import (
     relative_to_workspace,
 )
 from agent_harness.agent.base import BaseAgent
+from agent_harness.core.message import ToolOutput
 from agent_harness.tool.base import BaseTool, ToolSchema
+from agent_harness.utils.blob import make_attachment
+from agent_harness.utils.media import human_size, is_media_mime, is_pdf_mime
 
 logger = logging.getLogger(__name__)
 _MAX_LINE_CHARS = 5_000
+_MEDIA_PREVIEW_MAX_BYTES = 30 * 1024 * 1024
 
 READ_FILE_DESCRIPTION = (
-    "Reads a file from the filesystem with line numbers. "
-    "Supports paginated reading for large files via offset and limit parameters.\n\n"
+    "Reads any file from the filesystem: text files paginated with line numbers, "
+    "or PDF/image files inlined as media attachments for direct viewing. "
+    "Supports paginated reading for large text files via offset and limit parameters.\n\n"
     "Usage:\n"
     "- Assume this tool is able to read all files. If the user provides a path, "
     "assume that path is valid. It is okay to read a file that does not exist; "
@@ -31,6 +37,9 @@ READ_FILE_DESCRIPTION = (
     "- Read only what you need — avoid reading entire large files at once\n"
     "- Results are returned in cat -n format (line_number + tab + content) "
     "with a header showing total lines and position\n"
+    "- For PDF (.pdf) and image (png/jpg/jpeg/gif/webp) files, content is "
+    "returned as a media attachment in the following message instead of "
+    "paginated text — prefer this for viewing media directly\n"
     "- You should ALWAYS read a file before editing it\n"
     "- It is better to speculatively read multiple files as a batch when exploring a codebase\n"
     "- If you read a file that exists but has empty contents, "
@@ -55,7 +64,7 @@ def _read_file_streaming(path: Path, offset: int, limit: int) -> str:
     with open(path, "rb") as f:
         head = f.read(8192)
     if b"\x00" in head:
-        return f"Binary file detected: {path.name} ({size:,} bytes)."
+        return f"Error: binary file (not readable as text or media): {path.name} ({size:,} bytes)"
 
     encoding = "utf-8-sig" if head.startswith(b"\xef\xbb\xbf") else "utf-8"
 
@@ -136,18 +145,19 @@ class ReadFileTool(BaseTool):
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of lines to read (default 2000).",
-                        "default": 2000,
+                        "description": "Maximum number of lines to read (default 200).",
+                        "default": 200,
                     },
                 },
                 "required": ["file_path"],
             },
         )
 
-    async def execute(self, **kwargs: Any) -> str:
-        file_path: str = kwargs.get("file_path", "")
+    async def execute(self, **kwargs: Any) -> str | ToolOutput:
+        file_path_raw = kwargs.get("file_path", "")
+        file_path: str = file_path_raw if isinstance(file_path_raw, str) else ""
         offset: int = int(kwargs.get("offset", 0))
-        limit: int = int(kwargs.get("limit", 2000))
+        limit: int = int(kwargs.get("limit", 200))
 
         if limit <= 0:
             return "Error: limit must be a positive integer."
@@ -164,6 +174,23 @@ class ReadFileTool(BaseTool):
 
         if is_sensitive_path(resolved):
             logger.debug("Reading sensitive file: %s", resolved)
+
+        mime, _ = mimetypes.guess_type(str(resolved))
+        if mime and is_media_mime(mime):
+            size = resolved.stat().st_size
+            kind = "PDF" if is_pdf_mime(mime) else "image"
+            if size > _MEDIA_PREVIEW_MAX_BYTES:
+                return f"Error: {kind} too large to attach ({human_size(size)})"
+            att = make_attachment(resolved.read_bytes(), mime, resolved.name)
+            if self._agent is not None:
+                record_signature(self._agent, resolved)
+            return ToolOutput(
+                content=(
+                    f"Read {kind} from {file_path}; the {kind} is provided "
+                    f"as an attachment in the following message."
+                ),
+                attachments=[att],
+            )
 
         try:
             content = _read_file_streaming(resolved, offset, limit)
