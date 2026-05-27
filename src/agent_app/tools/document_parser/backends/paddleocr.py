@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import json
 import logging
 import mimetypes
@@ -18,6 +19,7 @@ from agent_app.tools.document_parser.backends.base import (
     DocumentBackend,
     DocumentBackendOutcome,
     PaddleOptions,
+    get_bytes,
     get_envelope,
     get_text,
     post_envelope,
@@ -49,6 +51,8 @@ class _PaddleConfig:
     request_timeout_s: int = 20
     upload_timeout_s: int = 120
     download_timeout_s: int = 600
+    image_fetch_concurrency: int = 8
+    image_fetch_timeout_s: int = 30
 
 
 _CFG = _PaddleConfig()
@@ -138,7 +142,7 @@ class PaddleBackend(DocumentBackend):
     ) -> DocumentBackendOutcome:
         json_url = await self._poll(job_id)
         jsonl = await get_text(_HTTP_CTX, json_url, timeout_s=_CFG.download_timeout_s)
-        return materialize_jsonl(jsonl, dest_dir, self.name, self.model)
+        return await materialize_jsonl(jsonl, dest_dir, self.name, self.model)
 
     async def _poll(self, job_id: str) -> str:
         url = f"{PORTAL_URL}/{job_id}"
@@ -187,66 +191,73 @@ class PaddleBackend(DocumentBackend):
         }
 
 
-def materialize_jsonl(
+async def materialize_jsonl(
     jsonl: str, dest_dir: Path, backend_name: str, backend_model: str,
 ) -> DocumentBackendOutcome:
-    md_parts: list[str] = []
+    raw_md_parts: list[str] = []
     layout_pages: list[dict[str, Any]] = []
-    images_written: dict[str, str] = {}
+    # orig_key (referenced inside markdown text) → safe local filename
+    image_targets: dict[str, str] = {}
+    # safe filename → raw value from JSONL (URL or base64 string)
+    image_sources: dict[str, str] = {}
+
+    for line in jsonl.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            page_obj = json.loads(line)
+        except json.JSONDecodeError:
+            logger.warning("paddleocr: skipping unparseable jsonl line")
+            continue
+        if not isinstance(page_obj, dict):
+            continue
+        result_obj = page_obj.get("result")
+        if not isinstance(result_obj, dict):
+            continue
+        lp_list = result_obj.get("layoutParsingResults")
+        if not isinstance(lp_list, list):
+            continue
+        for lp in lp_list:
+            if not isinstance(lp, dict):
+                continue
+            md_block = lp.get("markdown")
+            md = md_block if isinstance(md_block, dict) else {}
+            md_text_raw = md.get("text")
+            md_text = md_text_raw if isinstance(md_text_raw, str) else ""
+            images_block = md.get("images")
+            if isinstance(images_block, dict):
+                for orig_key, value in images_block.items():
+                    if not isinstance(orig_key, str) or not isinstance(value, str):
+                        continue
+                    if orig_key in image_targets:
+                        continue
+                    safe = _UNSAFE_FILENAME.sub("_", Path(orig_key).name)[:128] or "img"
+                    image_targets[orig_key] = safe
+                    image_sources[safe] = value
+            if md_text.strip():
+                raw_md_parts.append(md_text)
+            pruned = lp.get("prunedResult")
+            if isinstance(pruned, dict):
+                layout_pages.append(pruned)
+
+    # Fetch / decode image bytes concurrently before any disk writes
+    resolved_images = await _resolve_images(image_sources)
+    successful_safes = set(resolved_images.keys())
+    rewrites = [
+        (orig_key, f"images/{safe}")
+        for orig_key, safe in image_targets.items()
+        if safe in successful_safes
+    ]
+    md_parts = [_apply_rewrites(t, rewrites).strip() for t in raw_md_parts]
+
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
-
-        images_dir = dest_dir / "images"
-        images_dir_created = False
-
-        for line in jsonl.strip().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                page_obj = json.loads(line)
-            except json.JSONDecodeError:
-                logger.warning("paddleocr: skipping unparseable jsonl line")
-                continue
-            if not isinstance(page_obj, dict):
-                continue
-            result_obj = page_obj.get("result")
-            if not isinstance(result_obj, dict):
-                continue
-            lp_list = result_obj.get("layoutParsingResults")
-            if not isinstance(lp_list, list):
-                continue
-            for lp in lp_list:
-                if not isinstance(lp, dict):
-                    continue
-                md_block = lp.get("markdown")
-                md = md_block if isinstance(md_block, dict) else {}
-                md_text_raw = md.get("text")
-                md_text = md_text_raw if isinstance(md_text_raw, str) else ""
-                images_block = md.get("images")
-                if isinstance(images_block, dict):
-                    for orig_key, b64 in images_block.items():
-                        if not isinstance(orig_key, str) or not isinstance(b64, str):
-                            continue
-                        if orig_key in images_written:
-                            continue
-                        safe = _UNSAFE_FILENAME.sub("_", Path(orig_key).name)[:128] or "img"
-                        try:
-                            decoded = base64.b64decode(b64)
-                        except (TypeError, ValueError):
-                            continue
-                        if not images_dir_created:
-                            images_dir.mkdir(parents=True, exist_ok=True)
-                            images_dir_created = True
-                        (images_dir / safe).write_bytes(decoded)
-                        images_written[orig_key] = safe
-                for orig_key, safe in images_written.items():
-                    md_text = md_text.replace(orig_key, f"images/{safe}")
-                if md_text.strip():
-                    md_parts.append(md_text.strip())
-                pruned = lp.get("prunedResult")
-                if isinstance(pruned, dict):
-                    layout_pages.append(pruned)
+        if resolved_images:
+            images_dir = dest_dir / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            for safe, data in resolved_images.items():
+                (images_dir / safe).write_bytes(data)
 
         content_md = "\n\n".join(md_parts)
         (dest_dir / "content.md").write_text(content_md, encoding="utf-8")
@@ -263,5 +274,53 @@ def materialize_jsonl(
     page_count = len(layout_pages) if layout_pages else None
     return DocumentBackendOutcome(
         backend_name=backend_name, backend_model=backend_model,
-        page_count=page_count, image_count=len(images_written),
+        page_count=page_count, image_count=len(resolved_images),
     )
+
+
+def _apply_rewrites(text: str, rewrites: list[tuple[str, str]]) -> str:
+    # Apply longest-key first to avoid one orig_key being a substring of
+    # another rewriting partially through it. Stable order otherwise.
+    for orig, repl in sorted(rewrites, key=lambda kv: -len(kv[0])):
+        text = text.replace(orig, repl)
+    return text
+
+
+async def _resolve_images(sources: dict[str, str]) -> dict[str, bytes]:
+    """Resolve `safe_filename → image bytes`, fetching URLs and decoding
+    base64 in parallel. Failures (network / decode) drop that image from
+    the result map; the document still materializes with the remaining
+    successful images.
+
+    PaddleOCR's portal returns CDN URLs in `markdown.images.*` for the
+    chart / image / table crops it extracts. Earlier doc claimed base64
+    payloads; in practice the values are signed BCEbos URLs. base64 is
+    kept as a fallback in case future portal revisions revert.
+    """
+    if not sources:
+        return {}
+
+    sem = asyncio.Semaphore(_CFG.image_fetch_concurrency)
+
+    async def _one(safe: str, value: str) -> tuple[str, bytes | None]:
+        async with sem:
+            return safe, await _resolve_one_image(value)
+
+    results = await asyncio.gather(*(_one(s, v) for s, v in sources.items()))
+    return {s: data for s, data in results if data is not None}
+
+
+async def _resolve_one_image(value: str) -> bytes | None:
+    if value.startswith(("http://", "https://")):
+        try:
+            return await get_bytes(
+                _HTTP_CTX, value, timeout_s=_CFG.image_fetch_timeout_s,
+            )
+        except DocumentBackendError as e:
+            logger.debug("paddleocr: image fetch failed (%s): %s", value[:80], e)
+            return None
+    try:
+        return base64.b64decode(value, validate=True)
+    except (TypeError, ValueError, binascii.Error):
+        logger.debug("paddleocr: image value not URL nor base64; skipped")
+        return None
