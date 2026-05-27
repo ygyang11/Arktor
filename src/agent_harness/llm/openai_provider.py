@@ -79,20 +79,21 @@ class OpenAIProvider(BaseLLM):
                 raise LLMRateLimitError(str(e)) from e
             except openai.AuthenticationError as e:
                 raise LLMAuthenticationError(str(e)) from e
-            except openai.BadRequestError as e:
+            except openai.APIConnectionError as e:
+                raise LLMConnectionError(str(e)) from e
+            except openai.APIStatusError as e:
                 s = str(e)
                 if is_media_rejection(s):
                     raise LLMUnsupportedContentError(s) from e
-                if not retried and _is_reasoning_details_rejection(e):
-                    self._strip_reasoning_details = True
-                    _normalize_reasoning_for_strict_input(request_kwargs)
-                    retried = True
-                    continue
-                if "context_length" in s.lower() or "maximum context" in s.lower():
-                    raise LLMContextLengthError(s) from e
+                if isinstance(e, openai.BadRequestError):
+                    if not retried and _is_reasoning_details_rejection(e):
+                        self._strip_reasoning_details = True
+                        _normalize_reasoning_for_strict_input(request_kwargs)
+                        retried = True
+                        continue
+                    if "context_length" in s.lower() or "maximum context" in s.lower():
+                        raise LLMContextLengthError(s) from e
                 raise LLMError(s) from e
-            except openai.APIConnectionError as e:
-                raise LLMConnectionError(str(e)) from e
             except openai.APIError as e:
                 raise LLMError(str(e)) from e
 
@@ -127,18 +128,19 @@ class OpenAIProvider(BaseLLM):
                 raise LLMRateLimitError(str(e)) from e
             except openai.AuthenticationError as e:
                 raise LLMAuthenticationError(str(e)) from e
-            except openai.BadRequestError as e:
+            except openai.APIConnectionError as e:
+                raise LLMConnectionError(str(e)) from e
+            except openai.APIStatusError as e:
                 s = str(e)
                 if is_media_rejection(s):
                     raise LLMUnsupportedContentError(s) from e
-                if not retried and _is_reasoning_details_rejection(e):
-                    self._strip_reasoning_details = True
-                    _normalize_reasoning_for_strict_input(request_kwargs)
-                    retried = True
-                    continue
+                if isinstance(e, openai.BadRequestError):
+                    if not retried and _is_reasoning_details_rejection(e):
+                        self._strip_reasoning_details = True
+                        _normalize_reasoning_for_strict_input(request_kwargs)
+                        retried = True
+                        continue
                 raise LLMError(s) from e
-            except openai.APIConnectionError as e:
-                raise LLMConnectionError(str(e)) from e
             except openai.APIError as e:
                 raise LLMError(str(e)) from e
 

@@ -65,15 +65,16 @@ class AnthropicProvider(BaseLLM):
             raise LLMRateLimitError(str(e)) from e
         except anthropic.AuthenticationError as e:
             raise LLMAuthenticationError(str(e)) from e
-        except anthropic.BadRequestError as e:
+        except anthropic.APIConnectionError as e:
+            raise LLMConnectionError(str(e)) from e
+        except anthropic.APIStatusError as e:
             s = str(e)
             if is_media_rejection(s):
                 raise LLMUnsupportedContentError(s) from e
-            if "context" in s.lower() or "too long" in s.lower():
-                raise LLMContextLengthError(s) from e
+            if isinstance(e, anthropic.BadRequestError):
+                if "context" in s.lower() or "too long" in s.lower():
+                    raise LLMContextLengthError(s) from e
             raise LLMError(s) from e
-        except anthropic.APIConnectionError as e:
-            raise LLMConnectionError(str(e)) from e
         except anthropic.APIError as e:
             raise LLMError(str(e)) from e
 
@@ -257,13 +258,13 @@ class AnthropicProvider(BaseLLM):
             raise LLMRateLimitError(str(e)) from e
         except anthropic.AuthenticationError as e:
             raise LLMAuthenticationError(str(e)) from e
-        except anthropic.BadRequestError as e:
+        except anthropic.APIConnectionError as e:
+            raise LLMConnectionError(str(e)) from e
+        except anthropic.APIStatusError as e:
             s = str(e)
             if is_media_rejection(s):
                 raise LLMUnsupportedContentError(s) from e
             raise LLMError(s) from e
-        except anthropic.APIConnectionError as e:
-            raise LLMConnectionError(str(e)) from e
         except anthropic.APIError as e:
             raise LLMError(str(e)) from e
 
