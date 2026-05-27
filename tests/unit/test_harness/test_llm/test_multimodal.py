@@ -290,7 +290,17 @@ class _FakeOpenAIBadRequest(_openai_sdk.BadRequestError):
         Exception.__init__(self, msg)
 
 
+class _FakeOpenAINotFound(_openai_sdk.NotFoundError):
+    def __init__(self, msg: str) -> None:
+        Exception.__init__(self, msg)
+
+
 class _FakeAnthropicBadRequest(_anthropic_sdk.BadRequestError):
+    def __init__(self, msg: str) -> None:
+        Exception.__init__(self, msg)
+
+
+class _FakeAnthropicNotFound(_anthropic_sdk.NotFoundError):
     def __init__(self, msg: str) -> None:
         Exception.__init__(self, msg)
 
@@ -365,6 +375,28 @@ class TestOpenAIMediaRejection:
             await p.generate([])
         assert not isinstance(ei.value, LLMUnsupportedContentError)
 
+    async def test_404_media_phrase_raises_unsupported_content(self) -> None:
+        p = _openai()
+        msg = "Error code: 404 - {'error': {'message': 'No endpoints found that support image input'}}"
+
+        def raiser() -> Any:
+            raise _FakeOpenAINotFound(msg)
+
+        _wire_openai(p, raiser)
+        with pytest.raises(LLMUnsupportedContentError):
+            await p.generate([])
+
+    async def test_unrelated_404_still_llm_error(self) -> None:
+        p = _openai()
+
+        def raiser() -> Any:
+            raise _FakeOpenAINotFound("model not found")
+
+        _wire_openai(p, raiser)
+        with pytest.raises(LLMError) as ei:
+            await p.generate([])
+        assert not isinstance(ei.value, LLMUnsupportedContentError)
+
 
 class TestAnthropicMediaRejection:
     async def test_media_phrase_raises_unsupported_content(self) -> None:
@@ -392,6 +424,27 @@ class TestAnthropicMediaRejection:
 
         def raiser() -> Any:
             raise _FakeAnthropicBadRequest("invalid argument: temperature out of range")
+
+        _wire_anthropic(p, raiser)
+        with pytest.raises(LLMError) as ei:
+            await p.generate([])
+        assert not isinstance(ei.value, LLMUnsupportedContentError)
+
+    async def test_404_media_phrase_raises_unsupported_content(self) -> None:
+        p = _anthropic()
+
+        def raiser() -> Any:
+            raise _FakeAnthropicNotFound("No endpoints found that support image input")
+
+        _wire_anthropic(p, raiser)
+        with pytest.raises(LLMUnsupportedContentError):
+            await p.generate([])
+
+    async def test_unrelated_404_still_llm_error(self) -> None:
+        p = _anthropic()
+
+        def raiser() -> Any:
+            raise _FakeAnthropicNotFound("model not found")
 
         _wire_anthropic(p, raiser)
         with pytest.raises(LLMError) as ei:
