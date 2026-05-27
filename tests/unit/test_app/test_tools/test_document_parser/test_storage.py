@@ -200,6 +200,7 @@ class TestWriteManifest:
             image_count=3,
             content_md_tokens=2000,
             content_md_lines=50,
+            successful_tier_elapsed_ms=4321,
             fallback_chain=[],
             skipped_tiers=[],
         )
@@ -208,6 +209,7 @@ class TestWriteManifest:
         assert data["kind"] == "pdf"
         assert data["size_bytes"] == 12345
         assert data["stats"]["page_count"] == 10
+        assert data["stats"]["successful_tier_elapsed_ms"] == 4321
         assert "content_md" in data["artifacts"]
         assert "layout_json" in data["artifacts"]
 

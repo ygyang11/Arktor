@@ -221,6 +221,7 @@ class TestFinalizeManifestTolerant:
         success = PipelineSuccess(
             outcome=DocumentBackendOutcome("mineru-vlm", "vlm", 5, 0),
             fallback_chain=[], skipped_tiers=[],
+            successful_tier_elapsed_ms=1234,
         )
         insp = TargetInspection(
             is_local=False, size_bytes=100, size_mb=0.01, pages=5,

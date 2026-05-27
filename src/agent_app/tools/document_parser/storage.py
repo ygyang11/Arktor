@@ -202,6 +202,7 @@ def write_manifest(
     image_count: int,
     content_md_tokens: int,
     content_md_lines: int,
+    successful_tier_elapsed_ms: int,
     fallback_chain: list[dict[str, Any]],
     skipped_tiers: list[dict[str, str]],
 ) -> Path:
@@ -219,6 +220,7 @@ def write_manifest(
             "image_count": image_count,
             "content_md_tokens": content_md_tokens,
             "content_md_lines": content_md_lines,
+            "successful_tier_elapsed_ms": successful_tier_elapsed_ms,
         },
         "fallback_chain": fallback_chain,
         "skipped_tiers": skipped_tiers,

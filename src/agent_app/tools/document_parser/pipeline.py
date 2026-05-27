@@ -65,6 +65,7 @@ class PipelineSuccess:
     outcome: DocumentBackendOutcome
     fallback_chain: list[TierAttempt]
     skipped_tiers: list[dict[str, str]]
+    successful_tier_elapsed_ms: int
 
 
 def preflight(
@@ -129,6 +130,7 @@ async def run_pipeline(
 
     try:
         for i, tier in enumerate(plan):
+            tier_start = time.monotonic()
             try:
                 if insp.is_local:
                     local_path = Path(target).expanduser().resolve()
@@ -146,7 +148,11 @@ async def run_pipeline(
                         session, tier, target, dest_dir,
                         localize=localize, chain=fallback_chain,
                     )
-                return PipelineSuccess(outcome, fallback_chain, skipped)
+                tier_elapsed_ms = int((time.monotonic() - tier_start) * 1000)
+                return PipelineSuccess(
+                    outcome, fallback_chain, skipped,
+                    successful_tier_elapsed_ms=tier_elapsed_ms,
+                )
             except DocumentBackendError as e:
                 if e.error_class in _FALLBACK_CLASSES:
                     continue

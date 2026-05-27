@@ -83,8 +83,22 @@ def decode_envelope(
     status: int, body: str, *, ctx: BackendHTTPContext,
 ) -> dict[str, Any]:
     if status != 200:
+        # Backends may return non-200 with a JSON body carrying the real
+        # error code (e.g. PaddleOCR returns HTTP 400 with body
+        # `{"code": 10004, "msg": "..."}` for unsupported formats).
+        # Prefer the body `code` over the raw HTTP status so the pipeline
+        # sees the accurate error class (UNSUPPORTED_BY_TIER vs UNKNOWN).
+        code: Any = status
+        try:
+            parsed_err = json.loads(body)
+        except json.JSONDecodeError:
+            parsed_err = None
+        if isinstance(parsed_err, dict):
+            body_code = parsed_err.get("code")
+            if body_code is not None and body_code != 0:
+                code = body_code
         raise DocumentBackendError(
-            ctx.classify(status), status,
+            ctx.classify(code), code,
             f"HTTP {status} from {ctx.backend_label}: {body[:200]}",
         )
     try:

@@ -203,6 +203,7 @@ def _finalize(
             page_count=outcome.page_count,
             image_count=outcome.image_count,
             content_md_tokens=md_tokens, content_md_lines=md_lines,
+            successful_tier_elapsed_ms=success.successful_tier_elapsed_ms,
             fallback_chain=[a.to_dict() for a in success.fallback_chain],
             skipped_tiers=success.skipped_tiers,
         )
