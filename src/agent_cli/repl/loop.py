@@ -194,7 +194,7 @@ async def run_repl(
             if await background.collect_results(agent):
                 async with adapter.lock():
                     console.print(
-                        f"\n[info]{COMPRESSION} Background task completed[/info]",
+                        f"\n[info]{COMPRESSION} Background task completed[/info]\n",
                     )
                 await _run(
                     agent,
