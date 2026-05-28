@@ -43,6 +43,7 @@ _FALLBACK_CLASSES = frozenset({
 _URL_RETRY_CLASSES = frozenset({
     DocumentErrorClass.BACKEND_FETCH_FAILED,
     DocumentErrorClass.UNSUPPORTED_BY_TIER,
+    DocumentErrorClass.TIMEOUT,
 })
 _INTRA_TIER_RETRY_CLASSES = frozenset({
     DocumentErrorClass.BACKEND_TRANSIENT_ERROR,

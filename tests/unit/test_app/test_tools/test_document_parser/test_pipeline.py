@@ -232,6 +232,36 @@ class TestRunPipelineUrlToLocal:
         assert b1.local_calls == 1
         assert success.outcome.backend_name == "paddleocr-vl-1.5"
 
+    async def test_url_timeout_localizes(self, tmp_path: Path) -> None:
+        """URL POST TIMEOUT (paddle server slow / hung) must trigger localize
+        to give the same tier a local-upload chance. Defensive against the
+        future case where paddle stops responding instead of returning
+        BACKEND_FETCH_FAILED — without TIMEOUT in URL_RETRY, we'd
+        prematurely fall through to the next tier."""
+        outcome = DocumentBackendOutcome("paddleocr-vl-1.5", "p", 1, 0)
+        b1 = _FakeBackend(
+            "paddleocr-vl-1.5",
+            url_outcome=DocumentBackendError(
+                DocumentErrorClass.TIMEOUT, None, "request timeout",
+            ),
+            local_outcome=outcome,
+        )
+
+        local_file = tmp_path / "downloaded.pdf"
+        local_file.write_bytes(b"%PDF-1.4")
+
+        async def _download() -> Path:
+            return local_file
+
+        async with aiohttp.ClientSession() as s:
+            success = await run_pipeline(
+                s, [b1], "https://x/a.pdf", _insp(), tmp_path, {},
+                download=_download,
+            )
+        assert b1.url_calls == 1
+        assert b1.local_calls == 1
+        assert success.outcome.backend_name == "paddleocr-vl-1.5"
+
 
 class TestLocalizeDownloadFailedFallsThrough:
     """A DOWNLOAD_FAILED in localize must NOT short-circuit the pipeline —
