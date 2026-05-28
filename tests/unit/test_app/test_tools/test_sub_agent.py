@@ -331,6 +331,71 @@ class TestBindAgent:
         assert isinstance(tool, AgentAware)
 
 
+class TestBindSession:
+    def test_isinstance_session_aware(self) -> None:
+        from agent_harness.tool.base import SessionAware
+
+        tool = SubAgentTool()
+        assert isinstance(tool, SessionAware)
+
+    def test_bind_stores_session_id(self) -> None:
+        tool = SubAgentTool()
+        assert tool._session_id is None
+        tool.bind_session("sess_X")
+        assert tool._session_id == "sess_X"
+        tool.bind_session(None)
+        assert tool._session_id is None
+
+    async def test_execute_with_session_passes_inmemory_session_to_child(
+        self,
+    ) -> None:
+        """parent_sid → child.run(session=InMemorySession(parent_sid)).
+        InMemorySession scopes child's output paths but is ephemeral
+        (load_state returns None, save_state writes only to its own dict)
+        so parent's session file is never touched."""
+        from agent_harness.session.memory_session import InMemorySession
+
+        tool = _make_bound_tool()
+        tool.bind_session("sess_X")
+        tool._agent.hooks = DefaultHooks()
+        mock_result = AgentResult(
+            output="done", steps=[StepResult(response="done")],
+        )
+
+        with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
+            mock_instance = AsyncMock()
+            mock_instance.run = AsyncMock(return_value=mock_result)
+            MockAgent.return_value = mock_instance
+
+            await tool.execute(
+                description="x", prompt="y", agent_type="research",
+            )
+
+        passed = mock_instance.run.call_args.kwargs.get("session")
+        assert isinstance(passed, InMemorySession)
+        assert passed.session_id == "sess_X"
+
+    async def test_execute_without_session_passes_none_to_child(
+        self,
+    ) -> None:
+        tool = _make_bound_tool()
+        tool._agent.hooks = DefaultHooks()
+        mock_result = AgentResult(
+            output="done", steps=[StepResult(response="done")],
+        )
+
+        with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
+            mock_instance = AsyncMock()
+            mock_instance.run = AsyncMock(return_value=mock_result)
+            MockAgent.return_value = mock_instance
+
+            await tool.execute(
+                description="x", prompt="y", agent_type="research",
+            )
+
+        assert mock_instance.run.call_args.kwargs.get("session") is None
+
+
 # ── Type sequencing ──
 
 

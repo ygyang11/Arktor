@@ -6,6 +6,7 @@ import time
 from typing import Any, TYPE_CHECKING
 
 from agent_harness.core.errors import ToolExecutionError, ToolValidationError
+from agent_harness.session.memory_session import InMemorySession
 from agent_harness.tool.base import BaseTool, ToolSchema
 
 if TYPE_CHECKING:
@@ -250,9 +251,13 @@ class SubAgentTool(BaseTool):
         )
         self._agent: Any = None
         self._type_seq: dict[str, int] = {}
+        self._session_id: str | None = None
 
     def bind_agent(self, agent: Any) -> None:
         self._agent = agent
+
+    def bind_session(self, session_id: str | None) -> None:
+        self._session_id = session_id
 
     def get_schema(self) -> ToolSchema:
         available_types = self._get_available_types()
@@ -364,15 +369,21 @@ class SubAgentTool(BaseTool):
             parent_name, subagent_name, agent_type, description, prompt,
         )
 
+        sub_session = (
+            InMemorySession(self._session_id) if self._session_id else None
+        )
+
         if background:
             return self._start_background(
                 child, description, prompt, agent_type, subagent_name,
+                sub_session,
             )
 
         # Synchronous path
         try:
             result, tool_usage, elapsed_ms = await self._run_child(
-                child, prompt, parent_name, subagent_name, agent_type, description,
+                child, prompt, parent_name, subagent_name,
+                agent_type, description, sub_session,
             )
             return self._format_result(
                 output=result.output,
@@ -392,6 +403,7 @@ class SubAgentTool(BaseTool):
         prompt: str,
         agent_type: str,
         subagent_name: str,
+        sub_session: InMemorySession | None,
     ) -> str:
         from agent_harness.utils.token_counter import truncate_text_by_tokens
 
@@ -399,7 +411,8 @@ class SubAgentTool(BaseTool):
 
         async def work() -> tuple[str, str]:
             result, tool_usage, _ = await self._run_child(
-                child, prompt, parent_name, subagent_name, agent_type, description,
+                child, prompt, parent_name, subagent_name,
+                agent_type, description, sub_session,
             )
             result_preview = truncate_text_by_tokens(
                 result.output, max_tokens=100, suffix="..."
@@ -427,6 +440,7 @@ class SubAgentTool(BaseTool):
         subagent_name: str,
         agent_type: str,
         description: str,
+        sub_session: InMemorySession | None,
     ) -> tuple[Any, dict[str, int], float]:
         """Run child agent with hooks and progress tracking."""
         from agent_harness.hooks.progress import _subagent_active
@@ -436,7 +450,7 @@ class SubAgentTool(BaseTool):
         _tool_calls = 0
         token = _subagent_active.set(True)
         try:
-            result = await child.run(prompt)
+            result = await child.run(prompt, session=sub_session)
             _steps = result.step_count
             tool_usage = self._extract_tool_usage(result)
             _tool_calls = sum(tool_usage.values())
