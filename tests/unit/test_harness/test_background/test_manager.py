@@ -224,15 +224,13 @@ class TestOutput:
         task = manager.get_all()[0]
         assert Path(task.result.output_path).exists()
 
-    def test_cleanup_on_init(self, tmp_path: Path) -> None:
-        out_dir = tmp_path / "cleanup_test"
-        out_dir.mkdir()
-        (out_dir / "old.txt").write_text("stale")
-        m = BackgroundTaskManager()
-        m._output_dir = str(out_dir)
-        m._cleanup_output_dir()
-        assert not out_dir.exists()
-
+    async def test_output_path_is_absolute(
+        self, manager: BackgroundTaskManager,
+    ) -> None:
+        manager.spawn("terminal", "test", _immediate("x"))
+        await asyncio.sleep(0.05)
+        task = manager.get_all()[0]
+        assert Path(task.result.output_path).is_absolute()
 
 # -- Session --
 
@@ -240,13 +238,15 @@ class TestOutput:
 class TestSession:
     def test_bind_session_changes_dir(self, manager: BackgroundTaskManager) -> None:
         manager.bind_session("sess_abc")
-        assert "sess_abc" in manager._output_dir
+        assert manager._output_dir.endswith("/sessions/sess_abc/backgrounds")
+        assert Path(manager._output_dir).is_absolute()
 
     def test_default_isolation_by_uuid(self) -> None:
         m1 = BackgroundTaskManager()
         m2 = BackgroundTaskManager()
         assert m1._output_dir != m2._output_dir
-        assert m1._output_dir.startswith(BackgroundTaskManager._BASE_OUTPUT_DIR)
+        assert "/anonymous/backgrounds/" in m1._output_dir
+        assert Path(m1._output_dir).is_absolute()
 
     def test_bind_same_session_noop(self, manager: BackgroundTaskManager) -> None:
         manager.bind_session("sess_abc")
@@ -254,6 +254,70 @@ class TestSession:
         manager.bind_session("sess_abc")
         dir2 = manager._output_dir
         assert dir1 == dir2
+
+
+# -- Task ID counter --
+
+
+class TestTaskIdCounter:
+    async def test_task_ids_use_four_digits(
+        self, manager: BackgroundTaskManager,
+    ) -> None:
+        manager.spawn("terminal", "t1", _immediate("x"))
+        await asyncio.sleep(0.05)
+        task = manager.get_all()[0]
+        assert task.task_id == "bg_0001"
+
+    def test_advance_past_existing_artifacts(self, tmp_path: Path) -> None:
+        out = tmp_path / "sess_dir"
+        out.mkdir()
+        (out / "bg_0007.txt").write_text("old run")
+        (out / "bg_0003.txt").write_text("older run")
+        m = BackgroundTaskManager()
+        m._output_dir = str(out)
+        m._restore_task_seq()
+        assert m._next_task_id() == "bg_0008"
+
+    def test_advance_recognizes_old_three_digit_format(
+        self, tmp_path: Path,
+    ) -> None:
+        """Sessions created before the 4-digit switch have bg_001.txt-style
+        artifacts. Counter must still see them so resumes don't overwrite."""
+        out = tmp_path / "sess_dir"
+        out.mkdir()
+        (out / "bg_005.txt").write_text("pre-upgrade run")
+        m = BackgroundTaskManager()
+        m._output_dir = str(out)
+        m._restore_task_seq()
+        assert m._next_task_id() == "bg_0006"
+
+    def test_advance_empty_dir_keeps_counter(self, tmp_path: Path) -> None:
+        out = tmp_path / "fresh"
+        out.mkdir()
+        m = BackgroundTaskManager()
+        m._output_dir = str(out)
+        m._restore_task_seq()
+        assert m._next_task_id() == "bg_0001"
+
+    def test_advance_missing_dir_is_noop(self, tmp_path: Path) -> None:
+        m = BackgroundTaskManager()
+        m._output_dir = str(tmp_path / "does_not_exist")
+        m._restore_task_seq()
+        assert m._next_task_id() == "bg_0001"
+
+    def test_bind_session_to_resumed_dir_advances_counter(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "agent_harness.background.manager._HARNESS_DIR", tmp_path,
+        )
+        (tmp_path / "sessions" / "sess_R" / "backgrounds").mkdir(parents=True)
+        (tmp_path / "sessions" / "sess_R" / "backgrounds" / "bg_0012.txt").write_text(
+            "from earlier run"
+        )
+        m = BackgroundTaskManager()
+        m.bind_session("sess_R")
+        assert m._next_task_id() == "bg_0013"
 
 
 # -- Summary --

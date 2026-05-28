@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -12,13 +11,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_TASK_SEQ = 0
-
-
-def _next_task_id() -> str:
-    global _TASK_SEQ
-    _TASK_SEQ += 1
-    return f"bg_{_TASK_SEQ:03d}"
+_HARNESS_DIR = Path.home() / ".agent-harness"
 
 
 @dataclass
@@ -47,13 +40,13 @@ class BackgroundTask:
 class BackgroundTaskManager:
     """Manages background asyncio tasks with lifecycle tracking."""
 
-    _BASE_OUTPUT_DIR = ".agent-harness/background"
-
     def __init__(self) -> None:
         self._tasks: dict[str, BackgroundTask] = {}
-        self._anonymous_dir = f"{self._BASE_OUTPUT_DIR}/{uuid.uuid4().hex[:8]}"
+        self._anonymous_dir = str(
+            _HARNESS_DIR / "anonymous" / "backgrounds" / uuid.uuid4().hex[:8]
+        )
         self._output_dir = self._anonymous_dir
-        self._cleanup_output_dir()
+        self._task_seq = 0
 
     def bind_session(self, session_id: str | None) -> None:
         """Bind to a session for output directory isolation.
@@ -63,17 +56,34 @@ class BackgroundTaskManager:
         isolated from one another and never write into the shared base.
         """
         new_dir = (
-            f"{self._BASE_OUTPUT_DIR}/{session_id}" if session_id
+            str(_HARNESS_DIR / "sessions" / session_id / "backgrounds")
+            if session_id
             else self._anonymous_dir
         )
         if new_dir == self._output_dir:
             return
         self._output_dir = new_dir
+        self._restore_task_seq()
 
-    def _cleanup_output_dir(self) -> None:
-        out_dir = Path(self._output_dir)
-        if out_dir.exists():
-            shutil.rmtree(out_dir)
+    def _next_task_id(self) -> str:
+        self._task_seq += 1
+        return f"bg_{self._task_seq:04d}"
+
+    def _restore_task_seq(self) -> None:
+        """When binding to a persisted session dir, advance the counter
+        past any ``bg_*.txt`` artifacts from prior runs so we don't
+        overwrite content that the persisted message history still
+        references by path."""
+        out = Path(self._output_dir)
+        if not out.exists():
+            return
+        for p in out.glob("bg_*.txt"):
+            try:
+                n = int(p.stem.split("_", 1)[1])
+            except (ValueError, IndexError):
+                continue
+            if n > self._task_seq:
+                self._task_seq = n
 
     def spawn(
         self,
@@ -85,7 +95,7 @@ class BackgroundTaskManager:
 
         The coroutine must return tuple[str, str] = (full_output, summary).
         """
-        task_id = _next_task_id()
+        task_id = self._next_task_id()
         bg_task = BackgroundTask(
             task_id=task_id,
             tool_name=tool_name,
