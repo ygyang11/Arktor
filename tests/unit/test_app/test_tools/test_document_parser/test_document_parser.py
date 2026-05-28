@@ -134,6 +134,92 @@ class TestParseDocumentCacheHit:
         assert "paddleocr-vl-1.5" in out
 
 
+class TestParseDocumentFailureCleanup:
+    async def test_failed_parse_removes_empty_dest_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """All-tiers-fail must not leave the empty `<sid>/<slug>/` dir
+        behind. Cumulative failures across repeated stress tests showed
+        these accumulating as cruft."""
+        from agent_app.tools.document_parser.errors import (
+            NoViableDocumentBackend,
+        )
+
+        monkeypatch.setattr(dp_mod, "session_documents_root", lambda _s: tmp_path)
+
+        async def _fake_inspect(_target: str) -> TargetInspection:
+            return TargetInspection(
+                is_local=False, size_bytes=1024, size_mb=0.001,
+                pages=1, name="a.pdf", mime="application/pdf", kind="pdf",
+            )
+        monkeypatch.setattr(dp_mod, "inspect_target", _fake_inspect)
+
+        slug = "boom_deadbeef"
+        monkeypatch.setattr(
+            dp_mod, "make_slug",
+            lambda *, source, content_hash, suggested=None: slug,
+        )
+
+        async def _raise_pipeline(*a: object, **kw: object) -> object:
+            raise NoViableDocumentBackend(
+                skipped=[],
+                fallback_chain=[],
+                unattempted=[],
+            )
+        monkeypatch.setattr(dp_mod, "run_pipeline", _raise_pipeline)
+
+        out = await parse_document(
+            target="https://x/fail.pdf",
+            session_id=None,
+            slug_hint=None,
+        )
+        assert out.startswith("Error: document parsing failed.")
+        assert not (tmp_path / slug).exists()
+
+    async def test_failed_parse_with_partial_artifacts_keeps_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If a tier did write something before another tier raised
+        (corner case but possible across backends), the partial work
+        must NOT be deleted. rmdir() refuses on non-empty dirs so this
+        is implicit, but lock it in with a test."""
+        from agent_app.tools.document_parser.errors import (
+            NoViableDocumentBackend,
+        )
+
+        monkeypatch.setattr(dp_mod, "session_documents_root", lambda _s: tmp_path)
+
+        async def _fake_inspect(_target: str) -> TargetInspection:
+            return TargetInspection(
+                is_local=False, size_bytes=1024, size_mb=0.001,
+                pages=1, name="a.pdf", mime="application/pdf", kind="pdf",
+            )
+        monkeypatch.setattr(dp_mod, "inspect_target", _fake_inspect)
+
+        slug = "partial_cafebabe"
+        monkeypatch.setattr(
+            dp_mod, "make_slug",
+            lambda *, source, content_hash, suggested=None: slug,
+        )
+
+        async def _raise_with_partial(*a: object, **kw: object) -> object:
+            # Simulate a backend having written a partial file before all
+            # tiers eventually failed.
+            (tmp_path / slug / "content.md").parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / slug / "content.md").write_text("partial")
+            raise NoViableDocumentBackend(
+                skipped=[], fallback_chain=[], unattempted=[],
+            )
+        monkeypatch.setattr(dp_mod, "run_pipeline", _raise_with_partial)
+
+        await parse_document(
+            target="https://x/partial.pdf",
+            session_id=None,
+            slug_hint=None,
+        )
+        assert (tmp_path / slug / "content.md").exists()
+
+
 class TestMakeDownloader:
     async def test_too_large(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def _fail(*a: object, **kw: object) -> tuple[int, bytes]:

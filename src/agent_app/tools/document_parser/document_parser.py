@@ -139,6 +139,7 @@ def _make_downloader(url: str, *, mime: str | None) -> DownloadFn:
                 timeout=_CFG.download_timeout_s,
                 retry=HttpRetryConfig(max_attempts=3, base_delay=1.0),
                 max_bytes=_CFG.download_max_bytes,
+                allow_redirects=True,
             )
         except HttpResponseTooLargeError as e:
             raise DocumentBackendError(
@@ -258,6 +259,12 @@ async def parse_document(
                 download=_make_downloader(target, mime=insp.mime),
             )
         except NoViableDocumentBackend as e:
+            # No tier produced artifacts; clean up the empty session dir so
+            # failed parses don't accumulate as cruft.
+            try:
+                dest_dir.rmdir()
+            except OSError:
+                pass
             return format_no_viable(
                 e.skipped,
                 [a.to_dict() for a in e.fallback_chain],

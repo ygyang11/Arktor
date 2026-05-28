@@ -37,6 +37,7 @@ _FALLBACK_CLASSES = frozenset({
     DocumentErrorClass.FILE_TOO_LARGE,
     DocumentErrorClass.PAGE_LIMIT,
     DocumentErrorClass.UNSUPPORTED_BY_TIER,
+    DocumentErrorClass.DOWNLOAD_FAILED,
     DocumentErrorClass.UNKNOWN,
 })
 _URL_RETRY_CLASSES = frozenset({
@@ -113,13 +114,20 @@ async def run_pipeline(
 
     fallback_chain: list[TierAttempt] = []
     localized_cache: list[Path] = []
+    localize_failure: list[DocumentBackendError] = []
 
     async def localize(tier_name: str) -> Path:
+        if localize_failure:
+            # A prior tier already tried and failed to download this URL —
+            # the URL is the same, the failure mode (transport / redirect /
+            # SSRF / size) is the same, so we re-raise the cached error
+            raise localize_failure[0]
         if not localized_cache:
             start = time.monotonic()
             try:
                 localized_cache.append(await download())
             except DocumentBackendError as e:
+                localize_failure.append(e)
                 fallback_chain.append(TierAttempt(
                     tier=tier_name, mode="localize",
                     error_class=e.error_class.value, error_message=e.message,

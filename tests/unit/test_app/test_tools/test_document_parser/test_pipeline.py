@@ -233,6 +233,86 @@ class TestRunPipelineUrlToLocal:
         assert success.outcome.backend_name == "paddleocr-vl-1.5"
 
 
+class TestLocalizeDownloadFailedFallsThrough:
+    """A DOWNLOAD_FAILED in localize must NOT short-circuit the pipeline —
+    the next tier has its own URL fetcher (different transport, region,
+    auth) and might still succeed. Regression guard for the LSE 302 case
+    where our client-side download couldn't follow the redirect but the
+    server-side fetcher of the fallback tier could.
+    """
+
+    async def test_localize_download_failed_lets_next_tier_try_url(
+        self, tmp_path: Path,
+    ) -> None:
+        outcome = DocumentBackendOutcome("mineru-vlm", "vlm", 18, 0)
+        # paddle url fails 10004 → triggers localize → localize 302/DOWNLOAD_FAILED
+        # → next tier (mineru) should still get a chance at URL
+        b1 = _FakeBackend(
+            "paddleocr-vl-1.5",
+            url_outcome=DocumentBackendError(
+                DocumentErrorClass.UNSUPPORTED_BY_TIER, 10004, "fmt",
+            ),
+        )
+        b2 = _FakeBackend("mineru-vlm", url_outcome=outcome)
+
+        async def _fail_download() -> Path:
+            raise DocumentBackendError(
+                DocumentErrorClass.DOWNLOAD_FAILED, 302,
+                "HTTP 302 while downloading URL for localization",
+            )
+
+        async with aiohttp.ClientSession() as s:
+            success = await run_pipeline(
+                s, [b1, b2], "https://x/a.pdf", _insp(), tmp_path, {},
+                download=_fail_download,
+            )
+        assert success.outcome.backend_name == "mineru-vlm"
+        # chain must show paddle url 10004 + localize DOWNLOAD_FAILED
+        classes = {a.error_class for a in success.fallback_chain}
+        assert "UNSUPPORTED_BY_TIER" in classes
+        assert "DOWNLOAD_FAILED" in classes
+
+    async def test_localize_failure_cached_across_tiers(
+        self, tmp_path: Path,
+    ) -> None:
+        """A 2-tier pipeline where both want to localize the same URL.
+        The second tier must NOT re-attempt the download — it should
+        see the cached failure and abort localize immediately."""
+        b1 = _FakeBackend(
+            "paddleocr-vl-1.5",
+            url_outcome=DocumentBackendError(
+                DocumentErrorClass.UNSUPPORTED_BY_TIER, 10004, "fmt",
+            ),
+        )
+        b2 = _FakeBackend(
+            "paddleocr-vl",
+            url_outcome=DocumentBackendError(
+                DocumentErrorClass.UNSUPPORTED_BY_TIER, 10004, "fmt",
+            ),
+        )
+        b3 = _FakeBackend(
+            "mineru-vlm",
+            url_outcome=DocumentBackendOutcome("mineru-vlm", "vlm", 1, 0),
+        )
+
+        download_attempts: list[int] = []
+
+        async def _fail_download() -> Path:
+            download_attempts.append(1)
+            raise DocumentBackendError(
+                DocumentErrorClass.DOWNLOAD_FAILED, 302, "redirect",
+            )
+
+        async with aiohttp.ClientSession() as s:
+            success = await run_pipeline(
+                s, [b1, b2, b3], "https://x/a.pdf", _insp(), tmp_path, {},
+                download=_fail_download,
+            )
+        assert success.outcome.backend_name == "mineru-vlm"
+        # The download was attempted ONCE despite two tiers needing localize
+        assert len(download_attempts) == 1
+
+
 class TestRunPipelineNaturalExhaustion:
     async def test_no_unattempted_when_all_tried(self, tmp_path: Path) -> None:
         err = DocumentBackendError(
