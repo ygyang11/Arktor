@@ -1,9 +1,11 @@
 """Tiered document parsing (PDF / image) with on-disk artifacts."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -108,6 +110,24 @@ class _DocumentToolConfig:
 
 
 _CFG = _DocumentToolConfig()
+
+_slug_locks: weakref.WeakValueDictionary[
+    tuple[str | None, str], asyncio.Lock
+] = weakref.WeakValueDictionary()
+
+
+def _get_slug_lock(session_id: str | None, slug: str) -> asyncio.Lock:
+    """Per-(session, slug) asyncio lock so concurrent parses of the same
+    document (e.g. parent + sub-agent within one session) don't race on
+    the artifact directory. Held by callers via ``async with``, so the
+    weak-dict entry stays alive during contention; once all callers
+    drop their reference, the lock is GC'd and the entry cleared."""
+    key = (session_id, slug)
+    lock = _slug_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _slug_locks[key] = lock
+    return lock
 
 
 def _build_pipeline(cfg: DocumentParserConfig) -> list[DocumentBackend]:
@@ -245,35 +265,37 @@ async def parse_document(
         suggested=slug_hint,
     )
     dest_dir = session_documents_root(session_id) / slug
-    dest_dir.mkdir(parents=True, exist_ok=True)
 
-    if already_parsed(dest_dir):
-        return format_cached(dest_dir, target)
+    async with _get_slug_lock(session_id, slug):
+        dest_dir.mkdir(parents=True, exist_ok=True)
 
-    keys = {
-        "mineru": cfg.mineru_api_key or "",
-        "paddleocr": cfg.paddleocr_api_key or "",
-    }
-    async with aiohttp.ClientSession() as session:
-        try:
-            success = await run_pipeline(
-                session, backends, target, insp, dest_dir, keys,
-                download=_make_downloader(target, mime=insp.mime),
-            )
-        except NoViableDocumentBackend as e:
-            # No tier produced artifacts; clean up the empty session dir so
-            # failed parses don't accumulate as cruft.
+        if already_parsed(dest_dir):
+            return format_cached(dest_dir, target)
+
+        keys = {
+            "mineru": cfg.mineru_api_key or "",
+            "paddleocr": cfg.paddleocr_api_key or "",
+        }
+        async with aiohttp.ClientSession() as session:
             try:
-                dest_dir.rmdir()
-            except OSError:
-                pass
-            return format_no_viable(
-                e.skipped,
-                [a.to_dict() for a in e.fallback_chain],
-                unattempted=e.unattempted,
-            )
+                success = await run_pipeline(
+                    session, backends, target, insp, dest_dir, keys,
+                    download=_make_downloader(target, mime=insp.mime),
+                )
+            except NoViableDocumentBackend as e:
+                # No tier produced artifacts; clean up the empty session dir so
+                # failed parses don't accumulate as cruft.
+                try:
+                    dest_dir.rmdir()
+                except OSError:
+                    pass
+                return format_no_viable(
+                    e.skipped,
+                    [a.to_dict() for a in e.fallback_chain],
+                    unattempted=e.unattempted,
+                )
 
-    return _finalize(success, target, insp, dest_dir, slug)
+        return _finalize(success, target, insp, dest_dir, slug)
 
 
 class DocumentParserTool(BaseTool):

@@ -134,6 +134,158 @@ class TestParseDocumentCacheHit:
         assert "paddleocr-vl-1.5" in out
 
 
+class TestSlugLock:
+    """Concurrent parses of the same (session_id, slug) must serialize so
+    the second caller hits the cache instead of re-running the pipeline.
+    Different slugs (even in the same session) must NOT block each other."""
+
+    async def test_get_slug_lock_keys(self) -> None:
+        from agent_app.tools.document_parser.document_parser import (
+            _get_slug_lock, _slug_locks,
+        )
+
+        _slug_locks.clear()
+        lock_xa = _get_slug_lock("X", "slug_a")
+        lock_xb = _get_slug_lock("X", "slug_b")
+        lock_ya = _get_slug_lock("Y", "slug_a")
+        lock_anon_a = _get_slug_lock(None, "slug_a")
+        lock_anon_a_again = _get_slug_lock(None, "slug_a")
+
+        assert lock_xa is not lock_xb        # same session, different slug
+        assert lock_xa is not lock_ya        # different session, same slug
+        assert lock_xa is not lock_anon_a    # session vs anonymous
+        assert lock_anon_a is lock_anon_a_again  # cached, identity preserved
+
+    async def test_anon_string_session_id_does_not_collide_with_none(
+        self,
+    ) -> None:
+        """session_id="_anon" is a legal string by SAFE_ID_PATTERN; it must
+        get its own lock and not be conflated with the None (anonymous)
+        bucket. Tuple key (vs the previous "_anon" sentinel string) is
+        what guarantees this."""
+        from agent_app.tools.document_parser.document_parser import (
+            _get_slug_lock, _slug_locks,
+        )
+        _slug_locks.clear()
+        lock_none = _get_slug_lock(None, "slug_a")
+        lock_anon_str = _get_slug_lock("_anon", "slug_a")
+        assert lock_none is not lock_anon_str
+
+    async def test_concurrent_same_slug_serializes_second_hits_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Two concurrent parses of the same target: first runs pipeline,
+        second finds cache populated and skips pipeline entirely."""
+        import asyncio
+        from agent_app.tools.document_parser.backends import DocumentBackendOutcome
+        from agent_app.tools.document_parser.document_parser import _slug_locks
+        from agent_app.tools.document_parser.pipeline import PipelineSuccess
+        _slug_locks.clear()
+
+        monkeypatch.setattr(dp_mod, "session_documents_root", lambda _s: tmp_path)
+
+        async def _fake_inspect(_target: str) -> TargetInspection:
+            return TargetInspection(
+                is_local=False, size_bytes=1024, size_mb=0.001,
+                pages=1, name="a.pdf", mime="application/pdf", kind="pdf",
+            )
+        monkeypatch.setattr(dp_mod, "inspect_target", _fake_inspect)
+
+        slug = "shared_slug"
+        monkeypatch.setattr(
+            dp_mod, "make_slug",
+            lambda *, source, content_hash, suggested=None: slug,
+        )
+
+        pipeline_calls = 0
+        ready = asyncio.Event()
+
+        async def _slow_pipeline(*a: object, **kw: object) -> PipelineSuccess:
+            nonlocal pipeline_calls
+            pipeline_calls += 1
+            # Block until both callers have entered (or queued for) parse_document
+            await ready.wait()
+            dest_dir = tmp_path / slug
+            (dest_dir / "content.md").write_text("body")
+            return PipelineSuccess(
+                outcome=DocumentBackendOutcome("paddleocr-vl-1.5", "p", 1, 0),
+                fallback_chain=[], skipped_tiers=[],
+                successful_tier_elapsed_ms=10,
+            )
+        monkeypatch.setattr(dp_mod, "run_pipeline", _slow_pipeline)
+
+        t1 = asyncio.create_task(parse_document(
+            target="https://x/a.pdf", session_id="X", slug_hint=None,
+        ))
+        t2 = asyncio.create_task(parse_document(
+            target="https://x/a.pdf", session_id="X", slug_hint=None,
+        ))
+        # Give both tasks a chance to enter parse_document and contend for lock
+        await asyncio.sleep(0.05)
+        ready.set()
+        await t1
+        await t2
+
+        assert pipeline_calls == 1, (
+            "Second concurrent call must hit cache, not re-run pipeline"
+        )
+
+    async def test_concurrent_different_slugs_run_in_parallel(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Different slugs must NOT block each other — lock granularity
+        is per-(session, slug), not per-session."""
+        import asyncio
+        from agent_app.tools.document_parser.backends import DocumentBackendOutcome
+        from agent_app.tools.document_parser.document_parser import _slug_locks
+        from agent_app.tools.document_parser.pipeline import PipelineSuccess
+        _slug_locks.clear()
+
+        monkeypatch.setattr(dp_mod, "session_documents_root", lambda _s: tmp_path)
+
+        async def _fake_inspect(_target: str) -> TargetInspection:
+            return TargetInspection(
+                is_local=False, size_bytes=1024, size_mb=0.001,
+                pages=1, name="a.pdf", mime="application/pdf", kind="pdf",
+            )
+        monkeypatch.setattr(dp_mod, "inspect_target", _fake_inspect)
+
+        # Different slug per target
+        monkeypatch.setattr(
+            dp_mod, "make_slug",
+            lambda *, source, content_hash, suggested=None: f"slug_{source[-1]}",
+        )
+
+        in_flight = 0
+        max_in_flight = 0
+
+        async def _track_pipeline(*a: object, **kw: object) -> PipelineSuccess:
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(0.05)  # simulate work
+            in_flight -= 1
+            dest_dir = a[4]  # 5th positional arg is dest_dir
+            (dest_dir / "content.md").write_text("body")
+            return PipelineSuccess(
+                outcome=DocumentBackendOutcome("paddleocr-vl-1.5", "p", 1, 0),
+                fallback_chain=[], skipped_tiers=[],
+                successful_tier_elapsed_ms=10,
+            )
+        monkeypatch.setattr(dp_mod, "run_pipeline", _track_pipeline)
+
+        t1 = asyncio.create_task(parse_document(
+            target="https://x/a", session_id="X", slug_hint=None,
+        ))
+        t2 = asyncio.create_task(parse_document(
+            target="https://x/b", session_id="X", slug_hint=None,
+        ))
+        await asyncio.gather(t1, t2)
+        assert max_in_flight == 2, (
+            "Different slugs must parse concurrently (not serialized)"
+        )
+
+
 class TestParseDocumentFailureCleanup:
     async def test_failed_parse_removes_empty_dest_dir(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
