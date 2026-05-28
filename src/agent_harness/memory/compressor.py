@@ -360,6 +360,11 @@ class ContextCompressor:
         Protected system messages (agent identity) are always preserved.
         Compression summaries are system-role but NOT protected — they
         enter non_system and can be re-compressed (telescoping).
+
+        `retain_count` is measured in *user-anchored segments*: each
+        segment begins with a user message and includes the assistant /
+        tool groups that follow before the next user. This guarantees
+        ``recent[0]`` is user-starting 
         """
         system: list[_MessageGroup] = []
         non_system: list[_MessageGroup] = []
@@ -370,10 +375,15 @@ class ContextCompressor:
             else:
                 non_system.append(g)
 
-        if len(non_system) <= self._retain_count:
+        user_starts = [
+            i for i, g in enumerate(non_system)
+            if g.messages and g.messages[0].role == Role.USER
+        ]
+
+        if len(user_starts) <= self._retain_count:
             return system, [], non_system
 
-        split = len(non_system) - self._retain_count
+        split = user_starts[-self._retain_count]
         older = non_system[:split]
         recent = non_system[split:]
 

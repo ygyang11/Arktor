@@ -118,18 +118,45 @@ class TestPartition:
     def test_correct_split(self, compressor: ContextCompressor) -> None:
         groups = ContextCompressor._group_atomic_pairs(_make_messages(10))
         _, older, recent = compressor._partition(groups)
-        assert len(older) == 6
-        assert len(recent) == 4
+        assert len(older) == 2
+        assert len(recent) == 8
+        assert recent[0].messages[0].role.value == "user"
 
     def test_summary_can_be_recompressed(self, compressor: ContextCompressor) -> None:
         """Compression summary is system but not protected, enters non_system."""
         summary = Message.system(
             "Previous summary", metadata={"is_compression_summary": True}
         )
-        msgs = [summary] + _make_messages(8)
+        msgs = [summary] + _make_messages(12)
         groups = ContextCompressor._group_atomic_pairs(msgs)
-        _, older, _ = compressor._partition(groups)
+        _, older, recent = compressor._partition(groups)
         assert len(older) > 0
+        assert older[0].messages[0].metadata.get("is_compression_summary") is True
+        assert recent[0].messages[0].role.value == "user"
+
+    def test_recent_always_starts_with_user(
+        self, compressor: ContextCompressor,
+    ) -> None:
+        msgs = _make_messages(12)
+        groups = ContextCompressor._group_atomic_pairs(msgs)
+        _, _, recent = compressor._partition(groups)
+        assert recent[0].messages[0].role.value == "user"
+
+    def test_retain_count_counts_segments_not_groups(
+        self, compressor: ContextCompressor,
+    ) -> None:
+        from agent_harness.core.message import ToolCall
+        msgs: list[Message] = []
+        for i in range(5):
+            msgs.append(Message.user(f"u{i}"))
+            tc = ToolCall(id=f"c{i}", name="f", arguments={})
+            msgs.append(Message.assistant(None, tool_calls=[tc]))
+            msgs.append(Message.tool(tool_call_id=f"c{i}", content=f"r{i}"))
+        groups = ContextCompressor._group_atomic_pairs(msgs)
+        _, older, recent = compressor._partition(groups)
+        assert len(older) == 2
+        assert recent[0].messages[0].role.value == "user"
+        assert len(recent) == 8
 
 
 class TestCompress:
@@ -148,7 +175,8 @@ class TestCompress:
             assert result[1].metadata.get("is_compression_summary") is True
             assert result[1].metadata.get("archive_paths") == ["/tmp/t.md"]
             assert "resume directly" in (result[1].content or "")
-            assert len(result) == 1 + 1 + 4
+            assert len(result) == 1 + 1 + 8
+            assert result[2].role.value == "user"
 
     @pytest.mark.asyncio
     async def test_no_compression_when_few(self, compressor: ContextCompressor) -> None:
