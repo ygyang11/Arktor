@@ -257,6 +257,30 @@ class TestMakeDownloader:
         assert p.suffix == ".pdf"
         p.unlink(missing_ok=True)
 
+    async def test_sends_user_agent_header(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """aiohttp's default User-Agent is rejected (403) by Wikipedia and
+        likely other anti-bot CDNs. The downloader must self-identify so
+        localize() can actually fetch image/PDF URLs from those sources."""
+        captured: dict[str, Any] = {}
+
+        async def _capture(*a: object, **kw: object) -> tuple[int, bytes]:
+            captured.update(kw)
+            return 200, b"%PDF-1.4"
+
+        monkeypatch.setattr(dp_mod, "http_get_bytes_with_retry", _capture)
+        dl = _make_downloader("https://x/a.pdf", mime="application/pdf")
+        p = await dl()
+        p.unlink(missing_ok=True)
+
+        hdrs = captured.get("headers") or {}
+        ua = hdrs.get("User-Agent") or hdrs.get("user-agent")
+        assert ua, "downloader must set a User-Agent header"
+        assert "Mozilla" not in ua, (
+            "browser-impersonating UA breaks IMF (403); use a custom UA"
+        )
+
     async def test_io_error_translation(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

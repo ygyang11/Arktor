@@ -31,6 +31,7 @@ from agent_app.tools.document_parser.pipeline import (
 )
 from agent_app.tools.document_parser.storage import (
     _MIME_TO_SUFFIX,
+    _USER_AGENT,
     TargetInspection,
     already_parsed,
     format_cached,
@@ -136,6 +137,7 @@ def _make_downloader(url: str, *, mime: str | None) -> DownloadFn:
         try:
             status, data = await http_get_bytes_with_retry(
                 url,
+                headers={"User-Agent": _USER_AGENT},
                 timeout=_CFG.download_timeout_s,
                 retry=HttpRetryConfig(max_attempts=3, base_delay=1.0),
                 max_bytes=_CFG.download_max_bytes,

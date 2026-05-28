@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import unquote, urlparse
 
+from agent_harness import __version__ as _HARNESS_VERSION
+
 _UNSAFE_SLUG = re.compile(r"[^A-Za-z0-9._-]")
+
+_USER_AGENT = f"agent-harness/{_HARNESS_VERSION}"
 
 _PDF_SUFFIXES = frozenset({".pdf"})
 _IMAGE_SUFFIXES = frozenset(
@@ -112,7 +116,10 @@ async def _inspect_remote(target: str) -> TargetInspection:
     size: int | None = None
     mime: str | None = None
     try:
-        status, headers = await http_head_with_retry(target, timeout=15)
+        status, headers = await http_head_with_retry(
+            target, timeout=15,
+            headers={"User-Agent": _USER_AGENT},
+        )
         if status == 200:
             mime, size = _read_head_metadata(headers)
     except Exception:

@@ -126,6 +126,28 @@ class TestInspectRemote:
         assert insp.mime is None
         assert insp.size_bytes is None
 
+    async def test_head_sends_user_agent(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Wikimedia and other anti-bot CDNs 403 aiohttp's default UA on HEAD.
+        Inspect must self-identify so kind/mime/size detection works for
+        those sources."""
+        captured: dict[str, Any] = {}
+
+        async def _head(
+            url: str, *, headers: dict[str, str] | None = None, timeout: int = 30,
+        ) -> tuple[int, Mapping[str, str]]:
+            captured["headers"] = headers
+            return 200, {"Content-Type": "image/jpeg"}
+
+        monkeypatch.setattr(
+            "agent_harness.utils.http_retry.http_head_with_retry", _head,
+        )
+        await inspect_target("https://upload.wikimedia.org/x.jpg")
+        hdrs = captured.get("headers") or {}
+        ua = hdrs.get("User-Agent") or hdrs.get("user-agent")
+        assert ua and "agent-harness" in ua
+
 
 class TestSlug:
     def test_basic(self) -> None:

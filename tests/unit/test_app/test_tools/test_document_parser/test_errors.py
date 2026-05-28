@@ -34,9 +34,10 @@ class TestClassify:
         assert classify_paddle(429) is DocumentErrorClass.QUOTA_EXCEEDED
         assert classify_paddle(503) is DocumentErrorClass.RATE_LIMITED
         assert classify_paddle(504) is DocumentErrorClass.TIMEOUT
+        assert classify_paddle(10000) is DocumentErrorClass.TIMEOUT
         assert classify_paddle(10003) is DocumentErrorClass.FILE_TOO_LARGE
         assert classify_paddle(10004) is DocumentErrorClass.UNSUPPORTED_BY_TIER
-        assert classify_paddle(10005) is DocumentErrorClass.BACKEND_READ_FAILED
+        assert classify_paddle(10005) is DocumentErrorClass.BACKEND_FETCH_FAILED
         assert classify_paddle(10006) is DocumentErrorClass.PAGE_LIMIT
         assert classify_paddle(11003) is DocumentErrorClass.BACKEND_READ_FAILED
         assert classify_paddle(12001) is DocumentErrorClass.QUOTA_EXCEEDED
