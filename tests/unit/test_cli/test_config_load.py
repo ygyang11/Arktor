@@ -78,21 +78,53 @@ def test_fallback_when_template_missing(
 
 @pytest.fixture
 def restore_logging() -> None:
-    names = ("agent_harness", "agent_app")
+    loggers = [logging.getLogger(n) for n in ("agent_harness", "agent_app")]
+    loggers.append(logging.getLogger())  # root — attach_rich_logging touches it
     saved = {
-        n: (
-            list(logging.getLogger(n).handlers),
-            logging.getLogger(n).level,
-            logging.getLogger(n).propagate,
-        )
-        for n in names
+        lg: (list(lg.handlers), lg.level, lg.propagate) for lg in loggers
     }
     yield
-    for n, (handlers, level, propagate) in saved.items():
-        lg = logging.getLogger(n)
+    for lg, (handlers, level, propagate) in saved.items():
         lg.handlers[:] = handlers
         lg.setLevel(level)
         lg.propagate = propagate
+
+
+def test_setup_logging_pins_pypdf_to_warning(
+    restore_logging: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pypdf belongs in the third-party WARNING bucket like the other
+    libs — its noise is real WARNING-level and rendered (not corrupting)
+    once root routes through rich; it must NOT be force-silenced to ERROR."""
+    import agent_harness.utils.logging_config as lc
+
+    monkeypatch.setattr(lc, "_configured", False)
+    pypdf_logger = logging.getLogger("pypdf")
+    saved = pypdf_logger.level
+    try:
+        pypdf_logger.setLevel(logging.NOTSET)
+        lc.setup_logging("DEBUG")
+        assert pypdf_logger.level == logging.WARNING
+    finally:
+        pypdf_logger.setLevel(saved)
+
+
+def test_attach_rich_logging_routes_root_for_third_party(
+    restore_logging: None,
+) -> None:
+    """Third-party libs (pypdf/httpx/docker/…) propagate to root. Without
+    a handler there they hit logging.lastResort and write raw to stderr,
+    corrupting the Live region. attach_rich_logging must put the rich
+    handler on root so those records render above the Live instead."""
+    attach_rich_logging(Console())
+    root = logging.getLogger()
+    rich_handlers = [h for h in root.handlers if h.get_name() == "cli-rich"]
+    assert len(rich_handlers) == 1
+
+    # Idempotent: a second call must not stack duplicate handlers on root.
+    attach_rich_logging(Console())
+    rich_handlers = [h for h in root.handlers if h.get_name() == "cli-rich"]
+    assert len(rich_handlers) == 1
 
 
 def test_attach_rich_logging_handler_does_not_filter(

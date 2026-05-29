@@ -69,6 +69,12 @@ def attach_rich_logging(console: Console) -> None:
     records render above an active Live instead of through it. The
     handler stays at NOTSET so the logger level (which /debug toggles
     via setup_logging) remains the sole gate.
+
+    The same handler is also attached to the root logger so third-party
+    library records (pypdf, httpx, docker, …) — which propagate to root
+    and would otherwise hit logging.lastResort and write raw to stderr,
+    corrupting the Live region — render above the Live too. Our two
+    namespaces keep propagate=False so they are not double-handled.
     """
     import logging
 
@@ -89,3 +95,9 @@ def attach_rich_logging(console: Console) -> None:
                 lg.removeHandler(h)
         lg.addHandler(handler)
         lg.propagate = False
+
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        if h.get_name() == "cli-rich":
+            root.removeHandler(h)
+    root.addHandler(handler)

@@ -33,7 +33,10 @@ def setup_logging(level: str = "INFO") -> None:
             ns_logger.setLevel(numeric_level)
             ns_logger.propagate = False
 
-        for name in ("openai", "httpx", "urllib3", "httpcore", "docker"):
+        for name in (
+            "openai", "anthropic", "httpx", "urllib3", "httpcore",
+            "docker", "trafilatura", "pypdf",
+        ):
             logging.getLogger(name).setLevel(logging.WARNING)
 
         _configured = True
