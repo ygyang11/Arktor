@@ -30,6 +30,14 @@ Rules:
 - If the first approach doesn't work, try alternative strategies — \
 exhaust reasonable options before reporting failure"""
 
+# Injected into EVERY sub-agent prompt (built-in, custom, and fallback), 
+# so the constraint can't be bypassed by a custom type that supplies its own intro.
+_SUBAGENT_BG_CONSTRAINT = (
+    "You MUST NOT run tools in background mode (background=true): the "
+    "result is GUARANTEED LOST — continuing means it never returns to "
+    "you, and ANY attempt to wait exits you immediately."
+)
+
 # ── Built-in type definitions ──
 
 _BUILTIN_TYPES: dict[str, dict[str, Any]] = {
@@ -98,8 +106,7 @@ _BUILTIN_TYPES: dict[str, dict[str, Any]] = {
             "Guidelines:\n"
             "- Don't add features or make improvements beyond what was asked\n"
             "- Be careful not to introduce security vulnerabilities\n"
-            "- Stay focused on the task scope — do not expand beyond the stated objective\n"
-            "- MUST NOT run tools in background mode (background=true)\n\n"
+            "- Stay focused on the task scope — do not expand beyond the stated objective\n\n"
             "When you complete the task, respond with a concise report covering "
             "what was done and any key findings."
         ),
@@ -520,6 +527,7 @@ class SubAgentTool(BaseTool):
 
         type_spec = self._get_available_types()[agent_type]
         intro = type_spec.get("intro") or _SUBAGENT_INTRO
+        intro = f"{intro}\n\n{_SUBAGENT_BG_CONSTRAINT}"
         builder.register(make_intro_section(intro))
 
         return builder

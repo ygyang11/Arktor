@@ -276,6 +276,31 @@ class TestPromptBuilder:
         section = forked.register.call_args[0][0]
         assert "sub-agent assisting" in section.content.lower()
 
+    def test_bg_constraint_injected_for_all_types(self) -> None:
+        """The background-mode ban must reach EVERY sub-agent prompt —
+        built-in, custom-with-intro, and the no-intro fallback — since
+        it's the sole (prompt-only) guard against backgrounded results
+        being lost in a sub-agent."""
+        cfg = HarnessConfig(
+            sub_agent=SubAgentConfig(
+                types={
+                    "security": SubAgentTypeSpec(
+                        tools=["read_file"], intro="You are a security auditor.",
+                    ),
+                    "nointro": SubAgentTypeSpec(tools=["read_file"]),
+                }
+            ),
+        )
+        for agent_type in ("research", "plan", "general", "security", "nointro"):
+            tool = _make_bound_tool(config=cfg)
+            tool._build_subagent_prompt_builder(agent_type)
+            forked = tool._agent._prompt_builder.fork.return_value
+            section = forked.register.call_args[0][0]
+            assert "background mode (background=true)" in section.content, (
+                f"bg constraint missing for type {agent_type!r}"
+            )
+            assert "GUARANTEED LOST" in section.content
+
 
 # ── Result formatting ──
 
