@@ -9,6 +9,7 @@ import pytest
 from agent_app.observability.file_freshness import _key
 from agent_app.tools.filesystem.write_file import write_file
 from agent_harness.agent.base import BaseAgent
+from agent_harness.core.errors import ToolValidationError
 
 
 class TestWriteFile:
@@ -18,6 +19,11 @@ class TestWriteFile:
         result = await write_file.execute(file_path=str(target), content="hello\n")
         assert "Created" in result
         assert target.read_text() == "hello\n"
+
+    @pytest.mark.asyncio
+    async def test_empty_path_rejected(self) -> None:
+        with pytest.raises(ToolValidationError):
+            await write_file.execute(file_path="  ", content="x")
 
     @pytest.mark.asyncio
     async def test_create_parent_dirs(self, tmp_path: Path) -> None:

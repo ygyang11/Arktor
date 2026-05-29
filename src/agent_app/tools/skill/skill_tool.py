@@ -9,6 +9,7 @@ from typing import Any
 
 from agent_app.skills.loader import Skill, SkillLoader
 from agent_harness.core.config import HarnessConfig
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.base import BaseTool, ToolSchema
 
 _DESCRIPTION = """\
@@ -107,14 +108,14 @@ class SkillTool(BaseTool):
         skill_name = str(kwargs.get("skill_name", "")).strip()
         args = str(kwargs.get("args", ""))
         if not skill_name:
-            return "Error: skill_name is required."
+            raise ToolValidationError("skill_name is required.")
 
         loader = self._ensure_loader()
         skill = loader.get_skill(skill_name)
 
         if skill is None:
             self._ensure_loader(force=True)
-            return f"Skill '{skill_name}' not found. It may have been removed."
+            return f"Error: skill '{skill_name}' not found. It may have been removed."
 
         content = skill.body
         if "$ARGUMENTS" in content:

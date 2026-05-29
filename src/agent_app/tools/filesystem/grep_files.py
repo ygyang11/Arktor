@@ -11,6 +11,7 @@ from agent_app.tools.filesystem._security import (
     relative_to_workspace,
     walk_files,
 )
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.decorator import tool
 
 _MAX_GREP_FILE_SIZE = 250_000_000  # 250MB
@@ -117,20 +118,20 @@ async def grep_files(
         offset: Skip first N output lines for pagination (default 0).
     """
     if not pattern:
-        return "Error: pattern cannot be empty."
+        raise ToolValidationError("pattern cannot be empty.")
 
     if max_results <= 0:
-        return "Error: max_results must be a positive integer."
+        raise ToolValidationError("max_results must be a positive integer.")
     if context < 0:
-        return "Error: context must be non-negative."
+        raise ToolValidationError("context must be non-negative.")
     if offset < 0:
-        return "Error: offset must be non-negative."
+        raise ToolValidationError("offset must be non-negative.")
 
     flags = re.IGNORECASE if case_insensitive else 0
     try:
         regex = re.compile(pattern, flags)
     except re.error as exc:
-        return f"Error: Invalid regex pattern: {exc}"
+        raise ToolValidationError(f"invalid regex pattern: {exc}") from exc
 
     try:
         base = normalize_path(path, must_exist=True)

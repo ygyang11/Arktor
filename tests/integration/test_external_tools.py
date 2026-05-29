@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agent_harness.core.errors import ToolValidationError
+
 
 @pytest.mark.asyncio
 async def test_web_search_missing_api_key() -> None:
@@ -24,17 +26,17 @@ async def test_web_search_missing_api_key() -> None:
 
 @pytest.mark.asyncio
 async def test_document_parser_empty_target() -> None:
-    """document_parser returns error on empty target."""
+    """document_parser rejects an empty target."""
     from agent_app.tools.document_parser import document_parser
 
-    result = await document_parser.execute(target="")
-    assert result.startswith("Error:")
+    with pytest.raises(ToolValidationError):
+        await document_parser.execute(target="")
 
 
 @pytest.mark.asyncio
 async def test_document_parser_whitespace_target() -> None:
-    """document_parser returns error on whitespace-only target."""
+    """document_parser rejects a whitespace-only target."""
     from agent_app.tools.document_parser import document_parser
 
-    result = await document_parser.execute(target="   ")
-    assert result.startswith("Error:")
+    with pytest.raises(ToolValidationError):
+        await document_parser.execute(target="   ")

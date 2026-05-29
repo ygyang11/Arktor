@@ -5,6 +5,7 @@ import sys
 
 import pytest
 
+from agent_harness.core.errors import ToolValidationError
 from agent_app.tools.paper.paper_fetch import (
     PaperFetchTool,
     _fetch_arxiv_metadata,
@@ -88,18 +89,18 @@ class TestPaperFetchTool:
         assert props["source"]["enum"] == ["arxiv", "semantic_scholar"]
 
     async def test_empty_id(self) -> None:
-        result = await paper_fetch.execute(paper_id="")
-        assert "Error" in result
+        with pytest.raises(ToolValidationError):
+            await paper_fetch.execute(paper_id="")
 
     async def test_unknown_mode(self) -> None:
-        result = await paper_fetch.execute(paper_id="test", mode="unknown")
-        assert "Error" in result
+        with pytest.raises(ToolValidationError):
+            await paper_fetch.execute(paper_id="test", mode="unknown")
 
     async def test_unknown_source(self) -> None:
-        result = await paper_fetch.execute(
-            paper_id="test", mode="metadata", source="unknown",
-        )
-        assert "Error" in result
+        with pytest.raises(ToolValidationError):
+            await paper_fetch.execute(
+                paper_id="test", mode="metadata", source="unknown",
+            )
 
 
 class TestFullModeRoutesThroughParseDocument:
@@ -312,7 +313,7 @@ class TestResolveOaViaOpenAlex:
             self._mk_response({"best_oa_location": None, "locations": []}),
         )
         out = await paper_fetch_mod._resolve_oa_via_openalex("10.1/x")
-        assert out.startswith("Error: no open access PDF found")
+        assert out.startswith("Error: no open-access PDF")
 
     async def test_unpaywall_helper_removed(self) -> None:
         assert not hasattr(paper_fetch_mod, "_try_unpaywall")
@@ -326,8 +327,8 @@ class TestArxivMetadata:
 
         async def _fail_fetch_xml(url: str) -> object:
             _ = url
-            raise RuntimeError("simulated failure")
+            raise RuntimeError("arXiv API returned HTTP 503")
 
         monkeypatch.setattr(paper_search_module, "_fetch_xml", _fail_fetch_xml)
         result = await _fetch_arxiv_metadata("2301.07041")
-        assert result.startswith("Error: arXiv request failed:")
+        assert result == "Error: arXiv API returned HTTP 503"

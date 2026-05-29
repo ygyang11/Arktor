@@ -9,6 +9,7 @@ import pytest
 from agent_app.tools import BUILTIN_TOOLS
 from agent_app.tools.skill.skill_tool import SkillTool, skill_tool
 from agent_harness.core.config import HarnessConfig, SkillConfig
+from agent_harness.core.errors import ToolValidationError
 from tests.unit.test_app.test_skills.conftest import _write_skill
 
 
@@ -91,8 +92,8 @@ class TestSkillToolExecution:
         assert "not found" in result.lower()
 
     async def test_execute_empty_name(self, tool: SkillTool) -> None:
-        result = await tool.execute(skill_name="")
-        assert "Error" in result
+        with pytest.raises(ToolValidationError):
+            await tool.execute(skill_name="")
 
     async def test_arguments_substitution(
         self,

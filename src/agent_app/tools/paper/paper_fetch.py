@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from agent_app.tools.document_parser import parse_document
 from agent_harness.core.config import resolve_paper_config
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.utils.http_retry import HttpRetryConfig, http_get_with_retry
 from agent_harness.utils.json_utils import parse_json_lenient
@@ -19,12 +20,13 @@ PAPER_FETCH_DESCRIPTION = (
     "Fetch a specific paper by ID and source, returning either structured "
     "metadata or parsed content of the full paper.\n\n"
     "## Modes\n"
-    "- `metadata` (default): detailed structured info — title, authors, "
+    "- `metadata` (default): return detailed structured info — title, authors, "
     "full abstract, citations, fields of study, etc.\n"
-    "- `full`: routes through `document_parser` tool; the response lists on-disk "
-    "artifact paths (`content.md` body, `images/` figures, `layout.json` and "
-    "`manifest.json` — the last two usually do not need to be read). On failure, "
-    "returns the per-tier parsing trail."
+    "- `full`: return the paper's full text, parsed from its open-access PDF "
+    "(routes through `document_parser` tool) into on-disk artifacts — `content.md` (body), "
+    "`images/` (figures), `layout.json`/`manifest.json` (rarely need to be read); the response "
+    "lists the paths. On failure the response explains why — e.g. no open-access PDF "
+    "or a parsing failure (per-tier trail)."
 )
 
 _FULL_EXECUTOR_TIMEOUT = 720.0 + 30.0
@@ -33,6 +35,15 @@ _S2_DETAIL_FIELDS = (
     "paperId,title,authors,abstract,year,venue,"
     "externalIds,openAccessPdf,citationCount,referenceCount,"
     "fieldsOfStudy,publicationDate,publicationTypes,tldr,journal"
+)
+
+_OA_LOOKUP_FAILED = (
+    "Error: couldn't look up this paper's open-access availability "
+    "(temporary failure); retry shortly."
+)
+_NO_OA_PDF = (
+    "Error: no open-access PDF is available for this paper; it appears "
+    "paywalled or access-restricted. Full text can't be retrieved"
 )
 
 
@@ -115,10 +126,7 @@ async def _fetch_arxiv_metadata(arxiv_id: str) -> str:
     try:
         root = await _fetch_xml(url)
     except Exception as exc:
-        err = str(exc)
-        if err.startswith("arXiv request failed:"):
-            return f"Error: {err}"
-        return f"Error: arXiv request failed: {err}"
+        return f"Error: {exc}"
 
     entries = root.findall(f"{ns}entry")
     if not entries:
@@ -166,16 +174,14 @@ async def _fetch_s2_metadata(paper_id: str, api_key: str | None) -> str:
             "Try again later, or use source='arxiv' if the paper is on arXiv."
         )
     if status != 200:
-        return (
-            f"Error: Semantic Scholar API returned HTTP {status}. Detail: {body[:200]}"
-        )
+        return f"Error: Semantic Scholar API returned HTTP {status}."
 
     try:
         data_raw = parse_json_lenient(body)
-    except ValueError as exc:
-        return f"Error: failed to parse Semantic Scholar response: {exc}"
+    except ValueError:
+        return "Error: Semantic Scholar returned an unreadable response; retry shortly."
     if not isinstance(data_raw, dict):
-        return "Error: unexpected Semantic Scholar response format"
+        return "Error: Semantic Scholar returned an unreadable response; retry shortly."
     data = data_raw
 
     paper = _parse_s2_paper(data)
@@ -273,20 +279,20 @@ async def _resolve_pdf_url(
             headers=extra_headers,
             retry=HttpRetryConfig(max_attempts=3, base_delay=1.0),
         )
-    except Exception as exc:
-        return f"Error: cannot resolve PDF URL: {exc}"
+    except Exception:
+        return _OA_LOOKUP_FAILED
 
     if status == 404:
-        return f"Error: paper not found: {paper_id}"
+        return f"Error: paper not found: {paper_id}."
     if status != 200:
-        return f"Error: cannot resolve PDF URL (HTTP {status})"
+        return _OA_LOOKUP_FAILED
 
     try:
         data_raw = parse_json_lenient(body)
-    except ValueError as exc:
-        return f"Error: failed to parse Semantic Scholar response: {exc}"
+    except ValueError:
+        return _OA_LOOKUP_FAILED
     if not isinstance(data_raw, dict):
-        return "Error: unexpected Semantic Scholar response format"
+        return _OA_LOOKUP_FAILED
     data = data_raw
 
     pdf_info: dict[str, Any] = data.get("openAccessPdf") or {}
@@ -303,10 +309,7 @@ async def _resolve_pdf_url(
     if doi:
         return await _resolve_oa_via_openalex(doi)
 
-    return (
-        "Error: no open access PDF available for this paper. "
-        "The paper may require institutional access or subscription."
-    )
+    return _NO_OA_PDF
 
 
 async def _resolve_oa_via_openalex(doi: str) -> str:
@@ -321,18 +324,18 @@ async def _resolve_oa_via_openalex(doi: str) -> str:
             retry=HttpRetryConfig(max_attempts=3, base_delay=1.0),
         )
     except Exception:
-        return f"Error: failed to query OpenAlex for DOI {doi}"
+        return _OA_LOOKUP_FAILED
     if status == 404:
-        return f"Error: no open access PDF found for DOI {doi}"
+        return _NO_OA_PDF
     if status != 200:
-        return f"Error: cannot resolve PDF URL for DOI {doi} (HTTP {status})"
+        return _OA_LOOKUP_FAILED
 
     try:
         data_raw = parse_json_lenient(body)
-    except ValueError as exc:
-        return f"Error: failed to parse OpenAlex response for DOI {doi}: {exc}"
+    except ValueError:
+        return _OA_LOOKUP_FAILED
     if not isinstance(data_raw, dict):
-        return f"Error: unexpected OpenAlex response format for DOI {doi}"
+        return _OA_LOOKUP_FAILED
     data = data_raw
 
     best: dict[str, Any] = data.get("best_oa_location") or {}
@@ -344,7 +347,7 @@ async def _resolve_oa_via_openalex(doi: str) -> str:
         if isinstance(loc, dict) and loc.get("is_oa") and loc.get("pdf_url"):
             return str(loc["pdf_url"])
 
-    return f"Error: no open access PDF found for DOI {doi}"
+    return _NO_OA_PDF
 
 
 # ---------------------------------------------------------------------------
@@ -408,16 +411,15 @@ class PaperFetchTool(BaseTool):
         source: str = kwargs.get("source") or "arxiv"
 
         if not paper_id.strip():
-            return "Error: paper_id cannot be empty"
+            raise ToolValidationError("paper_id cannot be empty")
         if mode not in ("metadata", "full"):
-            return (
-                f"Error: unknown mode {mode!r}. "
+            raise ToolValidationError(
+                f"unknown mode {mode!r}. "
                 f"Use 'metadata' for structured info or 'full' for complete content."
             )
         if source not in ("arxiv", "semantic_scholar"):
-            return (
-                f"Error: unknown source {source!r}. "
-                f"Use 'arxiv' or 'semantic_scholar'."
+            raise ToolValidationError(
+                f"unknown source {source!r}. Use 'arxiv' or 'semantic_scholar'."
             )
 
         cfg = resolve_paper_config(None)

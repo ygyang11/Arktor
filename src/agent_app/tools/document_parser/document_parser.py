@@ -52,6 +52,7 @@ from agent_harness.core.config import (
 from agent_harness.core.errors import (
     HttpResponseTooLargeError,
     ToolExecutionError,
+    ToolValidationError,
 )
 from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.utils.http_retry import HttpRetryConfig, http_get_bytes_with_retry
@@ -351,6 +352,8 @@ class DocumentParserTool(BaseTool):
     async def execute(self, **kwargs: Any) -> str:
         target: str = kwargs.get("target") or ""
         background: bool = bool(kwargs.get("background", False))
+        if not target.strip():
+            raise ToolValidationError("target cannot be empty")
         if background:
             return self._start_background(target)
         return await parse_document(

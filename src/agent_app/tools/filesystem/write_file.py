@@ -12,6 +12,7 @@ from agent_app.tools.filesystem._security import (
     relative_to_workspace,
 )
 from agent_harness.agent.base import BaseAgent
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.base import BaseTool, ToolSchema
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,9 @@ class WriteFileTool(BaseTool):
     async def execute(self, **kwargs: Any) -> str:
         file_path: str = kwargs.get("file_path", "")
         content: str = kwargs.get("content", "")
+
+        if not file_path.strip():
+            raise ToolValidationError("file_path cannot be empty")
 
         try:
             resolved = normalize_path(file_path)

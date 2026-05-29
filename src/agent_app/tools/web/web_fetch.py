@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 from urllib.parse import unquote, urljoin, urlparse
 
 from agent_harness import __version__ as _HARNESS_VERSION
-from agent_harness.core.errors import HttpResponseTooLargeError
+from agent_harness.core.errors import HttpResponseTooLargeError, ToolValidationError
 from agent_harness.core.message import ToolOutput
 from agent_harness.tool.decorator import tool
 from agent_harness.utils.blob import make_attachment
@@ -245,10 +245,10 @@ async def web_fetch(url: str, timeout: int = 30) -> str | ToolOutput:
         Errors are prefixed with ``Error:``.
     """
     if not url.strip():
-        return "Error: URL cannot be empty"
+        raise ToolValidationError("url cannot be empty")
 
     if timeout <= 0:
-        return "Error: timeout must be greater than 0"
+        raise ToolValidationError("timeout must be greater than 0")
     timeout = min(timeout, _CFG.max_timeout)
 
     try:

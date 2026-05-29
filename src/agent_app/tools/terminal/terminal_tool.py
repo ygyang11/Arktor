@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agent_harness.core.errors import ToolExecutionError, ToolValidationError
 from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.utils.token_counter import truncate_text_by_tokens
 
@@ -114,11 +115,16 @@ class TerminalTool(BaseTool):
         background = kwargs.get("background", False)
 
         if not command.strip():
-            return "Error: command cannot be empty"
+            raise ToolValidationError("command cannot be empty")
         if timeout <= 0:
-            return "Error: timeout must be greater than 0"
+            raise ToolValidationError("timeout must be greater than 0")
+        if self._agent is None:
+            raise ToolExecutionError(
+                "terminal_tool is not bound to a parent agent. "
+                "Register it via BaseAgent(tools=[terminal_tool, ...])."
+            )
 
-        if background and self._agent is not None:
+        if background:
             timeout = min(timeout, _MAX_BG_TIMEOUT)
             return self._start_background(command, timeout)
 

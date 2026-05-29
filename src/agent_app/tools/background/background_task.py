@@ -94,7 +94,7 @@ class BackgroundTaskTool(BaseTool):
     def _status(self, manager: Any, task_id: str) -> str:
         task = manager.get_task(task_id)
         if not task:
-            return f"Task {task_id} not found."
+            return f"Error: task {task_id} not found."
         lines = [
             f"Task: {task.task_id}",
             f"Tool: {task.tool_name}",
@@ -114,10 +114,10 @@ class BackgroundTaskTool(BaseTool):
             return f"Task {task_id} cancelled successfully."
         task = manager.get_task(task_id)
         if not task:
-            return f"Task {task_id} not found."
+            return f"Error: task {task_id} not found."
         if task.status == "running":
-            return f"Task {task_id} could not be cancelled (internal error)."
-        return f"Task {task_id} is already {task.status}, cannot cancel."
+            return f"Error: task {task_id} could not be cancelled (internal error)."
+        return f"Error: task {task_id} is already {task.status}, cannot cancel."
 
     def build_context_message(self) -> Message | None:
         if self._agent is None:

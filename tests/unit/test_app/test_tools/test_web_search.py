@@ -1,7 +1,20 @@
 """Tests for web_search tool output formatting."""
 from __future__ import annotations
 
-from agent_app.tools.web.web_search import _format_result, _format_search_results
+import pytest
+
+from agent_app.tools.web.web_search import (
+    _format_result,
+    _format_search_results,
+    web_search,
+)
+from agent_harness.core.errors import ToolValidationError
+
+
+class TestWebSearchValidation:
+    async def test_empty_query_rejected(self) -> None:
+        with pytest.raises(ToolValidationError):
+            await web_search.execute(query="   ")
 
 
 class TestFormatResult:

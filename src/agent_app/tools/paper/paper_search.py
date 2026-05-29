@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from xml.etree.ElementTree import Element, fromstring
 
 from agent_harness.core.config import resolve_paper_config
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.decorator import tool
 from agent_harness.utils.http_retry import HttpRetryConfig, http_get_with_retry
 from agent_harness.utils.json_utils import parse_json_lenient
@@ -125,7 +126,7 @@ async def _fetch_xml(url: str) -> Element:
     except Exception as exc:
         raise RuntimeError(f"arXiv request failed: {exc}") from exc
     if status == 429:
-        raise RuntimeError("arXiv API returned HTTP 429")
+        raise RuntimeError("arXiv rate-limited this request (HTTP 429); retry shortly")
     if status != 200:
         raise RuntimeError(f"arXiv API returned HTTP {status}")
     try:
@@ -175,10 +176,7 @@ async def _search_arxiv(query: str, max_results: int) -> str:
     try:
         root = await _fetch_xml(url)
     except Exception as exc:
-        err = str(exc)
-        if err.startswith("arXiv request failed:"):
-            return f"Error: {err}"
-        return f"Error: arXiv request failed: {err}"
+        return f"Error: {exc}"
 
     entries = root.findall(f"{_ATOM_NS}entry")
     if not entries:
@@ -229,17 +227,14 @@ async def _search_semantic_scholar(
             "Try again later, reduce max_results, or use source='arxiv' instead."
         )
     if status != 200:
-        return (
-            f"Error: Semantic Scholar API returned HTTP {status}. "
-            f"Detail: {body[:200]}"
-        )
+        return f"Error: Semantic Scholar API returned HTTP {status}."
 
     try:
         data_raw = parse_json_lenient(body)
-    except ValueError as exc:
-        return f"Error: failed to parse Semantic Scholar response: {exc}"
+    except ValueError:
+        return "Error: Semantic Scholar returned an unreadable response; retry shortly."
     if not isinstance(data_raw, dict):
-        return "Error: unexpected Semantic Scholar response format"
+        return "Error: Semantic Scholar returned an unreadable response; retry shortly."
     data = data_raw
 
     total = data.get("total", 0)
@@ -375,7 +370,7 @@ async def paper_search(
         max_results: Number of results to return (1-30, default 10).
     """
     if not query.strip():
-        return "Error: query cannot be empty"
+        raise ToolValidationError("query cannot be empty")
 
     max_results = max(1, min(max_results, 30))
 
@@ -386,8 +381,8 @@ async def paper_search(
         api_key = cfg.semantic_scholar_api_key
         return await _search_semantic_scholar(query, max_results, api_key)
     else:
-        return (
-            f"Error: unknown source {source!r}. "
+        raise ToolValidationError(
+            f"unknown source {source!r}. "
             f"Use 'arxiv' for arXiv papers, or 'semantic_scholar' "
             f"for IEEE/ACM/ScienceDirect and other publishers."
         )

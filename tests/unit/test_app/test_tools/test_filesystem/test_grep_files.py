@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from agent_app.tools.filesystem.grep_files import grep_files
+from agent_harness.core.errors import ToolValidationError
 
 
 class TestGrepFiles:
@@ -92,8 +93,8 @@ class TestGrepFiles:
 
     @pytest.mark.asyncio
     async def test_invalid_regex(self) -> None:
-        result = await grep_files.execute(pattern="[invalid")
-        assert "Invalid regex" in result
+        with pytest.raises(ToolValidationError, match="invalid regex"):
+            await grep_files.execute(pattern="[invalid")
 
     @pytest.mark.asyncio
     async def test_skip_git(self, tmp_path: Path) -> None:
@@ -129,5 +130,5 @@ class TestGrepFiles:
 
     @pytest.mark.asyncio
     async def test_empty_pattern_rejected(self) -> None:
-        result = await grep_files.execute(pattern="")
-        assert "Error" in result
+        with pytest.raises(ToolValidationError):
+            await grep_files.execute(pattern="")

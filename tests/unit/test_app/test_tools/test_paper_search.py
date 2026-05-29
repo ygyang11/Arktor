@@ -7,6 +7,7 @@ from xml.etree.ElementTree import fromstring
 
 import pytest
 
+from agent_harness.core.errors import ToolValidationError
 from agent_app.tools.paper.paper_search import (
     _build_arxiv_query_url,
     _fetch_xml,
@@ -256,13 +257,12 @@ class TestFormatResults:
 
 class TestPaperSearchTool:
     async def test_empty_query(self) -> None:
-        result = await paper_search.execute(query="")
-        assert "Error" in result
+        with pytest.raises(ToolValidationError):
+            await paper_search.execute(query="")
 
     async def test_unknown_source(self) -> None:
-        result = await paper_search.execute(query="test", source="unknown")
-        assert "Error" in result
-        assert "semantic_scholar" in result
+        with pytest.raises(ToolValidationError, match="semantic_scholar"):
+            await paper_search.execute(query="test", source="unknown")
 
     def test_schema_has_correct_params(self) -> None:
         schema = paper_search.get_schema()
@@ -280,13 +280,13 @@ class TestPaperSearchTool:
     ) -> None:
         async def _fail_fetch_xml(url: str) -> object:
             _ = url
-            raise RuntimeError("simulated network failure")
+            raise RuntimeError("arXiv API returned HTTP 503")
 
         paper_search_module = sys.modules[_fetch_xml.__module__]
         monkeypatch.setattr(paper_search_module, "_fetch_xml", _fail_fetch_xml)
 
         result = await paper_search.execute(query="2301.07041", source="arxiv")
-        assert result.startswith("Error: arXiv request failed:")
+        assert result == "Error: arXiv API returned HTTP 503"
 
     @pytest.mark.asyncio
     async def test_arxiv_failure_does_not_duplicate_prefix(
@@ -400,7 +400,7 @@ class TestFetchXmlWithRetry:
             ),
         )
 
-        with pytest.raises(RuntimeError, match="arXiv API returned HTTP 429"):
+        with pytest.raises(RuntimeError, match="HTTP 429"):
             await _fetch_xml("https://example.com")
         assert len(call_markers) == 3
 
@@ -470,7 +470,7 @@ class TestSemanticScholarParsing:
         )
 
         result = await paper_search.execute(query="federated learning", source="semantic_scholar")
-        assert result.startswith("Error: failed to parse Semantic Scholar response:")
+        assert result == "Error: Semantic Scholar returned an unreadable response; retry shortly."
 
     @pytest.mark.asyncio
     async def test_semantic_scholar_non_object_json_returns_error(
@@ -488,7 +488,7 @@ class TestSemanticScholarParsing:
         )
 
         result = await paper_search.execute(query="federated learning", source="semantic_scholar")
-        assert result == "Error: unexpected Semantic Scholar response format"
+        assert result == "Error: Semantic Scholar returned an unreadable response; retry shortly."
 
 
 class TestPaperSearchDefaults:

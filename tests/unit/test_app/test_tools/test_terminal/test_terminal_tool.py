@@ -6,6 +6,7 @@ import pytest
 
 from agent_app.tools.terminal.terminal_tool import TerminalTool
 from agent_harness.core.config import ToolConfig
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.core.message import ToolCall
 from agent_harness.sandbox import SandboxManager
 from agent_harness.sandbox.backend import LocalBackend
@@ -42,13 +43,13 @@ class TestTerminalTool:
 
     @pytest.mark.asyncio
     async def test_empty_command(self, tt: TerminalTool) -> None:
-        result = await tt.execute(command="")
-        assert result == "Error: command cannot be empty"
+        with pytest.raises(ToolValidationError, match="command cannot be empty"):
+            await tt.execute(command="")
 
     @pytest.mark.asyncio
     async def test_whitespace_only_command(self, tt: TerminalTool) -> None:
-        result = await tt.execute(command="   ")
-        assert result == "Error: command cannot be empty"
+        with pytest.raises(ToolValidationError, match="command cannot be empty"):
+            await tt.execute(command="   ")
 
     @pytest.mark.asyncio
     async def test_no_output(self, tt: TerminalTool) -> None:
@@ -111,13 +112,13 @@ class TestTerminalTool:
 
     @pytest.mark.asyncio
     async def test_timeout_zero(self, tt: TerminalTool) -> None:
-        result = await tt.execute(command="echo x", timeout=0)
-        assert result == "Error: timeout must be greater than 0"
+        with pytest.raises(ToolValidationError, match="timeout must be greater than 0"):
+            await tt.execute(command="echo x", timeout=0)
 
     @pytest.mark.asyncio
     async def test_timeout_negative(self, tt: TerminalTool) -> None:
-        result = await tt.execute(command="echo x", timeout=-1)
-        assert result == "Error: timeout must be greater than 0"
+        with pytest.raises(ToolValidationError, match="timeout must be greater than 0"):
+            await tt.execute(command="echo x", timeout=-1)
 
     # --- Output truncation ---
 
@@ -176,6 +177,18 @@ class TestTerminalToolIntegration:
     async def test_executor_timeout_attribute(self) -> None:
         tt = _make_tool()
         assert tt.executor_timeout is not None
+
+    @pytest.mark.asyncio
+    async def test_validation_error_becomes_error_result(self, tt: TerminalTool) -> None:
+        registry = ToolRegistry()
+        registry.register(tt)
+        executor = ToolExecutor(registry)
+
+        tc = ToolCall(name="terminal_tool", arguments={"command": "   "})
+        result = await executor.execute(tc)
+        assert result.is_error is True
+        assert "command cannot be empty" in result.content
+        assert "terminal_tool" in result.content
         assert tt.executor_timeout > 600
 
         @tool

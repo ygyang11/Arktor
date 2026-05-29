@@ -18,6 +18,7 @@ from agent_app.tools.filesystem._security import (
     relative_to_workspace,
 )
 from agent_harness.agent.base import BaseAgent
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.base import BaseTool, ToolSchema
 
 logger = logging.getLogger(__name__)
@@ -104,11 +105,17 @@ class EditFileTool(BaseTool):
         new_string: str = kwargs.get("new_string", "")
         replace_all: bool = bool(kwargs.get("replace_all", False))
 
+        if not file_path.strip():
+            raise ToolValidationError("file_path cannot be empty")
         if not old_string:
-            return "Error: old_string cannot be empty. Use write_file to create new files."
+            raise ToolValidationError(
+                "old_string cannot be empty. Use write_file to create new files."
+            )
 
         if old_string == new_string:
-            return "Error: old_string and new_string are identical. No edit needed."
+            raise ToolValidationError(
+                "old_string and new_string are identical. No edit needed."
+            )
 
         try:
             resolved = normalize_path(file_path, must_exist=False)

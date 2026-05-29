@@ -14,6 +14,7 @@ from agent_app.tools.filesystem._security import (
     relative_to_workspace,
 )
 from agent_harness.agent.base import BaseAgent
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.core.message import ToolOutput
 from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.utils.blob import make_attachment
@@ -159,10 +160,12 @@ class ReadFileTool(BaseTool):
         offset: int = int(kwargs.get("offset", 0))
         limit: int = int(kwargs.get("limit", 200))
 
+        if not file_path.strip():
+            raise ToolValidationError("file_path cannot be empty")
         if limit <= 0:
-            return "Error: limit must be a positive integer."
+            raise ToolValidationError("limit must be a positive integer.")
         if offset < 0:
-            return "Error: offset must be non-negative."
+            raise ToolValidationError("offset must be non-negative.")
 
         try:
             resolved = normalize_path(file_path, must_exist=True)

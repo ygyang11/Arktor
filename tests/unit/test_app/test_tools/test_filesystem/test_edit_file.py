@@ -12,6 +12,7 @@ from agent_app.observability.file_freshness import _key
 from agent_app.tools.filesystem.edit_file import edit_file
 from agent_app.tools.filesystem.read_file import read_file
 from agent_harness.agent.base import BaseAgent
+from agent_harness.core.errors import ToolValidationError
 
 
 class TestEditFile:
@@ -54,21 +55,26 @@ class TestEditFile:
 
     @pytest.mark.asyncio
     async def test_empty_old_string_rejected(self, tmp_path: Path) -> None:
-        result = await edit_file.execute(
-            file_path=str(tmp_path / "any.txt"),
-            old_string="",
-            new_string="something",
-        )
-        assert "cannot be empty" in result
+        with pytest.raises(ToolValidationError, match="cannot be empty"):
+            await edit_file.execute(
+                file_path=str(tmp_path / "any.txt"),
+                old_string="",
+                new_string="something",
+            )
 
     @pytest.mark.asyncio
     async def test_old_equals_new_rejected(self, tmp_path: Path) -> None:
-        result = await edit_file.execute(
-            file_path=str(tmp_path / "any.txt"),
-            old_string="same",
-            new_string="same",
-        )
-        assert "identical" in result
+        with pytest.raises(ToolValidationError, match="identical"):
+            await edit_file.execute(
+                file_path=str(tmp_path / "any.txt"),
+                old_string="same",
+                new_string="same",
+            )
+
+    @pytest.mark.asyncio
+    async def test_empty_path_rejected(self) -> None:
+        with pytest.raises(ToolValidationError, match="file_path cannot be empty"):
+            await edit_file.execute(file_path="  ", old_string="a", new_string="b")
 
     @pytest.mark.asyncio
     async def test_not_found(self, tmp_path: Path) -> None:

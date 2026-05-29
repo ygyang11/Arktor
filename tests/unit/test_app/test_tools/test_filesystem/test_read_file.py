@@ -9,6 +9,7 @@ import pytest
 from agent_app.observability.file_freshness import _key
 from agent_app.tools.filesystem.read_file import read_file
 from agent_harness.agent.base import BaseAgent
+from agent_harness.core.errors import ToolValidationError
 
 
 class TestReadFile:
@@ -97,13 +98,18 @@ class TestReadFile:
 
     @pytest.mark.asyncio
     async def test_negative_offset_rejected(self) -> None:
-        result = await read_file.execute(file_path="any.txt", offset=-1)
-        assert "Error" in result
+        with pytest.raises(ToolValidationError):
+            await read_file.execute(file_path="any.txt", offset=-1)
 
     @pytest.mark.asyncio
     async def test_zero_limit_rejected(self) -> None:
-        result = await read_file.execute(file_path="any.txt", limit=0)
-        assert "Error" in result
+        with pytest.raises(ToolValidationError):
+            await read_file.execute(file_path="any.txt", limit=0)
+
+    @pytest.mark.asyncio
+    async def test_empty_path_rejected(self) -> None:
+        with pytest.raises(ToolValidationError):
+            await read_file.execute(file_path="  ")
 
     @pytest.mark.asyncio
     async def test_long_line_truncated(self, tmp_path: Path) -> None:

@@ -23,7 +23,7 @@ from agent_app.tools.document_parser.errors import (
 )
 from agent_app.tools.document_parser.storage import TargetInspection
 from agent_harness.core.config import DocumentParserConfig
-from agent_harness.core.errors import HttpResponseTooLargeError
+from agent_harness.core.errors import HttpResponseTooLargeError, ToolValidationError
 
 
 class TestBuildPipeline:
@@ -67,8 +67,8 @@ class TestDocumentParserTool:
 
     async def test_execute_empty_returns_error(self) -> None:
         t = DocumentParserTool()
-        out = await t.execute(target="")
-        assert out.startswith("Error:")
+        with pytest.raises(ToolValidationError):
+            await t.execute(target="")
 
     async def test_execute_local_missing(self) -> None:
         t = DocumentParserTool()

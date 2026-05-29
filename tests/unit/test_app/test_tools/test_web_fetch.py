@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from agent_harness.core.errors import HttpResponseTooLargeError
+from agent_harness.core.errors import HttpResponseTooLargeError, ToolValidationError
 from agent_harness.utils.http_retry import HttpRetryConfig, HttpTextResponse
 from agent_app.tools.web.web_fetch import (
     _CFG,
@@ -28,9 +28,8 @@ def _noop_host(host: str) -> None:
 class TestWebFetchValidation:
     @pytest.mark.asyncio
     async def test_empty_url_returns_error(self) -> None:
-        result = await web_fetch.execute(url="")
-        assert result.startswith("Error:")
-        assert "empty" in result
+        with pytest.raises(ToolValidationError, match="empty"):
+            await web_fetch.execute(url="")
 
     @pytest.mark.asyncio
     async def test_file_scheme_is_blocked(self) -> None:
@@ -51,8 +50,8 @@ class TestWebFetchValidation:
 
     @pytest.mark.asyncio
     async def test_invalid_timeout_returns_error(self) -> None:
-        result = await web_fetch.execute(url="https://example.com", timeout=0)
-        assert result.startswith("Error:")
+        with pytest.raises(ToolValidationError):
+            await web_fetch.execute(url="https://example.com", timeout=0)
 
     @pytest.mark.asyncio
     async def test_no_scheme_returns_error(self) -> None:

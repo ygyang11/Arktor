@@ -8,9 +8,25 @@ from pathlib import Path
 import pytest
 
 from agent_app.tools.filesystem.glob_files import glob_files
+from agent_harness.core.errors import ToolValidationError
 
 
 class TestGlobFiles:
+    @pytest.mark.asyncio
+    async def test_parent_dir_pattern_rejected(self) -> None:
+        with pytest.raises(ToolValidationError, match="must not contain"):
+            await glob_files.execute(pattern="../etc/*")
+
+    @pytest.mark.asyncio
+    async def test_invalid_glob_pattern_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ToolValidationError, match="invalid glob pattern"):
+            await glob_files.execute(pattern="a/**b/c", path=str(tmp_path))
+
+    @pytest.mark.asyncio
+    async def test_absolute_pattern_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ToolValidationError, match="invalid glob pattern"):
+            await glob_files.execute(pattern="/abs/*", path=str(tmp_path))
+
     @pytest.mark.asyncio
     async def test_recursive_pattern(self, tmp_path: Path) -> None:
         (tmp_path / "src").mkdir()

@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 
 from agent_harness.core.config import resolve_search_config
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.decorator import tool
 from agent_harness.utils.token_counter import truncate_text_by_tokens
 
@@ -109,24 +110,22 @@ async def web_search(query: str, max_results: int = 5) -> str:
         query: The search query string.
         max_results: Number of results to return (1-20, default 5).
     """
+    if not query.strip():
+        raise ToolValidationError("query cannot be empty")
+    max_results = max(1, min(max_results, 20))
+
     cfg = resolve_search_config(None)
     provider = cfg.provider
 
     if provider == "tavily":
         api_key = cfg.tavily_api_key or ""
         if not api_key:
-            return (
-                "Web search not configured: TAVILY_API_KEY not set. "
-                "Set the environment variable or configure in config.yaml."
-            )
+            return "Error: web search is not configured (no provider API key set)."
         return await _search_tavily(query, max_results, api_key)
     elif provider == "serpapi":
         api_key = cfg.serpapi_api_key or ""
         if not api_key:
-            return (
-                "Web search not configured: SERPAPI_API_KEY not set. "
-                "Set the environment variable or configure in config.yaml."
-            )
+            return "Error: web search is not configured (no provider API key set)."
         return await _search_serpapi(query, max_results, api_key)
     else:
-        return f"Unknown search provider: {provider!r}. Use 'tavily' or 'serpapi'."
+        return "Error: web search provider is misconfigured."

@@ -9,6 +9,7 @@ from agent_app.tools.filesystem._security import (
     normalize_path,
     relative_to_workspace,
 )
+from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.decorator import tool
 
 _MAX_RESULTS = 100
@@ -35,7 +36,7 @@ async def glob_files(pattern: str, path: str = ".") -> str:
         path: Base directory for the search (default: workspace root).
     """
     if ".." in pattern:
-        return "Error: glob pattern must not contain '..'"
+        raise ToolValidationError("glob pattern must not contain '..'")
 
     try:
         base = normalize_path(path, must_exist=True)
@@ -47,8 +48,10 @@ async def glob_files(pattern: str, path: str = ".") -> str:
 
     try:
         raw_matches = list(base.glob(pattern))
-    except (ValueError, OSError) as exc:
-        return f"Error: Invalid glob pattern: {exc}"
+    except (ValueError, NotImplementedError) as exc:
+        raise ToolValidationError(f"invalid glob pattern: {exc}") from exc
+    except OSError as exc:
+        return f"Error: {exc}"
 
     ws = get_workspace_root()
     files = [
