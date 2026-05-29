@@ -65,7 +65,7 @@ async def _async_main(args: argparse.Namespace) -> int:
     theme = load_saved_theme()
     console = Console(theme=theme.rich)
     attach_rich_logging(console)
-    adapter = CliAdapter(console, theme, effort=config_result.effort)
+    adapter = CliAdapter(console, theme)
     color_depth = (
         ColorDepth.DEPTH_1_BIT if console.no_color
         else DEPTH_MAP.get(console.color_system or "")

@@ -9,6 +9,7 @@ from typing import Any, Literal
 from rich.console import Console, RenderableType
 from rich.markup import escape as rich_escape
 
+from agent_cli.config import current_effort
 from agent_cli.render.markdown_stream import MarkdownStream
 from agent_cli.render.status_lines import SubagentLine, ThinkingLine, fmt_duration
 from agent_cli.render.tool_display import SUPPRESSED_IN_ROW, ToolDisplay
@@ -27,7 +28,6 @@ class CliAdapter:
         self,
         console: Console,
         theme: CliTheme,
-        effort: str | None = None,
     ) -> None:
         self.console = console
         self.theme = theme
@@ -43,7 +43,7 @@ class CliAdapter:
             console,
             self._console_lock,
             theme,
-            effort=effort,
+            effort_provider=current_effort,
             run_elapsed_provider=lambda: (
                 int(time.monotonic() - self._run_started)
                 if self._run_started is not None and self._has_prior_step

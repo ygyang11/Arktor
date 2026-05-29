@@ -15,10 +15,9 @@ if TYPE_CHECKING:
 class ConfigLoadResult:
     path: Path | None
     bootstrapped: bool
-    effort: str | None = None
 
 
-def _effort() -> str | None:
+def current_effort() -> str | None:
     from agent_harness.core.config import HarnessConfig
     return HarnessConfig.get().llm.reasoning_effort
 
@@ -41,9 +40,7 @@ def load_config() -> ConfigLoadResult:
     project_cfg = Path.cwd() / "config.yaml"
     if project_cfg.exists():
         HarnessConfig.load(project_cfg)
-        return ConfigLoadResult(
-            path=project_cfg, bootstrapped=False, effort=_effort(),
-        )
+        return ConfigLoadResult(path=project_cfg, bootstrapped=False)
 
     user_cfg = Path.home() / ".agent-harness" / "config.yaml"
     bootstrapped = False
@@ -52,12 +49,10 @@ def load_config() -> ConfigLoadResult:
 
     if user_cfg.exists():
         HarnessConfig.load(user_cfg)
-        return ConfigLoadResult(
-            path=user_cfg, bootstrapped=bootstrapped, effort=_effort(),
-        )
+        return ConfigLoadResult(path=user_cfg, bootstrapped=bootstrapped)
 
     HarnessConfig.load(None, env_override=True)
-    return ConfigLoadResult(path=None, bootstrapped=False, effort=_effort())
+    return ConfigLoadResult(path=None, bootstrapped=False)
 
 
 def attach_rich_logging(console: Console) -> None:

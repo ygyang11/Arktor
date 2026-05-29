@@ -111,12 +111,12 @@ class ThinkingLine:
         console: Console,
         lock: asyncio.Lock,
         theme: CliTheme,
-        effort: str | None = None,
+        effort_provider: Callable[[], str | None] | None = None,
         run_elapsed_provider: Callable[[], int | None] | None = None,
     ) -> None:
         self._accent = _ansi_accent(theme)
         self._text_ansi = _ansi_color(theme, "text")
-        self._effort = effort
+        self._effort_provider = effort_provider
         self._run_elapsed_provider = run_elapsed_provider
         self._current_word: str = _THINKING_WORDS[0]
         self._line = LiveLine(
@@ -132,8 +132,9 @@ class ThinkingLine:
         detail = ""
         if elapsed >= _DETAIL_AFTER_S:
             parts = [fmt_duration(elapsed)]
-            if self._effort:
-                parts.append(f"thinking with {self._effort} effort")
+            effort = self._effort_provider() if self._effort_provider else None
+            if effort:
+                parts.append(f"thinking with {effort} effort")
             detail = self._compose_detail(parts, elapsed)
         elif self._run_elapsed_provider is not None:
             run_elapsed = self._run_elapsed_provider()

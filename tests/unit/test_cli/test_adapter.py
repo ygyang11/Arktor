@@ -320,9 +320,8 @@ async def test_thinking_detail_shows_effort_past_threshold(
 ) -> None:
     # Zero threshold so first tick already reveals the detail section.
     monkeypatch.setattr(status_lines_mod, "_DETAIL_AFTER_S", 0)
-    a = CliAdapter(MagicMock(), FLEXOKI_DARK, effort="high")
-    a.markdown = MagicMock()
-    a.tool_display = MagicMock()
+    monkeypatch.setattr("agent_cli.adapter.current_effort", lambda: "high")
+    a = _adapter()
     await a.on_llm_call()
     await asyncio.sleep(0.02)
     written = "".join(c.args[0] for c in a.console.file.write.call_args_list)
@@ -334,7 +333,8 @@ async def test_thinking_detail_omits_effort_when_unconfigured(
     monkeypatch: pytest.MonkeyPatch, fast_thinking: None,
 ) -> None:
     monkeypatch.setattr(status_lines_mod, "_DETAIL_AFTER_S", 0)
-    a = _adapter()   # default effort=None
+    monkeypatch.setattr("agent_cli.adapter.current_effort", lambda: None)
+    a = _adapter()
     await a.on_llm_call()
     await asyncio.sleep(0.02)
     written = "".join(c.args[0] for c in a.console.file.write.call_args_list)
