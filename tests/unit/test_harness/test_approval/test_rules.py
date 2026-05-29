@@ -1,6 +1,8 @@
 """Tests for approval/rules.py — rule parsing, pattern matching, resource extraction."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent_harness.approval.rules import (
@@ -220,3 +222,21 @@ class TestCanonicalize:
     def test_path_key_alias(self) -> None:
         result = _canonicalize("src/main.py", "path")
         assert result == "src/main.py"
+
+    def test_home_expanded(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        result = _canonicalize("~/notes.md", "file_path")
+        assert result == str((tmp_path / "notes.md").resolve())
+
+    def test_outside_workspace_returns_absolute(self) -> None:
+        result = _canonicalize("/etc/hosts", "file_path")
+        assert result == str(Path("/etc/hosts").resolve())
+
+    def test_outside_workspace_traversal_resolved(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        result = _canonicalize("../outside_dir", "file_path")
+        assert result == str((tmp_path.parent / "outside_dir").resolve())

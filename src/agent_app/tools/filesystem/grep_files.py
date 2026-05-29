@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 
 from agent_app.tools.filesystem._security import (
-    get_workspace_root,
     normalize_path,
     relative_to_workspace,
     walk_files,
@@ -141,8 +140,7 @@ async def grep_files(
     if not base.is_dir():
         return f"Error: {path} is not a directory."
 
-    ws = get_workspace_root()
-    files = walk_files(base, include, workspace=ws)
+    files = walk_files(base, include, workspace=base)
     files.sort()
 
     total_match_count = 0

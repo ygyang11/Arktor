@@ -245,10 +245,10 @@ class CliApprovalHandler(ApprovalHandler):
         if k == "url":
             return f"[A]lways allow requests to '{prefix}' this session"
         if k == "path":
-            parent = os.path.dirname(os.path.normpath(r))
-            if parent:
-                return f"[A]lways allow {display} under '{prefix}/' this session"
-            return f"[A]lways allow {display} on '{prefix}' this session"
+            normed = os.path.normpath(r)
+            if prefix == normed and not os.path.isdir(normed):
+                return f"[A]lways allow {display} on '{prefix}' this session"
+            return f"[A]lways allow {display} under '{prefix}/' this session"
         return f"[A]lways allow {display} this session"
 
     async def _handle_background(self, request: ApprovalRequest) -> ApprovalResult:

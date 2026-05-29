@@ -7,7 +7,6 @@ from typing import Any
 
 from agent_app.observability.file_freshness import record_signature
 from agent_app.tools.filesystem._security import (
-    is_sensitive_path,
     normalize_path,
     relative_to_workspace,
 )
@@ -74,12 +73,6 @@ class WriteFileTool(BaseTool):
 
         if resolved.is_dir():
             return f"Error: {file_path} is a directory."
-
-        if is_sensitive_path(resolved):
-            return (
-                f"Error: Refusing to write to sensitive file: {file_path}. "
-                "This file may contain secrets or security-critical configuration."
-            )
 
         if resolved.exists():
             return f"Error: File already exists: {file_path}. Use edit_file to modify existing files."

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 from unittest.mock import patch
 
 from agent_harness.approval.handler import StdinApprovalHandler
@@ -108,3 +109,29 @@ class TestStdinApprovalHandler:
         request = ApprovalRequest(tool_call=tc, agent_name="agent")
         label = handler._always_label(request)
         assert "my_tool" in label
+
+
+class TestAlwaysLabelPaths:
+    @staticmethod
+    def _label(tool: str, resource: str) -> str:
+        handler = StdinApprovalHandler(output=io.StringIO(), color=False)
+        request = ApprovalRequest(
+            tool_call=ToolCall(name=tool, arguments={}),
+            agent_name="agent",
+            resource=resource,
+            resource_kind="path",
+        )
+        return handler._always_label(request)
+
+    def test_absolute_single_file_uses_on(self) -> None:
+        label = self._label("read_file", "/foo.txt")
+        assert "on '/foo.txt'" in label
+        assert "under" not in label
+
+    def test_absolute_file_in_dir_uses_under(self) -> None:
+        label = self._label("read_file", "/etc/hosts")
+        assert "under '/etc/'" in label
+
+    def test_directory_uses_under(self, tmp_path: Path) -> None:
+        label = self._label("list_dir", str(tmp_path))
+        assert f"under '{tmp_path}/'" in label

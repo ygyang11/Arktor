@@ -82,9 +82,14 @@ class TestReadFile:
         assert "empty file" in result
 
     @pytest.mark.asyncio
-    async def test_path_escape_rejected(self) -> None:
-        result = await read_file.execute(file_path="/etc/passwd")
-        assert "Error" in result
+    async def test_outside_workspace_allowed(self, tmp_path: Path) -> None:
+        external = tmp_path.parent / "outside_read_target.txt"
+        external.write_text("external content\n")
+        try:
+            result = await read_file.execute(file_path=str(external))
+        finally:
+            external.unlink()
+        assert "external content" in result
 
     @pytest.mark.asyncio
     async def test_directory_rejected(self, tmp_path: Path) -> None:

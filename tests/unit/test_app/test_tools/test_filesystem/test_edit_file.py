@@ -88,7 +88,7 @@ class TestEditFile:
         assert "not found" in result
 
     @pytest.mark.asyncio
-    async def test_sensitive_path_rejected(self, tmp_path: Path) -> None:
+    async def test_formerly_sensitive_path_now_edited(self, tmp_path: Path) -> None:
         f = tmp_path / ".env"
         f.write_text("SECRET=old\n")
         result = await edit_file.execute(
@@ -96,8 +96,8 @@ class TestEditFile:
             old_string="old",
             new_string="new",
         )
-        assert "Refusing" in result
-        assert f.read_text() == "SECRET=old\n"
+        assert "1 replacement" in result
+        assert f.read_text() == "SECRET=new\n"
 
     @pytest.mark.asyncio
     async def test_preserve_crlf(self, tmp_path: Path) -> None:

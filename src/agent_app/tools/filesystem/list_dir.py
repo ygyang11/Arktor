@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_app.tools.filesystem._security import (
-    check_traversal,
-    get_workspace_root,
     normalize_path,
     relative_to_workspace,
 )
@@ -25,7 +23,7 @@ LIST_DIR_DESCRIPTION = (
 )
 
 
-def _list_dir_impl(resolved: Path, workspace: Path) -> str:
+def _list_dir_impl(resolved: Path) -> str:
     """Core listing logic."""
     try:
         entries = sorted(resolved.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
@@ -40,11 +38,16 @@ def _list_dir_impl(resolved: Path, workspace: Path) -> str:
 
     for entry in entries[:_MAX_ENTRIES]:
         if entry.is_symlink():
-            if check_traversal(entry, workspace=workspace):
-                target = relative_to_workspace(entry.resolve(), workspace)
-                lines.append(f"  {entry.name} -> {target}")
-            else:
-                lines.append(f"  {entry.name} -> (external symlink, skipped)")
+            try:
+                target = entry.resolve(strict=True)
+            except (OSError, RuntimeError):
+                lines.append(f"  {entry.name} -> (unresolved symlink)")
+                continue
+            try:
+                target.relative_to(resolved)
+                lines.append(f"  {entry.name} -> {relative_to_workspace(target)}")
+            except ValueError:
+                lines.append(f"  {entry.name} -> (external)")
         elif entry.is_dir():
             lines.append(f"  {entry.name}/")
         else:
@@ -76,8 +79,7 @@ async def list_dir(path: str = ".") -> str:
     if not resolved.is_dir():
         return f"Error: {path} is not a directory. Use read_file for files."
 
-    workspace = get_workspace_root()
     try:
-        return _list_dir_impl(resolved, workspace=workspace)
+        return _list_dir_impl(resolved)
     except OSError as exc:
         return f"Error: {exc}"

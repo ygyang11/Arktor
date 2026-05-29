@@ -149,19 +149,24 @@ _KIND_MAP: dict[str, str] = {
 
 
 def _canonicalize(raw: str, key: str) -> str:
-    """Normalize a resource identifier to prevent traversal bypass.
+    """Normalize a resource identifier for stable rule and grant matching.
 
-    Path keys: resolve + relative_to(workspace).
-    Other keys: returned as-is.
+    Path keys: expanduser + resolve. Returns the workspace-relative form when
+    inside the workspace, the absolute resolved form otherwise. Non-path keys
+    pass through unchanged.
     """
     if key not in ("file_path", "path"):
         return raw
     try:
+        expanded = os.path.expanduser(raw)
         ws = Path.cwd().resolve()
-        p = Path(raw)
+        p = Path(expanded)
         resolved = (p if p.is_absolute() else ws / p).resolve()
-        return str(resolved.relative_to(ws))
-    except (ValueError, OSError):
+        try:
+            return str(resolved.relative_to(ws))
+        except ValueError:
+            return str(resolved)
+    except OSError:
         return os.path.normpath(raw)
 
 

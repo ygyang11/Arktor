@@ -16,9 +16,6 @@ from agent_harness.context.variables import ContextVariables
 
 _PATCH_TARGETS = [
     "agent_app.tools.filesystem._security.get_workspace_root",
-    "agent_app.tools.filesystem.list_dir.get_workspace_root",
-    "agent_app.tools.filesystem.glob_files.get_workspace_root",
-    "agent_app.tools.filesystem.grep_files.get_workspace_root",
 ]
 
 

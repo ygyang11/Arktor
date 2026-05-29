@@ -1,4 +1,6 @@
 """Tests for resource-aware ApprovalPolicy."""
+from pathlib import Path
+
 from agent_harness.approval.policy import ApprovalPolicy, derive_session_prefix
 from agent_harness.approval.rules import _canonicalize
 from agent_harness.approval.types import ApprovalAction
@@ -226,6 +228,43 @@ class TestSessionPath:
         p.grant_session("read_file", resource="src/main.py", kind="path")
         tc = ToolCall(name="read_file", arguments={})
         assert p.check(tc, resource="src_evil/file.py", kind="path") == ASK
+
+
+# ── session grant: directory semantics ───────────────────────────────────────
+
+class TestDirGrantSemantics:
+    def test_dir_grant_matches_subpath_same_tool(self, tmp_path: Path) -> None:
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        p = ApprovalPolicy(mode="auto")
+        p.grant_session("list_dir", resource=str(tmp_path), kind="path")
+        tc = ToolCall(name="list_dir", arguments={})
+        assert p.check(tc, resource=str(sub), kind="path") == EXECUTE
+
+    def test_dir_grant_does_not_escalate_to_sibling(self, tmp_path: Path) -> None:
+        sub_a = tmp_path / "a"
+        sub_a.mkdir()
+        sub_b = tmp_path / "b"
+        sub_b.mkdir()
+        p = ApprovalPolicy(mode="auto")
+        p.grant_session("list_dir", resource=str(sub_a), kind="path")
+        tc = ToolCall(name="list_dir", arguments={})
+        assert p.check(tc, resource=str(sub_b), kind="path") == ASK
+
+    def test_dir_grant_does_not_cross_tools(self, tmp_path: Path) -> None:
+        sub_file = tmp_path / "x.md"
+        sub_file.write_text("x")
+        p = ApprovalPolicy(mode="auto")
+        p.grant_session("list_dir", resource=str(tmp_path), kind="path")
+        tc = ToolCall(name="read_file", arguments={})
+        assert p.check(tc, resource=str(sub_file), kind="path") == ASK
+
+    def test_top_level_file_grant_self_only(self) -> None:
+        p = ApprovalPolicy(mode="auto")
+        p.grant_session("read_file", resource="/foo.txt", kind="path")
+        tc = ToolCall(name="read_file", arguments={})
+        assert p.check(tc, resource="/foo.txt", kind="path") == EXECUTE
+        assert p.check(tc, resource="/bar.txt", kind="path") == ASK
 
 
 # ── session grant: url ───────────────────────────────────────────────────────

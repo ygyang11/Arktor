@@ -33,22 +33,28 @@ class TestListDir:
         assert "empty directory" in result
 
     @pytest.mark.asyncio
-    async def test_external_symlink_masked(self, tmp_path: Path) -> None:
-        link = tmp_path / "escape"
+    async def test_external_symlink_redacted(self, tmp_path: Path) -> None:
+        link = tmp_path / "extlink"
         link.symlink_to("/etc")
         result = await list_dir.execute(path=str(tmp_path))
-        assert "external symlink" in result
+        assert "extlink -> (external)" in result
         assert "/etc" not in result
 
     @pytest.mark.asyncio
-    async def test_internal_symlink_shown(self, tmp_path: Path) -> None:
+    async def test_internal_symlink_shows_target(self, tmp_path: Path) -> None:
         target = tmp_path / "real.txt"
         target.touch()
         link = tmp_path / "link.txt"
         link.symlink_to(target)
         result = await list_dir.execute(path=str(tmp_path))
-        assert "->" in result
-        assert "external" not in result
+        assert "link.txt -> real.txt" in result
+
+    @pytest.mark.asyncio
+    async def test_broken_symlink_marked(self, tmp_path: Path) -> None:
+        link = tmp_path / "broken"
+        link.symlink_to(tmp_path / "nonexistent_target")
+        result = await list_dir.execute(path=str(tmp_path))
+        assert "broken -> (unresolved symlink)" in result
 
     @pytest.mark.asyncio
     async def test_file_path_rejected(self, tmp_path: Path) -> None:

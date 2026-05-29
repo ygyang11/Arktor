@@ -9,7 +9,6 @@ import pytest
 from agent_app.tools.filesystem._security import (
     check_traversal,
     detect_text_file,
-    is_sensitive_path,
     normalize_path,
     walk_files,
 )
@@ -20,23 +19,36 @@ class TestNormalizePath:
         (tmp_path / "src").mkdir()
         assert normalize_path("src", workspace=tmp_path) == tmp_path / "src"
 
-    def test_traversal_rejected(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="escapes workspace"):
-            normalize_path("../outside", workspace=tmp_path)
+    def test_dot_path(self, tmp_path: Path) -> None:
+        assert normalize_path(".", workspace=tmp_path) == tmp_path
 
-    def test_absolute_outside_rejected(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="escapes workspace"):
-            normalize_path("/etc/passwd", workspace=tmp_path)
+    def test_must_exist(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="does not exist"):
+            normalize_path("nonexistent.txt", workspace=tmp_path, must_exist=True)
 
-    def test_home_path_rejected(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="Home-relative"):
-            normalize_path("~/secret", workspace=tmp_path)
+    def test_absolute_outside_allowed(self, tmp_path: Path) -> None:
+        result = normalize_path("/etc/hosts", workspace=tmp_path)
+        assert result == Path("/etc/hosts").resolve()
 
-    def test_symlink_escape_rejected(self, tmp_path: Path) -> None:
-        link = tmp_path / "escape_link"
-        link.symlink_to("/tmp")
-        with pytest.raises(ValueError, match="escapes workspace"):
-            normalize_path("escape_link", workspace=tmp_path)
+    def test_traversal_allowed(self, tmp_path: Path) -> None:
+        result = normalize_path("../", workspace=tmp_path)
+        assert result == tmp_path.parent.resolve()
+
+    def test_home_path_expanded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "secret").write_text("ok")
+        result = normalize_path("~/secret", workspace=tmp_path, must_exist=True)
+        assert result == (tmp_path / "secret").resolve()
+
+    def test_symlink_outside_followed(self, tmp_path: Path) -> None:
+        external = tmp_path.parent / "outside_target.txt"
+        external.write_text("hi")
+        link = tmp_path / "outlink.txt"
+        link.symlink_to(external)
+        result = normalize_path("outlink.txt", workspace=tmp_path, must_exist=True)
+        assert result == external.resolve()
 
     def test_symlink_within_workspace_allowed(self, tmp_path: Path) -> None:
         target = tmp_path / "real.txt"
@@ -45,14 +57,6 @@ class TestNormalizePath:
         link.symlink_to(target)
         result = normalize_path("link.txt", workspace=tmp_path, must_exist=True)
         assert result == target.resolve()
-
-    def test_must_exist(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="does not exist"):
-            normalize_path("nonexistent.txt", workspace=tmp_path, must_exist=True)
-
-    def test_dot_path(self, tmp_path: Path) -> None:
-        result = normalize_path(".", workspace=tmp_path)
-        assert result == tmp_path
 
 
 class TestCheckTraversal:
@@ -77,35 +81,6 @@ class TestCheckTraversal:
         f = tmp_path / "ok.py"
         f.touch()
         assert check_traversal(f, workspace=tmp_path) is True
-
-
-class TestIsSensitivePath:
-    @pytest.mark.parametrize("name", [".env", ".ENV", ".Env"])
-    def test_env_case_variants(self, tmp_path: Path, name: str) -> None:
-        assert is_sensitive_path(tmp_path / name) is True
-
-    @pytest.mark.parametrize(
-        "path_suffix",
-        [
-            ".git/config",
-            ".Git/Config",
-            ".GIT/CONFIG",
-        ],
-    )
-    def test_git_config_case_variants(self, tmp_path: Path, path_suffix: str) -> None:
-        assert is_sensitive_path(tmp_path / path_suffix) is True
-
-    def test_aws_credentials_case(self, tmp_path: Path) -> None:
-        assert is_sensitive_path(tmp_path / ".Aws" / "Credentials") is True
-
-    def test_normal_file(self, tmp_path: Path) -> None:
-        assert is_sensitive_path(tmp_path / "main.py") is False
-
-    def test_env_local(self, tmp_path: Path) -> None:
-        assert is_sensitive_path(tmp_path / ".env.local") is True
-
-    def test_ssh_directory(self, tmp_path: Path) -> None:
-        assert is_sensitive_path(tmp_path / ".ssh" / "id_rsa") is True
 
 
 class TestDetectTextFile:

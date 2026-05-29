@@ -11,25 +11,6 @@ from pathlib import Path, PurePosixPath
 
 MAX_TEXT_FILE_SIZE: int = 50_000_000  # 50MB — used by detect_text_file (edit_file)
 
-SENSITIVE_PATTERNS: frozenset[str] = frozenset(
-    {
-        ".env",
-        ".env.local",
-        ".env.production",
-        ".env.development",
-        ".git/config",
-        ".git/credentials",
-        "credentials.json",
-        "secrets.yaml",
-        "secrets.yml",
-        ".ssh/",
-        ".aws/credentials",
-        ".netrc",
-        "id_rsa",
-        "id_ed25519",
-    }
-)
-
 _SKIP_DIRS: frozenset[str] = frozenset(
     {
         # VCS internals
@@ -82,36 +63,18 @@ def normalize_path(
     workspace: Path | None = None,
     must_exist: bool = False,
 ) -> Path:
-    """Resolve a user-supplied path string to an absolute path within the workspace.
+    """Resolve a user-supplied path string to an absolute path.
 
-    Checks:
-    1. Reject ~ prefixed paths
-    2. resolve() to real path, verify within workspace
-    3. Check symlink on the pre-resolve original path
-    4. Optionally verify existence
+    Expands ~ and resolves relative paths against the workspace. Authorization
+    is delegated to ApprovalPolicy; no boundary rejection is performed here.
 
     Raises:
-        ValueError: Path escapes workspace, does not exist, or symlink target is external.
+        ValueError: must_exist is set and the resolved path does not exist.
     """
-    ws = workspace or get_workspace_root()
-
-    if path_str.startswith("~"):
-        raise ValueError(f"Home-relative paths not allowed: {path_str}")
-
-    raw = Path(path_str)
-    raw_full = raw if raw.is_absolute() else ws / raw
-
-    resolved = raw_full.resolve()
-
-    if not _is_within(resolved, ws):
-        raise ValueError(
-            f"Path escapes workspace: {path_str} (resolved to {resolved}, workspace is {ws})"
-        )
-
-    if raw_full.is_symlink():
-        real = Path(os.path.realpath(raw_full))
-        if not _is_within(real, ws):
-            raise ValueError(f"Symlink target escapes workspace: {path_str} -> {real}")
+    base = workspace or get_workspace_root()
+    expanded = os.path.expanduser(path_str)
+    raw = Path(expanded)
+    resolved = (raw if raw.is_absolute() else base / raw).resolve()
 
     if must_exist and not resolved.exists():
         raise ValueError(f"Path does not exist: {path_str}")
@@ -141,30 +104,6 @@ def check_traversal(candidate: Path, workspace: Path | None = None) -> bool:
         return False
 
     return _is_within(resolved, ws)
-
-
-def is_sensitive_path(path: Path) -> bool:
-    """Case-insensitive check against known sensitive file patterns.
-
-    Detects .ENV, .Git/Config and other case variants.
-    Uses path-component-level matching, not simple endswith.
-    """
-    name_cf = path.name.casefold()
-    parts_cf = "/".join(p.casefold() for p in path.parts)
-
-    for pattern in SENSITIVE_PATTERNS:
-        pat_cf = pattern.casefold()
-        if pat_cf.endswith("/"):
-            if pat_cf.rstrip("/") in [p.casefold() for p in path.parts]:
-                return True
-        elif "/" in pat_cf:
-            if pat_cf in parts_cf:
-                return True
-        else:
-            if name_cf == pat_cf:
-                return True
-
-    return False
 
 
 @dataclass(frozen=True)

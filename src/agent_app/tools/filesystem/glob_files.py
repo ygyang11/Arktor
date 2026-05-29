@@ -5,7 +5,6 @@ from __future__ import annotations
 from agent_app.tools.filesystem._security import (
     _SKIP_DIRS,
     check_traversal,
-    get_workspace_root,
     normalize_path,
     relative_to_workspace,
 )
@@ -35,9 +34,6 @@ async def glob_files(pattern: str, path: str = ".") -> str:
         pattern: Glob pattern (e.g. "**/*.py", "src/**/*.ts", "*.md").
         path: Base directory for the search (default: workspace root).
     """
-    if ".." in pattern:
-        raise ToolValidationError("glob pattern must not contain '..'")
-
     try:
         base = normalize_path(path, must_exist=True)
     except ValueError as exc:
@@ -53,12 +49,11 @@ async def glob_files(pattern: str, path: str = ".") -> str:
     except OSError as exc:
         return f"Error: {exc}"
 
-    ws = get_workspace_root()
     files = [
         m
         for m in raw_matches
         if m.is_file()
-        and check_traversal(m, workspace=ws)
+        and check_traversal(m, workspace=base)
         and not (_SKIP_DIRS & set(m.relative_to(base).parts))
     ]
 

@@ -13,9 +13,12 @@ from agent_harness.core.errors import ToolValidationError
 
 class TestGlobFiles:
     @pytest.mark.asyncio
-    async def test_parent_dir_pattern_rejected(self) -> None:
-        with pytest.raises(ToolValidationError, match="must not contain"):
-            await glob_files.execute(pattern="../etc/*")
+    async def test_parent_dir_pattern_is_contained(self, tmp_path: Path) -> None:
+        base = tmp_path / "base"
+        base.mkdir()
+        (tmp_path / "outside.py").write_text("x")
+        result = await glob_files.execute(pattern="../*.py", path=str(base))
+        assert "outside.py" not in result
 
     @pytest.mark.asyncio
     async def test_invalid_glob_pattern_rejected(self, tmp_path: Path) -> None:

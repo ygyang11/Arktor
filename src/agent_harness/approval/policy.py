@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
@@ -31,13 +32,23 @@ _UNSAFE_SHELL_RE = re.compile(
 def derive_session_prefix(resource: str, kind: str) -> str:
     """Derive a session grant prefix from a concrete resource.
 
-    path:    "src/utils/helper.py" -> "src/utils" (parent directory)
+    path:    directories grant the directory itself; files grant the parent
+             directory, collapsing to the file itself when the parent would be
+             the filesystem root.
     url:     "https://github.com/repo" -> "github.com" (hostname)
     command: "git status" -> "git" (first word)
     """
     if kind == "path":
-        parent = os.path.dirname(os.path.normpath(resource))
-        return parent if parent else resource
+        normed = os.path.normpath(resource)
+        try:
+            if Path(normed).is_dir():
+                return normed
+        except OSError:
+            pass
+        parent = os.path.dirname(normed)
+        if parent and parent != os.sep:
+            return parent
+        return normed
     if kind == "url":
         try:
             return urlparse(resource).hostname or resource

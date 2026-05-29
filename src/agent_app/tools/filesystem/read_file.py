@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import mimetypes
 from pathlib import Path
 from typing import Any
 
 from agent_app.observability.file_freshness import record_signature
 from agent_app.tools.filesystem._security import (
-    is_sensitive_path,
     normalize_path,
     relative_to_workspace,
 )
@@ -20,7 +18,6 @@ from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.utils.blob import make_attachment
 from agent_harness.utils.media import human_size, is_media_mime, is_pdf_mime
 
-logger = logging.getLogger(__name__)
 _MAX_LINE_CHARS = 5_000
 _MEDIA_PREVIEW_MAX_BYTES = 30 * 1024 * 1024
 
@@ -174,9 +171,6 @@ class ReadFileTool(BaseTool):
 
         if resolved.is_dir():
             return f"Error: {file_path} is a directory. Use list_dir instead."
-
-        if is_sensitive_path(resolved):
-            logger.debug("Reading sensitive file: %s", resolved)
 
         mime, _ = mimetypes.guess_type(str(resolved))
         if mime and is_media_mime(mime):

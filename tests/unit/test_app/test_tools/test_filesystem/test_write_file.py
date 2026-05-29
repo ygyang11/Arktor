@@ -42,17 +42,11 @@ class TestWriteFile:
         assert target.read_text() == "original\n"
 
     @pytest.mark.asyncio
-    async def test_sensitive_path_rejected(self, tmp_path: Path) -> None:
+    async def test_formerly_sensitive_path_now_written(self, tmp_path: Path) -> None:
         target = tmp_path / ".env"
-        result = await write_file.execute(file_path=str(target), content="SECRET=bad")
-        assert "Refusing" in result
-        assert not target.exists()
-
-    @pytest.mark.asyncio
-    async def test_sensitive_path_case_bypass(self, tmp_path: Path) -> None:
-        target = tmp_path / ".ENV"
-        result = await write_file.execute(file_path=str(target), content="SECRET=bad")
-        assert "Refusing" in result
+        result = await write_file.execute(file_path=str(target), content="SECRET=ok\n")
+        assert "Created" in result
+        assert target.read_text() == "SECRET=ok\n"
 
     @pytest.mark.asyncio
     async def test_directory_rejected(self, tmp_path: Path) -> None:

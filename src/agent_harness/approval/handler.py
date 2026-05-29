@@ -89,8 +89,8 @@ class StdinApprovalHandler(ApprovalHandler):
         if k == "url":
             return f"[A]lways allow requests to '{prefix}' this session"
         if k == "path":
-            parent = os.path.dirname(os.path.normpath(r))
-            if parent:
-                return f"[A]lways allow {tc.name} under '{prefix}/' this session"
-            return f"[A]lways allow {tc.name} on '{prefix}' this session"
+            normed = os.path.normpath(r)
+            if prefix == normed and not os.path.isdir(normed):
+                return f"[A]lways allow {tc.name} on '{prefix}' this session"
+            return f"[A]lways allow {tc.name} under '{prefix}/' this session"
         return f"[A]lways allow {tc.name} this session"
