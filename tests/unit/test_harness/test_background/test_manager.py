@@ -232,6 +232,39 @@ class TestOutput:
         task = manager.get_all()[0]
         assert Path(task.result.output_path).is_absolute()
 
+    async def test_output_dir_snapshot_survives_session_switch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A task spawned under session A must write its bg_*.txt under
+        session A even if the manager rebinds to session B before the task
+        completes — the output dir is snapshotted at spawn, not resolved
+        at write time."""
+        monkeypatch.setattr(
+            "agent_harness.background.manager._HARNESS_DIR", tmp_path,
+        )
+        m = BackgroundTaskManager()
+        m.bind_session("sess_A")
+        dir_a = m._output_dir
+
+        gate = asyncio.Event()
+
+        async def _gated() -> tuple[str, str]:
+            await gate.wait()
+            return "payload", "summary"
+
+        m.spawn("terminal", "t", _gated())
+        # Rebind to a different session while the task is still in flight
+        m.bind_session("sess_B")
+        assert m._output_dir != dir_a
+
+        gate.set()
+        await asyncio.sleep(0.05)
+        task = m.get_all()[0]
+        # bg artifact must land under sess_A (spawn-time), not sess_B
+        assert task.result.output_path.startswith(dir_a)
+        assert "sess_A" in task.result.output_path
+        assert "sess_B" not in task.result.output_path
+
 # -- Session --
 
 

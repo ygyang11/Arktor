@@ -30,6 +30,7 @@ class BackgroundTask:
     tool_name: str
     description: str
     asyncio_task: asyncio.Task[BackgroundResult] | None
+    output_dir: str = ""
     created_at: datetime = field(default_factory=datetime.now)
     status: str = "running"
     result: BackgroundResult | None = None
@@ -101,6 +102,7 @@ class BackgroundTaskManager:
             tool_name=tool_name,
             description=description,
             asyncio_task=None,
+            output_dir=self._output_dir,
         )
         self._tasks[task_id] = bg_task
         bg_task.asyncio_task = asyncio.create_task(self._run(task_id, coro))
@@ -112,7 +114,7 @@ class BackgroundTaskManager:
         task = self._tasks[task_id]
         try:
             output, summary = await coro
-            output_path = self._write_output(task_id, output) if output else None
+            output_path = self._write_output(task, output) if output else None
             task.result = BackgroundResult(summary=summary, output_path=output_path)
             task.status = "completed"
             logger.debug("Background task %s completed", task_id)
@@ -126,7 +128,7 @@ class BackgroundTaskManager:
             task.result = BackgroundResult(summary=f"Error: {e}")
             task.error = str(e)
             task.status = "failed"
-            logger.warning("Background task %s failed: %s", task_id, e)
+            logger.debug("Background task %s failed: %s", task_id, e)
             return task.result
 
     def collect_completed(self) -> list[BackgroundTask]:
@@ -204,9 +206,12 @@ class BackgroundTaskManager:
         )
         return "\n".join(lines)
 
-    def _write_output(self, task_id: str, output: str) -> str:
-        out_dir = Path(self._output_dir)
+    def _write_output(self, task: BackgroundTask, output: str) -> str:
+        # Use the output dir captured at spawn time, not the manager's
+        # current one: a task belongs to the session it was spawned under,
+        # even if the agent rebinds to another session before it completes.
+        out_dir = Path(task.output_dir or self._output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        path = out_dir / f"{task_id}.txt"
+        path = out_dir / f"{task.task_id}.txt"
         path.write_text(output, encoding="utf-8")
         return str(path)
