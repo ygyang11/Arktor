@@ -43,6 +43,7 @@ _GREP_HEADER_RE = re.compile(r"^(\d+) matches in (\d+) files")
 _LIST_HEADER_RE = re.compile(r"^(.+)/  \((\d+) entries\)")
 _TERM_EXIT_RE = re.compile(r"^\[exit code (\d+|N/A)\]")
 _TERM_BG_RE = re.compile(r"^Background command (\S+) started:")
+_DOC_BG_RE = re.compile(r"^Background document_parser (\S+) started:")
 _PAPER_TITLE_RE = re.compile(r"^# (.+)$", re.MULTILINE)
 _DOC_FORMAT_RE = re.compile(r"format\s*:\s*(\w+)(?:\s*\((\d+)\s*pages?)?")
 _DOC_IMAGES_RE = re.compile(r"\((\d+)\s*figures?\)")
@@ -293,6 +294,9 @@ def _fmt_webfetch(tc: ToolCall, r: ToolResult) -> str:
 
 @register_result_formatter("document_parser")
 def _fmt_doc(tc: ToolCall, r: ToolResult) -> str:
+    if tc.arguments.get("background"):
+        m = _DOC_BG_RE.match(r.content)
+        return f"Backgrounded: {m[1]}" if m else "Backgrounded"
     fm = _DOC_FORMAT_RE.search(r.content)
     if not fm:
         return "Parsed"

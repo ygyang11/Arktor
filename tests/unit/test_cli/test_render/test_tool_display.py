@@ -68,6 +68,39 @@ def test_mark_result_done_status_and_summary_formats() -> None:
     assert line is not None and "Read 3 lines" in line.plain
 
 
+def test_document_parser_background_shows_backgrounded_not_parsed() -> None:
+    """In background mode the tool returns immediately with a 'Background
+    document_parser bg_NNNN started: ...' line, not a parse result. The row
+    must show 'Backgrounded: bg_NNNN', not the fallback 'Parsed'."""
+    d = _mock_live_display()
+    tc = MagicMock(
+        id="t1", arguments={"target": "https://x/a.pdf", "background": True},
+    )
+    tc.name = "document_parser"
+    d.add_call(tc)
+    d.mark_result(_read_result(
+        "Background document_parser bg_0042 started: https://x/a.pdf"
+    ))
+    row = d._rows[0]
+    line = _format_result_line(row)
+    assert line is not None
+    assert "Backgrounded: bg_0042" in line.plain
+    assert "Parsed" not in line.plain
+
+
+def test_document_parser_foreground_still_shows_parsed() -> None:
+    d = _mock_live_display()
+    tc = MagicMock(id="t1", arguments={"target": "https://x/a.pdf"})
+    tc.name = "document_parser"
+    d.add_call(tc)
+    d.mark_result(_read_result(
+        "Document parsed and saved.\nformat: pdf (10 pages)\n"
+    ))
+    row = d._rows[0]
+    line = _format_result_line(row)
+    assert line is not None and "Parsed 10p pdf" in line.plain
+
+
 def test_mark_result_error_summary_is_error_prefixed() -> None:
     d = _mock_live_display()
     tc = MagicMock(id="t1", arguments={})
