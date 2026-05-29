@@ -256,6 +256,68 @@ class TestFullModeRoutesThroughParseDocument:
         assert captured_hints == ["arxiv-2401.14200", "arxiv-2401.99999"]
 
 
+class TestResolveOaViaOpenAlex:
+    """DOI -> OA PDF via OpenAlex (replaced Unpaywall, which 422'd on the
+    placeholder email and silently disabled the whole DOI-OA branch)."""
+
+    def _mk_response(self, payload: dict[str, object]) -> object:
+        import json
+
+        async def _fake_get(
+            url: str, *, headers: dict[str, str] | None = None,
+            timeout: int = 30, retry: object = None,
+        ) -> tuple[int, str]:
+            self._last_url = url
+            return 200, json.dumps(payload)
+        return _fake_get
+
+    async def test_best_oa_location_pdf(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            paper_fetch_mod, "http_get_with_retry",
+            self._mk_response({
+                "best_oa_location": {"pdf_url": "https://x/best.pdf"},
+                "locations": [],
+            }),
+        )
+        out = await paper_fetch_mod._resolve_oa_via_openalex("10.1/x")
+        assert out == "https://x/best.pdf"
+        assert "doi:10.1/x" in self._last_url
+
+    async def test_falls_back_to_locations_green_oa(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """best_oa_location has no direct PDF, but a green-OA repository copy
+        (e.g. PMC) in locations does — that's how paywalled IEEE/ACM papers
+        with a self-archived copy still resolve."""
+        monkeypatch.setattr(
+            paper_fetch_mod, "http_get_with_retry",
+            self._mk_response({
+                "best_oa_location": {"pdf_url": None},
+                "locations": [
+                    {"is_oa": False, "pdf_url": None},
+                    {"is_oa": True, "pdf_url": "https://pmc/green.pdf"},
+                ],
+            }),
+        )
+        out = await paper_fetch_mod._resolve_oa_via_openalex("10.1/x")
+        assert out == "https://pmc/green.pdf"
+
+    async def test_no_oa_pdf_returns_error(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            paper_fetch_mod, "http_get_with_retry",
+            self._mk_response({"best_oa_location": None, "locations": []}),
+        )
+        out = await paper_fetch_mod._resolve_oa_via_openalex("10.1/x")
+        assert out.startswith("Error: no open access PDF found")
+
+    async def test_unpaywall_helper_removed(self) -> None:
+        assert not hasattr(paper_fetch_mod, "_try_unpaywall")
+
+
 class TestArxivMetadata:
     async def test_fetch_xml_exception_returns_error(
         self, monkeypatch: pytest.MonkeyPatch,

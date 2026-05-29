@@ -301,7 +301,7 @@ async def _resolve_pdf_url(
 
     doi: str = external.get("DOI") or ""
     if doi:
-        return await _try_unpaywall(doi)
+        return await _resolve_oa_via_openalex(doi)
 
     return (
         "Error: no open access PDF available for this paper. "
@@ -309,8 +309,11 @@ async def _resolve_pdf_url(
     )
 
 
-async def _try_unpaywall(doi: str) -> str:
-    url = f"https://api.unpaywall.org/v2/{doi}?email=agent-harness@example.com"
+async def _resolve_oa_via_openalex(doi: str) -> str:
+    """Resolve a DOI to an open-access PDF URL via OpenAlex.
+    OpenAlex's single-entity lookup is free, unlimited, and keyless
+    """
+    url = f"https://api.openalex.org/works/doi:{doi}"
     try:
         status, body = await http_get_with_retry(
             url,
@@ -318,22 +321,28 @@ async def _try_unpaywall(doi: str) -> str:
             retry=HttpRetryConfig(max_attempts=3, base_delay=1.0),
         )
     except Exception:
-        return f"Error: failed to query Unpaywall for DOI {doi}"
-    if status != 200:
+        return f"Error: failed to query OpenAlex for DOI {doi}"
+    if status == 404:
         return f"Error: no open access PDF found for DOI {doi}"
+    if status != 200:
+        return f"Error: cannot resolve PDF URL for DOI {doi} (HTTP {status})"
 
     try:
         data_raw = parse_json_lenient(body)
     except ValueError as exc:
-        return f"Error: failed to parse Unpaywall response for DOI {doi}: {exc}"
+        return f"Error: failed to parse OpenAlex response for DOI {doi}: {exc}"
     if not isinstance(data_raw, dict):
-        return f"Error: unexpected Unpaywall response format for DOI {doi}"
+        return f"Error: unexpected OpenAlex response format for DOI {doi}"
     data = data_raw
 
     best: dict[str, Any] = data.get("best_oa_location") or {}
-    oa_url: str = best.get("url_for_pdf") or ""
-    if oa_url:
-        return oa_url
+    best_pdf: str = best.get("pdf_url") or ""
+    if best_pdf:
+        return best_pdf
+
+    for loc in data.get("locations") or []:
+        if isinstance(loc, dict) and loc.get("is_oa") and loc.get("pdf_url"):
+            return str(loc["pdf_url"])
 
     return f"Error: no open access PDF found for DOI {doi}"
 
