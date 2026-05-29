@@ -321,7 +321,7 @@ class SubAgentTool(BaseTool):
 
         if self._agent is None:
             raise ToolExecutionError(
-                "SubAgentTool is not bound to a parent agent. "
+                "sub_agent is not bound to a parent agent. "
                 "Register it via BaseAgent(tools=[sub_agent, ...])."
             )
 
