@@ -71,6 +71,12 @@ class _LoopState:
     pending_input: str | Document = ""
     pending_from_race: _PendingApproval | None = None
     deferred_line: str | None = None
+    # True when the last idle prompt was cancelled by a race win (bg /
+    # approval), leaving an orphan `❯` line with no trailing blank. The
+    # inter-turn notices add a leading blank only in that case; after a
+    # normal response (which already ends with a blank) they don't, so the
+    # gap above the notice is exactly one line either way.
+    prompt_orphaned: bool = False
 
 
 async def _cancel_and_collect(
@@ -178,9 +184,11 @@ async def run_repl(
                 if pending.future.done():
                     # Orphan from a cancelled bg task; skip without prompting.
                     continue
+                lead = "\n" if state.prompt_orphaned else ""
+                state.prompt_orphaned = False
                 async with adapter.lock():
                     console.print(
-                        f"\n[accent]{APPROVAL} Background approval requested[/accent]",
+                        f"{lead}[accent]{APPROVAL} Background approval requested[/accent]",
                     )
                 try:
                     await handler.resolve_pending(pending)
@@ -192,9 +200,11 @@ async def run_repl(
 
             # 2 bg result collect — auto-trigger agent.run on completion
             if await background.collect_results(agent):
+                lead = "\n" if state.prompt_orphaned else ""
+                state.prompt_orphaned = False
                 async with adapter.lock():
                     console.print(
-                        f"\n[info]{COMPRESSION} Background task completed[/info]\n",
+                        f"{lead}[info]{COMPRESSION} Background task completed[/info]\n",
                     )
                 await _run(
                     agent,
@@ -276,6 +286,9 @@ async def run_repl(
             outcome = await _cancel_and_collect(input_task, pt_session)
             if outcome.eof or outcome.interrupted:
                 break
+            # A race win cancels the rendered prompt, leaving an orphan `❯`
+            # with no trailing blank; a submitted line consumes it normally.
+            state.prompt_orphaned = bool(outcome.cancelled)
             if outcome.line is not None:
                 state.deferred_line = outcome.line
             elif outcome.buffered is not None and outcome.buffered.text:
