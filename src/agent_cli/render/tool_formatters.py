@@ -348,8 +348,6 @@ def _fmt_memory(tc: ToolCall, r: ToolResult) -> str:
 
 @register_result_formatter("skill_tool")
 def _fmt_skill(tc: ToolCall, r: ToolResult) -> str:
-    if r.content.startswith("Skill '") and "not found" in r.content:
-        return r.content.rstrip(".")
     return f"Loaded skill: {tc.arguments.get('skill_name', '?')}"
 
 
@@ -366,10 +364,9 @@ def _fmt_bgtask(tc: ToolCall, r: ToolResult) -> str:
     if action == "status":
         m = re.search(r"^Status: (\w+)", c, re.MULTILINE)
         tid = tc.arguments.get("task_id", "")
-        return f"{tid} is {m[1]}" if m else f"{tid}: not found"
+        return f"{tid} is {m[1]}" if m else tid
     if action == "cancel":
-        tid = tc.arguments.get("task_id", "")
-        return f"Cancelled {tid}" if "cancelled" in c else f"Could not cancel {tid}, maybe not found"
+        return f"Cancelled {tc.arguments.get('task_id', '')}"
     return "Background op"
 
 
@@ -563,5 +560,5 @@ def _expand_bgtask(console: Console, row: _ToolRow) -> None:
     if action == "list" and not content.startswith("No background"):
         _, _, body = content.partition("\n")
         _print_body_lines(console, body.splitlines(), more_label="tasks")
-    elif action == "status" and " not found" not in content:
+    elif action == "status":
         _print_body_lines(console, content.splitlines(), more_label="lines")
