@@ -117,7 +117,7 @@ class CliHooks(DefaultHooks):
         await self.adapter.end_step()
         if isinstance(error, LLMUnsupportedContentError):
             return  # _run owns rendering for this class
-        await self.adapter.print_inline(f"[error]! Error: {error}[/error]")
+        await self.adapter.print_inline(f"[error]! Error: {rich_escape(str(error))}[/error]")
         if _debug_enabled[0]:
             tb = "".join(
                 traceback.format_exception(type(error), error, error.__traceback__)

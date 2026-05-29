@@ -182,6 +182,17 @@ async def test_on_error_debug_disabled_prints_one_line_only() -> None:
     assert a.print_inline.await_count == 1
 
 
+async def test_on_error_escapes_markup_in_message() -> None:
+    a = _mock_adapter()
+    hooks = CliHooks(a)
+    await hooks.on_error("cli", RuntimeError("bad [/error] [red]value"))
+    rendered = a.print_inline.await_args_list[0].args[0]
+    assert "\\[/error]" in rendered
+    assert "\\[red]" in rendered
+    assert rendered.startswith("[error]! Error:")
+    assert rendered.endswith("[/error]")
+
+
 async def test_step_end_calls_end_step_run_end_calls_end_run() -> None:
     a = _mock_adapter()
     hooks = CliHooks(a)
