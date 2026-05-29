@@ -49,7 +49,10 @@ from agent_harness.core.config import (
     DocumentParserConfig,
     resolve_document_parser_config,
 )
-from agent_harness.core.errors import HttpResponseTooLargeError
+from agent_harness.core.errors import (
+    HttpResponseTooLargeError,
+    ToolExecutionError,
+)
 from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.utils.http_retry import HttpRetryConfig, http_get_bytes_with_retry
 from agent_harness.utils.token_counter import count_tokens
@@ -61,6 +64,8 @@ DOCUMENT_PARSER_DESCRIPTION = (
     "Persists artifacts on disk and returns paths.\n\n"
     "## Usage\n"
     "- `target`: URL (http/https) or local file path\n"
+    "- `background`: recommended when parsing multiple documents in "
+    "parallel, or when the next step doesn't depend on this result.\n"
     "- Supported formats: PDF, png, jpg, jpeg, jp2, webp, gif, bmp\n\n"
     "## Backends & Pipeline\n"
     "Routed automatically across tiers — PaddleOCR (PaddleOCR-VL-1.5 then "
@@ -110,6 +115,10 @@ class _DocumentToolConfig:
 
 
 _CFG = _DocumentToolConfig()
+
+_BG_COMPLETION_FOOTER = (
+    "\n(The full parse result is shown above; the 'Full output' file is a duplicate.)"
+)
 
 _slug_locks: weakref.WeakValueDictionary[
     tuple[str | None, str], asyncio.Lock
@@ -307,9 +316,13 @@ class DocumentParserTool(BaseTool):
             approval_resource_key="target",
         )
         self._session_id: str | None = None
+        self._agent: Any = None
 
     def bind_session(self, session_id: str | None) -> None:
         self._session_id = session_id
+
+    def bind_agent(self, agent: Any) -> None:
+        self._agent = agent
 
     def get_schema(self) -> ToolSchema:
         return ToolSchema(
@@ -322,6 +335,14 @@ class DocumentParserTool(BaseTool):
                         "type": "string",
                         "description": "URL (http/https) or local path of the document.",
                     },
+                    "background": {
+                        "type": "boolean",
+                        "description": (
+                            "Run in background. Returns a task ID immediately; "
+                            "results are delivered automatically when complete."
+                        ),
+                        "default": False,
+                    },
                 },
                 "required": ["target"],
             },
@@ -329,11 +350,36 @@ class DocumentParserTool(BaseTool):
 
     async def execute(self, **kwargs: Any) -> str:
         target: str = kwargs.get("target") or ""
+        background: bool = bool(kwargs.get("background", False))
+        if background:
+            return self._start_background(target)
         return await parse_document(
             target=target,
             session_id=self._session_id,
             slug_hint=None,
         )
+
+    def _start_background(self, target: str) -> str:
+        if self._agent is None:
+            raise ToolExecutionError(
+                "DocumentParserTool is not bound to a parent agent; "
+                "background mode requires agent binding."
+            )
+        sid_capture = self._session_id
+
+        async def work() -> tuple[str, str]:
+            output = await parse_document(
+                target=target, session_id=sid_capture, slug_hint=None,
+            )
+            summary = output + _BG_COMPLETION_FOOTER
+            return output, summary
+
+        task_id = self._agent._bg_manager.spawn(
+            tool_name="document_parser",
+            description=target,
+            coro=work(),
+        )
+        return f"Background document_parser {task_id} started: {target}"
 
 
 document_parser = DocumentParserTool()

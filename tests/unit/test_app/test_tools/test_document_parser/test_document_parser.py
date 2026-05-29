@@ -75,6 +75,131 @@ class TestDocumentParserTool:
         out = await t.execute(target="/tmp/__no_such_file__.pdf")
         assert "not found" in out
 
+    def test_agent_aware_structural(self) -> None:
+        from agent_harness.tool.base import AgentAware
+        t = DocumentParserTool()
+        assert isinstance(t, AgentAware)
+
+    def test_schema_includes_background_default_false(self) -> None:
+        t = DocumentParserTool()
+        sch = t.get_schema()
+        bg = sch.parameters["properties"].get("background")
+        assert bg is not None
+        assert bg["type"] == "boolean"
+        assert bg.get("default") is False
+        assert "background" not in sch.parameters["required"]
+
+
+class TestBackgroundMode:
+    """`background=true` dispatches the parse via the agent's bg_manager
+    and returns a task ID immediately. The bg coroutine's return value
+    is (output, output) — same string for the bg artifact file and the
+    LLM-facing summary — with a footer noting the artifact mirrors the
+    response (scoped to this tool, not a universal claim)."""
+
+    async def test_execute_with_background_raises_without_agent(self) -> None:
+        from agent_harness.core.errors import ToolExecutionError
+        t = DocumentParserTool()
+        with pytest.raises(ToolExecutionError, match="not bound"):
+            await t.execute(target="https://x/a.pdf", background=True)
+
+    async def test_background_spawns_via_bg_manager(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from unittest.mock import MagicMock
+        t = DocumentParserTool()
+        agent = MagicMock()
+        spawn_calls: list[dict[str, Any]] = []
+
+        def _capture_spawn(**kwargs: Any) -> str:
+            spawn_calls.append(kwargs)
+            return "bg_0042"
+        agent._bg_manager.spawn.side_effect = _capture_spawn
+        t.bind_agent(agent)
+
+        out = await t.execute(target="https://x/a.pdf", background=True)
+
+        assert out == "Background document_parser bg_0042 started: https://x/a.pdf"
+        assert len(spawn_calls) == 1
+        kw = spawn_calls[0]
+        assert kw["tool_name"] == "document_parser"
+        assert kw["description"] == "https://x/a.pdf"
+        kw["coro"].close()
+
+    async def test_background_description_uses_full_target(self) -> None:
+        """No truncation — description is the full target string."""
+        from unittest.mock import MagicMock
+        t = DocumentParserTool()
+        agent = MagicMock()
+        agent._bg_manager.spawn.return_value = "bg_0001"
+        t.bind_agent(agent)
+        long_url = "https://example.com/" + ("a" * 100) + ".pdf"
+        out = await t.execute(target=long_url, background=True)
+        kw = agent._bg_manager.spawn.call_args.kwargs
+        assert kw["description"] == long_url
+        assert long_url in out
+        kw["coro"].close()
+
+    async def test_background_work_returns_clean_output_and_summary_with_footer(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """work() returns (output, summary):
+        - output goes to the bg artifact file → pure parse result, no footer
+        - summary is injected into the LLM context → has the completion footer
+          so the LLM understands the bg artifact mirrors this response.
+        """
+        from unittest.mock import MagicMock
+        from agent_app.tools.document_parser.document_parser import (
+            _BG_COMPLETION_FOOTER,
+        )
+
+        async def _fake_parse(*, target: str, **kw: Any) -> str:
+            return "Document parsed and saved.\n  source: " + target
+
+        monkeypatch.setattr(dp_mod, "parse_document", _fake_parse)
+
+        t = DocumentParserTool()
+        agent = MagicMock()
+        agent._bg_manager.spawn.return_value = "bg_0007"
+        t.bind_agent(agent)
+        t.bind_session("S1")
+        await t.execute(target="https://x/a.pdf", background=True)
+
+        coro = agent._bg_manager.spawn.call_args.kwargs["coro"]
+        output, summary = await coro
+        assert output.startswith("Document parsed and saved.")
+        assert _BG_COMPLETION_FOOTER not in output
+        assert summary == output + _BG_COMPLETION_FOOTER
+
+    async def test_background_captures_session_id_at_spawn_time(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """sid_capture in closure: session change after spawn does NOT
+        affect the already-spawned work — it uses the sid in effect when
+        spawned."""
+        from unittest.mock import MagicMock
+        captured_sids: list[str | None] = []
+
+        async def _fake_parse(*, target: str, session_id: str | None, **kw: Any) -> str:
+            captured_sids.append(session_id)
+            return "Document parsed and saved."
+
+        monkeypatch.setattr(dp_mod, "parse_document", _fake_parse)
+
+        t = DocumentParserTool()
+        agent = MagicMock()
+        agent._bg_manager.spawn.return_value = "bg_0001"
+        t.bind_agent(agent)
+        t.bind_session("S_initial")
+        await t.execute(target="https://x/a.pdf", background=True)
+
+        # Change session after spawn — must NOT leak into the captured closure
+        t.bind_session("S_changed")
+
+        coro = agent._bg_manager.spawn.call_args.kwargs["coro"]
+        await coro
+        assert captured_sids == ["S_initial"]
+
 
 class TestParseDocumentCacheHit:
     async def test_returns_cached_without_parsing(

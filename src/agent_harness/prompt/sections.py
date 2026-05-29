@@ -164,7 +164,8 @@ as media you cannot read or parse, or when you need precise structured content \
 - Extracts text, tables, formulas, and figures from PDFs and images with \
 complex layouts
 - Returns a structured response pointing to on-disk artifacts for downstream \
-reading""",
+reading. Supports `background=true` for non-blocking parsing; results are \
+delivered automatically when complete.""",
 
 
     "memory_tool": """\
