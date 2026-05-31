@@ -233,7 +233,7 @@ def _render_compaction(console: Console, messages: list[Message]) -> None:
         label = "Earlier messages compacted"
         if round_n > 1:
             label = f"{label} ×{round_n}"
-        console.print(Text(f"── {label} ──", style="muted"))
+        console.print(Text(f"⎯⎯ {label} ⎯⎯", style="muted"))
         console.print()
         return
 
