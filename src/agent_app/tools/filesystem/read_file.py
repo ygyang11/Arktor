@@ -24,6 +24,7 @@ _MEDIA_PREVIEW_MAX_BYTES = 30 * 1024 * 1024
 READ_FILE_DESCRIPTION = (
     "Reads any file from the filesystem: text files paginated with line numbers, "
     "or PDF/image files inlined as media attachments for direct viewing. "
+    "(files only — to see what a directory contains, use list_dir)"
     "Supports paginated reading for large text files via offset and limit parameters.\n\n"
     "Usage:\n"
     "- Assume this tool is able to read all files. If the user provides a path, "

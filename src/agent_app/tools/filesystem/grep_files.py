@@ -13,24 +13,30 @@ from agent_app.tools.filesystem._security import (
 from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.decorator import tool
 
-_MAX_GREP_FILE_SIZE = 250_000_000  # 250MB
-_MAX_LINE_CHARS = 500
+_MAX_GREP_FILE_SIZE = 250_000_000  # 250MB — grep streams line-by-line
+_MAX_LINE_CHARS = 5_000
 
 GREP_FILES_DESCRIPTION = (
     "Search for a text pattern across files using regular expressions (Python re syntax).\n\n"
     "Searches file contents and returns matching lines with file paths and line numbers. "
     "Supports regex syntax — special characters like parentheses, brackets, pipes "
     "are treated as regex operators, not literals.\n\n"
+    "The search runs recursively under `path` (default: '.', the workspace root). `include` "
+    "selects which of those files to search: a filename glob matched at any depth, so "
+    "'*.py' matches Python files anywhere under `path` (nested included). A '/' anchors "
+    "the pattern relative to `path` — 'src/*.ts' = files directly in src/, "
+    "'src/**' = the whole src/ subtree.\n\n"
     "Usage:\n"
     "- Search all files: grep_files(pattern='TODO')\n"
     "- Search Python files only: grep_files(pattern='import', include='*.py')\n"
-    "- Search in a subdirectory: grep_files(pattern='def', include='src/*.py')\n"
+    "- Search within a directory: grep_files(pattern='def', path='src')\n"
+    "- Search a directory by file type: grep_files(pattern='import', path='src', include='*.ts')\n"
     "- Show context around matches: grep_files(pattern='error', context=2)\n"
     "- Case-insensitive: grep_files(pattern='todo', case_insensitive=True)\n\n"
     "If results are truncated, the output shows the next offset. "
     "Use offset to retrieve more if needed: grep_files(pattern='TODO', offset=250).\n\n"
     "Automatically skips binary files and common non-source directories "
-    "(.git, node_modules, __pycache__)."
+    "(.git, node_modules, __pycache__, etc.); to search inside one, pass it explicitly as path."
 )
 
 
@@ -47,7 +53,8 @@ def _search_file_streaming(
         size = file_path.stat().st_size
         if size > _MAX_GREP_FILE_SIZE:
             rel = relative_to_workspace(file_path)
-            return 0, [f"(skipped {rel}: {size:,} bytes, exceeds 250MB grep limit)"]
+            limit_mb = _MAX_GREP_FILE_SIZE // 1_000_000
+            return 0, [f"(skipped {rel}: {size:,} bytes, exceeds {limit_mb}MB grep limit)"]
     except OSError:
         return 0, []
 
@@ -87,7 +94,7 @@ def _search_file_streaming(
             result_lines.append("--")
         line_text = lines[idx]
         if len(line_text) > _MAX_LINE_CHARS:
-            line_text = line_text[:_MAX_LINE_CHARS] + "..."
+            line_text = line_text[:_MAX_LINE_CHARS] + "... (truncated)"
         marker = ":" if idx in matched_line_nums else "-"
         result_lines.append(f"{rel}{marker}{idx + 1}{marker}{line_text}")
         prev_idx = idx
@@ -109,8 +116,8 @@ async def grep_files(
 
     Args:
         pattern: Regex pattern (Python re syntax).
-        path: Directory to search (default: workspace root).
-        include: Glob to filter files by relative path (e.g. "*.py", "src/*.py").
+        path: Directory to search (absolute or relative to workspace root, default ".").
+        include: Filename glob to filter which files are searched (default: "", no filter).
         context: Context lines before/after each match (default 0).
         case_insensitive: Case-insensitive search (default False).
         max_results: Maximum output lines to return (default 250).
@@ -140,7 +147,8 @@ async def grep_files(
     if not base.is_dir():
         return f"Error: {path} is not a directory."
 
-    files = walk_files(base, include, workspace=base)
+    excluded: set[str] = set()
+    files = walk_files(base, include, workspace=base, skipped=excluded)
     files.sort()
 
     total_match_count = 0
@@ -157,7 +165,12 @@ async def grep_files(
 
     if total_match_count == 0:
         scope = f" in '{include}' files" if include else ""
-        return f"No matches for '{pattern}'{scope} under {relative_to_workspace(base)}"
+        msg = f"No matches for '{pattern}'{scope} under {relative_to_workspace(base)}"
+        if excluded:
+            msg += f" (excluded: {', '.join(sorted(excluded))})"
+        if all_output:
+            msg += "\n" + "\n".join(all_output)
+        return msg
 
     total_output_lines = len(all_output)
     paginated = all_output[offset : offset + max_results]
@@ -171,5 +184,7 @@ async def grep_files(
             f" (showing {len(paginated)} of {total_output_lines} output lines, "
             f"use offset={next_offset} for more)"
         )
+    if excluded:
+        header += f" (excluded: {', '.join(sorted(excluded))})"
 
     return header + "\n" + "\n".join(paginated)

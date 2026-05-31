@@ -5,11 +5,12 @@ Shared infrastructure for all filesystem tools.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-MAX_TEXT_FILE_SIZE: int = 50_000_000  # 50MB — used by detect_text_file (edit_file)
+MAX_TEXT_FILE_SIZE: int = 50_000_000  # 50MB — used by detect_text_file
 
 _SKIP_DIRS: frozenset[str] = frozenset(
     {
@@ -173,10 +174,40 @@ def detect_text_file(path: Path, max_size: int = MAX_TEXT_FILE_SIZE) -> TextFile
     )
 
 
+def include_matches(rel_posix: str, pattern: str) -> bool:
+    """Match a path (relative to the search base) against an include glob.
+
+    gitignore / `grep --include`-style semantics: a bare pattern matches by
+    filename at any depth ("*.py" -> Python files anywhere); a pattern with a
+    "/" is anchored, where "*" stays within a segment and "**" spans
+    directories ("src/*.py" -> directly under src/, "src/**" -> the subtree).
+
+    Segment matching is delegated to stdlib fnmatch; only the "**" spanning is
+    implemented here.
+    """
+    if "/" not in pattern:
+        return fnmatch.fnmatchcase(rel_posix.rsplit("/", 1)[-1], pattern)
+    return _match_segments(rel_posix.split("/"), pattern.split("/"))
+
+
+def _match_segments(parts: list[str], pats: list[str]) -> bool:
+    if not pats:
+        return not parts
+    head, rest = pats[0], pats[1:]
+    if head == "**":
+        return _match_segments(parts, rest) or (
+            bool(parts) and _match_segments(parts[1:], pats)
+        )
+    if not parts or not fnmatch.fnmatchcase(parts[0], head):
+        return False
+    return _match_segments(parts[1:], rest)
+
+
 def walk_files(
     base: Path,
     include: str,
     workspace: Path,
+    skipped: set[str] | None = None,
 ) -> list[Path]:
     """Recursively collect files with directory pruning and traversal safety.
 
@@ -185,15 +216,14 @@ def walk_files(
     2. NOT follow any symlink directories (deliberate design choice)
     3. Check traversal safety on each discovered file
 
-    include matching uses PurePath.match() (NOT fnmatch) for correct glob semantics:
-    - "*.py"          — .py files at any depth
-    - "src/*.py"      — .py files directly under src/ only
-    - "src/**/*.py"   — .py files under src/ at any depth
-    - ""              — no filter, return all files
+    When `skipped` is provided, the names of pruned _SKIP_DIRS are added to it
+    so callers can surface them (e.g. when the search yields nothing).
     """
     files: list[Path] = []
 
     for dirpath_str, dirnames, filenames in os.walk(base):
+        if skipped is not None:
+            skipped.update(d for d in dirnames if d in _SKIP_DIRS)
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
 
         for fname in filenames:
@@ -202,10 +232,8 @@ def walk_files(
             if not check_traversal(fpath, workspace=workspace):
                 continue
 
-            if include:
-                rel = fpath.relative_to(base)
-                if not PurePosixPath(rel).match(include):
-                    continue
+            if include and not include_matches(fpath.relative_to(base).as_posix(), include):
+                continue
 
             files.append(fpath)
 

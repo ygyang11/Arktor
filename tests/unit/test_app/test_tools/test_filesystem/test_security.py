@@ -9,6 +9,7 @@ import pytest
 from agent_app.tools.filesystem._security import (
     check_traversal,
     detect_text_file,
+    include_matches,
     normalize_path,
     walk_files,
 )
@@ -190,7 +191,7 @@ class TestWalkFiles:
         assert "setup.py" not in names
 
     def test_include_recursive_pattern(self, tmp_path: Path) -> None:
-        """src/**/*.py matches .py at any depth BELOW src/ (not src/main.py directly)."""
+        """src/**/*.py matches .py anywhere under src/, including direct children."""
         src = tmp_path / "src"
         sub = src / "sub"
         sub.mkdir(parents=True)
@@ -200,11 +201,9 @@ class TestWalkFiles:
 
         files = walk_files(tmp_path, "src/**/*.py", workspace=tmp_path)
         names = [f.name for f in files]
+        assert "main.py" in names
         assert "deep.py" in names
         assert "setup.py" not in names
-        # Note: src/main.py does NOT match src/**/*.py on Python 3.11
-        # because ** requires at least one directory segment.
-        # Use "src/*.py" for direct children or "src/**" for everything.
 
     def test_external_symlink_file_skipped(self, tmp_path: Path) -> None:
         link = tmp_path / "escape.py"
@@ -242,3 +241,43 @@ class TestWalkFiles:
         names = [f.name for f in files]
         assert "a.py" in names
         assert "b.md" in names
+
+
+class TestIncludeMatch:
+    def test_bare_name_matches_any_depth(self) -> None:
+        assert include_matches("foo.py", "*.py")
+        assert include_matches("a/foo.py", "*.py")
+        assert include_matches("a/b/foo.py", "*.py")
+        assert not include_matches("foo.txt", "*.py")
+
+    def test_globstar_prefix_includes_root(self) -> None:
+        assert include_matches("foo.py", "**/*.py")
+        assert include_matches("a/foo.py", "**/*.py")
+        assert include_matches("a/b/foo.py", "**/*.py")
+
+    def test_slash_pattern_anchors_to_direct_children(self) -> None:
+        assert include_matches("src/foo.py", "src/*.py")
+        assert not include_matches("src/sub/foo.py", "src/*.py")
+        assert not include_matches("foo.py", "src/*.py")
+        assert not include_matches("other/foo.py", "src/*.py")
+
+    def test_trailing_globstar_matches_subtree(self) -> None:
+        assert include_matches("src/foo.py", "src/**")
+        assert include_matches("src/a/b.py", "src/**")
+        assert not include_matches("foo.py", "src/**")
+        assert not include_matches("srcx/y.py", "src/**")
+
+    def test_globstar_in_middle_includes_direct_children(self) -> None:
+        assert include_matches("src/main.py", "src/**/*.py")
+        assert include_matches("src/a/b.py", "src/**/*.py")
+        assert not include_matches("main.py", "src/**/*.py")
+
+    def test_char_class_delegated_to_fnmatch(self) -> None:
+        assert include_matches("a.c", "*.[ch]")
+        assert include_matches("x/b.h", "*.[ch]")
+        assert not include_matches("a.py", "*.[ch]")
+
+    def test_prefix_glob_matches_any_depth(self) -> None:
+        assert include_matches("test_foo.py", "test_*.py")
+        assert include_matches("pkg/test_foo.py", "test_*.py")
+        assert not include_matches("foo_test.py", "test_*.py")

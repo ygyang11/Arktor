@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from agent_app.tools.filesystem.list_dir import list_dir
+from agent_harness.core.errors import ToolValidationError
 
 
 class TestListDir:
@@ -75,3 +76,23 @@ class TestListDir:
             (tmp_path / f"file_{i}.txt").touch()
         result = await list_dir.execute(path=str(tmp_path))
         assert "5 entries" in result
+
+    @pytest.mark.asyncio
+    async def test_offset_max_results_pagination(self, tmp_path: Path) -> None:
+        for i in range(5):
+            (tmp_path / f"file_{i}.txt").touch()
+        page1 = await list_dir.execute(path=str(tmp_path), max_results=2)
+        assert "5 entries" in page1
+        assert "use offset=2 for more" in page1
+        page2 = await list_dir.execute(path=str(tmp_path), max_results=2, offset=2)
+        assert "offset 2" in page2
+
+    @pytest.mark.asyncio
+    async def test_invalid_max_results_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ToolValidationError, match="max_results"):
+            await list_dir.execute(path=str(tmp_path), max_results=0)
+
+    @pytest.mark.asyncio
+    async def test_negative_offset_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ToolValidationError, match="offset"):
+            await list_dir.execute(path=str(tmp_path), offset=-1)

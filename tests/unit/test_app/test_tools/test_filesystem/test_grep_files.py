@@ -26,6 +26,39 @@ class TestGrepFiles:
         assert "notes.md" not in result
 
     @pytest.mark.asyncio
+    async def test_excluded_dirs_surfaced_when_empty(self, tmp_path: Path) -> None:
+        nm = tmp_path / "node_modules"
+        nm.mkdir()
+        (nm / "x.js").write_text("TODO here\n")
+        result = await grep_files.execute(pattern="TODO", path=str(tmp_path))
+        assert "No matches" in result
+        assert "node_modules" in result
+        assert "excluded" in result
+
+    @pytest.mark.asyncio
+    async def test_excluded_dirs_surfaced_with_matches(self, tmp_path: Path) -> None:
+        (tmp_path / "main.py").write_text("TODO real\n")
+        nm = tmp_path / "node_modules"
+        nm.mkdir()
+        (nm / "x.js").write_text("TODO dep\n")
+        result = await grep_files.execute(pattern="TODO", path=str(tmp_path))
+        assert "1 matches in 1 files" in result
+        assert "excluded: node_modules" in result
+
+    @pytest.mark.asyncio
+    async def test_oversized_skip_surfaced_when_no_match(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sys
+        grep_mod = sys.modules["agent_app.tools.filesystem.grep_files"]
+        monkeypatch.setattr(grep_mod, "_MAX_GREP_FILE_SIZE", 10)
+        (tmp_path / "big.log").write_text("x" * 100)
+        result = await grep_files.execute(pattern="NEEDLE", path=str(tmp_path))
+        assert "No matches" in result
+        assert "skipped" in result
+        assert "big.log" in result
+
+    @pytest.mark.asyncio
     async def test_include_relative_path(self, tmp_path: Path) -> None:
         src = tmp_path / "src"
         src.mkdir()

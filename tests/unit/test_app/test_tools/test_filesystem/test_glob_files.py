@@ -13,12 +13,20 @@ from agent_harness.core.errors import ToolValidationError
 
 class TestGlobFiles:
     @pytest.mark.asyncio
-    async def test_parent_dir_pattern_is_contained(self, tmp_path: Path) -> None:
-        base = tmp_path / "base"
-        base.mkdir()
-        (tmp_path / "outside.py").write_text("x")
-        result = await glob_files.execute(pattern="../*.py", path=str(base))
-        assert "outside.py" not in result
+    async def test_parent_dir_pattern_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ToolValidationError, match="must not contain"):
+            await glob_files.execute(pattern="../*.py", path=str(tmp_path))
+
+    @pytest.mark.asyncio
+    async def test_parent_dir_segment_in_middle_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ToolValidationError, match="must not contain"):
+            await glob_files.execute(pattern="a/../b/*.py", path=str(tmp_path))
+
+    @pytest.mark.asyncio
+    async def test_dots_in_filename_allowed(self, tmp_path: Path) -> None:
+        (tmp_path / "foo..bar.py").write_text("x")
+        result = await glob_files.execute(pattern="*..*.py", path=str(tmp_path))
+        assert "foo..bar.py" in result
 
     @pytest.mark.asyncio
     async def test_invalid_glob_pattern_rejected(self, tmp_path: Path) -> None:
@@ -79,3 +87,46 @@ class TestGlobFiles:
         assert "root.py" in result
         # *.py in Path.glob only matches direct children
         assert "nested.py" not in result
+
+    @pytest.mark.asyncio
+    async def test_offset_max_results_pagination(self, tmp_path: Path) -> None:
+        for i in range(5):
+            (tmp_path / f"f{i}.py").write_text("x")
+        page1 = await glob_files.execute(pattern="*.py", path=str(tmp_path), max_results=2)
+        assert "5 files matching" in page1
+        assert "use offset=2 for more" in page1
+        page2 = await glob_files.execute(
+            pattern="*.py", path=str(tmp_path), max_results=2, offset=2,
+        )
+        assert "offset 2" in page2
+
+    @pytest.mark.asyncio
+    async def test_invalid_max_results_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ToolValidationError, match="max_results"):
+            await glob_files.execute(pattern="*.py", path=str(tmp_path), max_results=0)
+
+    @pytest.mark.asyncio
+    async def test_negative_offset_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ToolValidationError, match="offset"):
+            await glob_files.execute(pattern="*.py", path=str(tmp_path), offset=-1)
+
+    @pytest.mark.asyncio
+    async def test_excluded_dirs_surfaced_when_empty(self, tmp_path: Path) -> None:
+        nm = tmp_path / "node_modules"
+        nm.mkdir()
+        (nm / "x.py").write_text("pass")
+        result = await glob_files.execute(pattern="**/*.py", path=str(tmp_path))
+        assert "No files matching" in result
+        assert "node_modules" in result
+        assert "excluded" in result
+
+    @pytest.mark.asyncio
+    async def test_excluded_dirs_surfaced_with_matches(self, tmp_path: Path) -> None:
+        (tmp_path / "main.py").write_text("pass")
+        nm = tmp_path / "node_modules"
+        nm.mkdir()
+        (nm / "x.py").write_text("pass")
+        result = await glob_files.execute(pattern="**/*.py", path=str(tmp_path))
+        assert "main.py" in result
+        assert "1 files matching" in result
+        assert "excluded: node_modules" in result
