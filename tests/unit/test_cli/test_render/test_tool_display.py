@@ -223,8 +223,9 @@ def test_end_closes_live_prints_call_and_summary_and_diff_expander() -> None:
         id="t1", name="edit_file", args_preview="a.py",
         status="done", tool_call=tc,
         result=MagicMock(
-            content="Edited a.py (1 replacement)\n--- a/a.py\n+++ b/a.py\n@@\n-x\n+y\n",
+            content="Edited a.py (1 replacement)",
             is_error=False,
+            tool_metadata={"diff": "--- a/a.py\n+++ b/a.py\n@@\n-x\n+y\n"},
         ),
     )]
     d.end()

@@ -25,8 +25,15 @@ def _a(text: str | None = None, calls: list[ToolCall] | None = None) -> Message:
     return Message.assistant(content=text, tool_calls=calls)
 
 
-def _t(call_id: str, content: str, is_error: bool = False) -> Message:
-    return Message.tool(tool_call_id=call_id, content=content, is_error=is_error)
+def _t(
+    call_id: str,
+    content: str,
+    is_error: bool = False,
+    metadata: dict[str, object] | None = None,
+) -> Message:
+    return Message.tool(
+        tool_call_id=call_id, content=content, is_error=is_error, tool_metadata=metadata,
+    )
 
 
 def _render(*messages: Message) -> str:
@@ -198,8 +205,11 @@ def test_replay_edit_file_emits_expander_diff() -> None:
         name="edit_file",
         arguments={"file_path": "/a.py", "old_string": "x", "new_string": "y"},
     )
-    body = "Edited /a.py (1 replacement)\n@@ -1,1 +1,1 @@\n-x\n+y"
-    tr = _t("c1", body)
+    tr = _t(
+        "c1",
+        "Edited /a.py (1 replacement)",
+        metadata={"diff": "@@ -1,1 +1,1 @@\n-x\n+y"},
+    )
     out = _render(_a(calls=[tc]), tr)
     assert "-x" in out
     assert "+y" in out

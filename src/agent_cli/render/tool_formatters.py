@@ -65,6 +65,10 @@ def _cell_ljust(s: str, width: int) -> str:
     return s + " " * max(width - cell_len(s), 0)
 
 
+def _print_body_line(console: Console, line: str) -> None:
+    console.print(_INDENT + line, markup=False, highlight=False, no_wrap=True, overflow="ellipsis")
+
+
 def _print_body_lines(
     console: Console,
     lines: Iterable[str],
@@ -73,7 +77,7 @@ def _print_body_lines(
 ) -> None:
     ls = list(lines)
     for line in ls[:cap]:
-        console.print(_INDENT + line, markup=False, highlight=False)
+        _print_body_line(console, line)
     if len(ls) > cap:
         console.print(
             f"{_INDENT}[muted]{SEP_ELLIPSIS} {len(ls) - cap} more {more_label}[/muted]"
@@ -90,16 +94,16 @@ def _print_body_head_tail(
     ls = list(lines)
     if len(ls) <= head + tail:
         for line in ls:
-            console.print(_INDENT + line, markup=False, highlight=False)
+            _print_body_line(console, line)
         return
     for line in ls[:head]:
-        console.print(_INDENT + line, markup=False, highlight=False)
+        _print_body_line(console, line)
     middle = len(ls) - head - tail
     console.print(
         f"{_INDENT}[muted]{SEP_ELLIPSIS} {middle} more {more_label}[/muted]"
     )
     for line in ls[-tail:]:
-        console.print(_INDENT + line, markup=False, highlight=False)
+        _print_body_line(console, line)
 
 
 def _render_diff_lines(
@@ -388,7 +392,7 @@ def _expand_write(console: Console, row: _ToolRow) -> None:
 def _expand_edit(console: Console, row: _ToolRow) -> None:
     if _is_error_result(row.result) or row.result is None or row.tool_call is None:
         return
-    _, _, diff = row.result.content.partition("\n")
+    diff = str((row.result.tool_metadata or {}).get("diff", ""))
     if not diff.strip():
         return
     file_path = str(row.tool_call.arguments.get("file_path", ""))
