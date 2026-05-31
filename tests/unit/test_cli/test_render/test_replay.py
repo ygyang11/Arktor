@@ -672,7 +672,7 @@ def test_render_post_switch_emits_marker_when_summary_present() -> None:
     console = Console(file=buf, force_terminal=False, color_system=None, width=120, theme=DEFAULT_THEME.rich)
     render_post_switch(agent, console, DEFAULT_THEME, "session-id")
     out = buf.getvalue()
-    assert "── Earlier messages compacted ──" in out
+    assert "⎯⎯ Earlier messages compacted ⎯⎯" in out
 
 
 def test_render_post_switch_emits_round_count_when_above_one() -> None:
@@ -695,7 +695,7 @@ def test_render_post_switch_emits_round_count_when_above_one() -> None:
     console = Console(file=buf, force_terminal=False, color_system=None, width=120, theme=DEFAULT_THEME.rich)
     render_post_switch(agent, console, DEFAULT_THEME, "session-id")
     out = buf.getvalue()
-    assert "── Earlier messages compacted ×3 ──" in out
+    assert "⎯⎯ Earlier messages compacted ×3 ⎯⎯" in out
 
 
 def test_render_post_switch_omits_marker_without_summary() -> None:
