@@ -82,15 +82,18 @@ class ToolExecutor(EventEmitter):
             if isinstance(raw, ToolOutput):
                 result_str = raw.content
                 attachments = raw.attachments
+                tool_metadata = raw.tool_metadata
             else:
                 result_str = raw
                 attachments = None
+                tool_metadata = None
 
             result = ToolResult(
                 tool_call_id=tool_call.id,
                 content=result_str,
                 is_error=False,
                 attachments=attachments,
+                tool_metadata=tool_metadata,
             )
 
             await self.emit(

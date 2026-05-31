@@ -357,3 +357,24 @@ class TestToolExecutorToolOutput:
         result = await executor.execute(tc)
         assert result.content == "just text"
         assert result.attachments is None
+
+    @pytest.mark.asyncio
+    async def test_tool_output_metadata_threads_through(self) -> None:
+        from agent_harness.core.message import ToolOutput
+
+        tool = _ToolOutputTool(
+            ToolOutput(content="header", tool_metadata={"diff": "-a\n+b"}),
+        )
+        executor = _make_executor(tool)
+        tc = ToolCall(name="tool_output_tool", arguments={})
+        result = await executor.execute(tc)
+        assert result.content == "header"
+        assert result.tool_metadata == {"diff": "-a\n+b"}
+
+    @pytest.mark.asyncio
+    async def test_str_return_has_no_metadata(self) -> None:
+        tool = _ToolOutputTool("plain")
+        executor = _make_executor(tool)
+        tc = ToolCall(name="tool_output_tool", arguments={})
+        result = await executor.execute(tc)
+        assert result.tool_metadata is None

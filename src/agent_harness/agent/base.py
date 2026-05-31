@@ -868,6 +868,7 @@ class BaseAgent(ABC, EventEmitter):
                     content=r.content,
                     attachments=r.attachments,
                     is_error=r.is_error,
+                    tool_metadata=r.tool_metadata,
                 )
             )
 

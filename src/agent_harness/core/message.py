@@ -50,10 +50,11 @@ class ToolCall(BaseModel):
 
 
 class ToolOutput(BaseModel):
-    """Rich tool return: text content plus optional media attachments."""
+    """Rich tool return: text content plus optional media attachments and metadata."""
 
     content: str
     attachments: list[Attachment] | None = None
+    tool_metadata: dict[str, Any] | None = None
 
 
 class ToolResult(BaseModel):
@@ -65,10 +66,12 @@ class ToolResult(BaseModel):
         content: The output/result from the tool execution
         is_error: Whether the tool execution resulted in an error
         attachments: Optional media attachments produced by the tool
+        tool_metadata: Optional metadata associated with the tool.
     """
     tool_call_id: str
     content: str
     attachments: list[Attachment] | None = None
+    tool_metadata: dict[str, Any] | None = None
     is_error: bool = False
 
 
@@ -127,6 +130,7 @@ class Message(BaseModel):
         content: str,
         is_error: bool = False,
         attachments: list[Attachment] | None = None,
+        tool_metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Message:
         """Create a tool result message."""
@@ -136,6 +140,7 @@ class Message(BaseModel):
                 tool_call_id=tool_call_id,
                 content=content,
                 attachments=attachments,
+                tool_metadata=tool_metadata,
                 is_error=is_error,
             ),
             content=content,

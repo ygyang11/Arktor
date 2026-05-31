@@ -13,6 +13,12 @@ from agent_app.tools.filesystem.edit_file import edit_file
 from agent_app.tools.filesystem.read_file import read_file
 from agent_harness.agent.base import BaseAgent
 from agent_harness.core.errors import ToolValidationError
+from agent_harness.core.message import ToolOutput
+
+
+def _text(result: object) -> str:
+    """Success returns ToolOutput (diff in metadata); errors return a str."""
+    return result.content if isinstance(result, ToolOutput) else str(result)
 
 
 class TestEditFile:
@@ -25,7 +31,7 @@ class TestEditFile:
             old_string="return 1",
             new_string="return 42",
         )
-        assert "1 replacement" in result
+        assert "1 replacement" in _text(result)
         assert f.read_text() == "def foo():\n    return 42\n"
 
     @pytest.mark.asyncio
@@ -38,7 +44,7 @@ class TestEditFile:
             new_string="2",
             replace_all=True,
         )
-        assert "3 replacements" in result
+        assert "3 replacements" in _text(result)
         assert f.read_text() == "x = 2\ny = 2\nz = 2\n"
 
     @pytest.mark.asyncio
@@ -96,7 +102,7 @@ class TestEditFile:
             old_string="old",
             new_string="new",
         )
-        assert "1 replacement" in result
+        assert "1 replacement" in _text(result)
         assert f.read_text() == "SECRET=new\n"
 
     @pytest.mark.asyncio
@@ -108,7 +114,7 @@ class TestEditFile:
             old_string="line2",
             new_string="replaced",
         )
-        assert "1 replacement" in result
+        assert "1 replacement" in _text(result)
         raw = f.read_bytes()
         assert b"replaced\r\n" in raw
         assert b"\r\n" in raw
@@ -122,7 +128,7 @@ class TestEditFile:
             old_string="hello",
             new_string="goodbye",
         )
-        assert "1 replacement" in result
+        assert "1 replacement" in _text(result)
         assert f.read_bytes().startswith(b"\xef\xbb\xbf")
 
     @pytest.mark.asyncio
@@ -146,7 +152,7 @@ class TestEditFile:
         assert "does not exist" in result
 
     @pytest.mark.asyncio
-    async def test_diff_output(self, tmp_path: Path) -> None:
+    async def test_diff_in_metadata_not_content(self, tmp_path: Path) -> None:
         f = tmp_path / "code.py"
         f.write_text("def foo():\n    return 1\n")
         result = await edit_file.execute(
@@ -154,8 +160,14 @@ class TestEditFile:
             old_string="return 1",
             new_string="return 42",
         )
-        assert "-    return 1" in result
-        assert "+    return 42" in result
+        assert isinstance(result, ToolOutput)
+        # LLM-facing content is the header only; the diff rides on metadata.
+        assert result.content == "Edited code.py (1 replacement)"
+        assert "\n" not in result.content
+        assert result.tool_metadata is not None
+        diff = result.tool_metadata["diff"]
+        assert "-    return 1" in diff
+        assert "+    return 42" in diff
 
 
 class TestEditFileFreshness:
@@ -169,7 +181,7 @@ class TestEditFileFreshness:
             old_string="return 1",
             new_string="return 42",
         )
-        assert "1 replacement" in result
+        assert "1 replacement" in _text(result)
 
     @pytest.mark.asyncio
     async def test_edit_fails_when_file_changed_since_read(self, tmp_path: Path) -> None:
@@ -195,7 +207,7 @@ class TestEditFileFreshness:
             old_string="return 1",
             new_string="return 42",
         )
-        assert "1 replacement" in result
+        assert "1 replacement" in _text(result)
 
     @pytest.mark.asyncio
     async def test_edit_records_new_signature_after_success(
@@ -214,7 +226,7 @@ class TestEditFileFreshness:
             old_string="return 42",
             new_string="return 99",
         )
-        assert "1 replacement" in result
+        assert "1 replacement" in _text(result)
         recorded = fs_agent.context.variables.get(_key(f))
         assert isinstance(recorded, dict)
         assert recorded["size"] == f.stat().st_size

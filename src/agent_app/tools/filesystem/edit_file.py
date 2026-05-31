@@ -18,6 +18,7 @@ from agent_app.tools.filesystem._security import (
 )
 from agent_harness.agent.base import BaseAgent
 from agent_harness.core.errors import ToolValidationError
+from agent_harness.core.message import ToolOutput
 from agent_harness.tool.base import BaseTool, ToolSchema
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ EDIT_FILE_DESCRIPTION = (
     "in old_string or new_string\n"
     "- The old_string must match exactly. If it appears more than once, "
     "include more surrounding context to make it unique, or set replace_all=True\n"
+    "- MUST use it for ALL changes to an existing file, even a COMPLETE REWRITE\n"
     "- ALWAYS prefer editing existing files over creating new ones\n"
     "- The file's original line-ending style (LF or CRLF) and BOM are preserved automatically"
 )
@@ -98,7 +100,7 @@ class EditFileTool(BaseTool):
             },
         )
 
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str | ToolOutput:
         file_path: str = kwargs.get("file_path", "")
         old_string: str = kwargs.get("old_string", "")
         new_string: str = kwargs.get("new_string", "")
@@ -183,7 +185,8 @@ class EditFileTool(BaseTool):
 
         diff = _generate_diff(work_content, new_content.replace("\r\n", "\n"), rel)
         replaced = count if replace_all else 1
-        return f"Edited {rel} ({replaced} replacement{'s' if replaced > 1 else ''})\n{diff}"
+        header = f"Edited {rel} ({replaced} replacement{'s' if replaced > 1 else ''})"
+        return ToolOutput(content=header, tool_metadata={"diff": diff})
 
 
 edit_file = EditFileTool()
