@@ -107,12 +107,12 @@ class TodoWriteTool(BaseTool):
         if not isinstance(raw_todos, list):
             raise ToolValidationError("'todos' must be a list.")
 
-        self._validate(raw_todos)
-        self._todos = [TodoItem(**item) for item in raw_todos]
+        self._todos = self._validate(raw_todos)
         return self._build_recap()
 
-    def _validate(self, todos: list[dict[str, Any]]) -> None:
+    def _validate(self, todos: list[Any]) -> list[TodoItem]:
         errors: list[str] = []
+        normalized: list[tuple[str, str, Any]] = []
 
         if len(todos) > MAX_TODOS:
             errors.append(
@@ -124,6 +124,10 @@ class TodoWriteTool(BaseTool):
         seen_ids: set[str] = set()
 
         for i, item in enumerate(todos):
+            if not isinstance(item, dict):
+                errors.append(f"Todo #{i + 1}: must be an object.")
+                continue
+
             tid = str(item.get("id", "")).strip()
             if not tid:
                 errors.append(f"Todo #{i + 1}: 'id' is required.")
@@ -150,6 +154,8 @@ class TodoWriteTool(BaseTool):
             if status == "in_progress":
                 in_progress_count += 1
 
+            normalized.append((tid, content, status))
+
         if in_progress_count > 1:
             errors.append(
                 f"At most 1 task can be in_progress, got {in_progress_count}."
@@ -159,6 +165,8 @@ class TodoWriteTool(BaseTool):
             raise ToolValidationError(
                 f"{len(errors)} validation error(s): " + ";\n".join(errors)
             )
+
+        return [TodoItem(id=t, content=c, status=s) for t, c, s in normalized]
 
     def _build_recap(self) -> str:
         s = self.stats
@@ -243,5 +251,3 @@ class TodoWriteTool(BaseTool):
 
 
 todo_write = TodoWriteTool()
-
-TODO_TOOLS: list[BaseTool] = [todo_write]

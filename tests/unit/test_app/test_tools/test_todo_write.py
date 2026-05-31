@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_app.tools.todo_write import (
+from agent_app.tools.todo_write.todo_write import (
     MAX_CONTENT_LEN,
     MAX_TODOS,
     TodoItem,
@@ -170,6 +170,38 @@ class TestTodoWriteTool:
                     {"id": "3", "content": "C", "status": "bad"},
                 ]
             )
+
+    async def test_execute_coerces_int_id(self) -> None:
+        tool = TodoWriteTool()
+        await tool.execute(
+            todos=[{"id": 1, "content": "X", "status": "pending"}]
+        )
+        assert tool.todos[0].id == "1"
+
+    async def test_execute_coerces_int_content(self) -> None:
+        tool = TodoWriteTool()
+        await tool.execute(
+            todos=[{"id": "1", "content": 123, "status": "pending"}]
+        )
+        assert tool.todos[0].content == "123"
+
+    async def test_execute_non_dict_item(self) -> None:
+        tool = TodoWriteTool()
+        with pytest.raises(ToolValidationError, match="must be an object"):
+            await tool.execute(todos=["just a string"])
+
+    async def test_execute_none_item(self) -> None:
+        tool = TodoWriteTool()
+        with pytest.raises(ToolValidationError, match="must be an object"):
+            await tool.execute(todos=[None])
+
+    async def test_execute_strips_whitespace(self) -> None:
+        tool = TodoWriteTool()
+        await tool.execute(
+            todos=[{"id": " 1 ", "content": "  hi  ", "status": "pending"}]
+        )
+        assert tool.todos[0].id == "1"
+        assert tool.todos[0].content == "hi"
 
     async def test_todos_property_returns_copy(self) -> None:
         tool = TodoWriteTool()
