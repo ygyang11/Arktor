@@ -320,9 +320,10 @@ def render_session_list(metas: list[SessionMeta]) -> RenderableType:
     truncated = len(metas) - len(visible)
 
     rows: list[RenderableType] = [info("Recent sessions"), Text("")]
+    id_w = max((len(m.session_id) for m in visible), default=0)
     for m in visible:
         line = Text("  ")
-        line.append(m.session_id, style="primary")
+        line.append(m.session_id.ljust(id_w), style="primary")
         line.append("  ")
         line.append(relative_time(m.updated_at).rjust(10), style="muted")
         line.append("  ")
