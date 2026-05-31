@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent_app.tools.sub_agent import (
-    SubAgentTool,
+from agent_app.tools.sub_agent.sub_agent import SubAgentTool
+from agent_app.tools.sub_agent.types import (
     _ALWAYS_EXCLUDE,
     _BUILTIN_TYPES,
     _SUBAGENT_INTRO,

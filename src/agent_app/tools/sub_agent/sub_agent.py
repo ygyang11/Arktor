@@ -5,6 +5,12 @@ import logging
 import time
 from typing import Any, TYPE_CHECKING
 
+from agent_app.tools.sub_agent.types import (
+    _ALWAYS_EXCLUDE,
+    _BUILTIN_TYPES,
+    _SUBAGENT_BG_CONSTRAINT,
+    _SUBAGENT_INTRO,
+)
 from agent_harness.core.errors import ToolExecutionError, ToolValidationError
 from agent_harness.session.memory_session import InMemorySession
 from agent_harness.tool.base import BaseTool, ToolSchema
@@ -14,106 +20,6 @@ if TYPE_CHECKING:
     from agent_harness.prompt.system_builder import SystemPromptBuilder
 
 logger = logging.getLogger(__name__)
-
-# ── Fallback intro (used when config custom types have no intro) ──
-
-_SUBAGENT_INTRO = """\
-You are a sub-agent assisting the primary agent with a focused task. \
-Given the task description, use your available tools to complete it fully.
-
-When you complete the task, respond with a concise report covering what \
-was done and any key findings.
-
-Rules:
-- Complete the task efficiently — don't over-engineer, but don't leave it half-done
-- Do not ask clarifying questions — interpret the request directly
-- If the first approach doesn't work, try alternative strategies — \
-exhaust reasonable options before reporting failure"""
-
-# Injected into EVERY sub-agent prompt (built-in, custom, and fallback), 
-# so the constraint can't be bypassed by a custom type that supplies its own intro.
-_SUBAGENT_BG_CONSTRAINT = (
-    "You MUST NOT run tools in background mode (background=true): the "
-    "result is GUARANTEED LOST — continuing means it never returns to "
-    "you, and ANY attempt to wait exits you immediately."
-)
-
-# ── Built-in type definitions ──
-
-_BUILTIN_TYPES: dict[str, dict[str, Any]] = {
-    "research": {
-        "tools": [
-            "read_file", "list_dir", "glob_files", "grep_files",
-            "web_fetch", "web_search",
-            "paper_search", "paper_fetch", "document_parser",
-            "memory_tool",
-        ],
-        "intro": (
-            "You are a research sub-agent specialized in exploring codebases, "
-            "searching the web, and gathering information.\n\n"
-            "=== CRITICAL: READ-ONLY MODE — NO FILE MODIFICATIONS ===\n"
-            "This is a READ-ONLY research task. You are STRICTLY PROHIBITED from:\n"
-            "- Creating, modifying, or deleting files\n"
-            "- Running commands that change system state\n"
-            "- Saving or deleting memories, but reading is ok\n"
-            "Your role is EXCLUSIVELY to search, read, and analyze.\n\n"
-            "Your strengths:\n"
-            "- Searching, reading and analyzing file contents across large codebases\n"
-            "- Web research, academic paper lookup, and document parsing\n\n"
-            "When you complete the task, respond with a structured "
-            "report of your findings. Be factual and specific — include "
-            "file paths, function names, code snippets, URLs, or references "
-            "as appropriate."
-        ),
-    },
-    "plan": {
-        "tools": [
-            "read_file", "list_dir", "glob_files", "grep_files",
-            "web_fetch", "web_search",
-            "paper_search", "paper_fetch", "document_parser",
-            "memory_tool",
-        ],
-        "intro": (
-            "You are a planning sub-agent specialized in analyzing content and "
-            "designing implementation strategies.\n\n"
-            "=== CRITICAL: READ-ONLY MODE — NO FILE MODIFICATIONS ===\n"
-            "This is a READ-ONLY planning task. You are STRICTLY PROHIBITED from:\n"
-            "- Creating, modifying, or deleting files\n"
-            "- Running commands that change system state\n"
-            "- Saving or deleting memories, but reading is ok\n"
-            "Your role is EXCLUSIVELY to explore existing content and design plans.\n\n"
-            "Your strengths:\n"
-            "- Analyzing multiple files to understand system architecture\n"
-            "- Identifying critical files, dependencies, and potential impacts\n"
-            "- Producing clear, actionable implementation plans\n\n"
-            "When you complete the task, produce a clear, actionable plan. "
-            "Include specific file paths, concrete steps, and design decisions "
-            "with rationale. The plan should be detailed enough to implement "
-            "without further clarification."
-        ),
-    },
-    "general": {
-        "tools": "__inherit__",
-        "intro": (
-            "You are an general sub-agent with full tool access. Given the "
-            "task description, use your available tools to complete it fully — "
-            "don't over-engineer, but don't leave it half-done.\n\n"
-            "Your strengths:\n"
-            "- Completing multi-step implementation tasks end-to-end\n"
-            "- Making coordinated changes across multiple files\n"
-            "- Building, testing, and verifying changes\n"
-            "- Handling any substantial, self-contained task that benefits from isolation\n\n"
-            "Guidelines:\n"
-            "- Don't add features or make improvements beyond what was asked\n"
-            "- Be careful not to introduce security vulnerabilities\n"
-            "- Stay focused on the task scope — do not expand beyond the stated objective\n\n"
-            "When you complete the task, respond with a concise report covering "
-            "what was done and any key findings."
-        ),
-    },
-}
-
-_ALWAYS_EXCLUDE = frozenset({"sub_agent", "todo_write", "skill_tool", "background_task"})
 
 # ── Tool Description Template ──
 
@@ -317,8 +223,6 @@ class SubAgentTool(BaseTool):
         )
 
     async def execute(self, **kwargs: Any) -> str:
-        from agent_harness.hooks.progress import _subagent_active
-
         if self._agent is None:
             raise ToolExecutionError(
                 "sub_agent is not bound to a parent agent. "
@@ -371,10 +275,6 @@ class SubAgentTool(BaseTool):
         child._usage_source = "background" if background else "subagent"
         # Share parent's sandbox (child reuses the same container / backend)
         child._sandbox = self._agent._sandbox
-
-        await self._agent.hooks.on_subagent_start(
-            parent_name, subagent_name, agent_type, description, prompt,
-        )
 
         sub_session = (
             InMemorySession(self._session_id) if self._session_id else None
@@ -457,6 +357,9 @@ class SubAgentTool(BaseTool):
         _tool_calls = 0
         token = _subagent_active.set(True)
         try:
+            await self._agent.hooks.on_subagent_start(
+                parent_name, subagent_name, agent_type, description, prompt,
+            )
             result = await child.run(prompt, session=sub_session)
             _steps = result.step_count
             tool_usage = self._extract_tool_usage(result)
@@ -504,20 +407,7 @@ class SubAgentTool(BaseTool):
             allowed = set(tool_names) - _ALWAYS_EXCLUDE
             filtered = [t for t in parent_tools if t.name in allowed]
 
-        return self._isolate_agent_aware(filtered)
-
-    @staticmethod
-    def _isolate_agent_aware(tools: list[BaseTool]) -> list[BaseTool]:
-        """Create fresh instances for AgentAware tools to prevent rebind."""
-        from agent_harness.tool.base import AgentAware
-
-        result: list[BaseTool] = []
-        for t in tools:
-            if isinstance(t, AgentAware):
-                result.append(t.__class__())
-            else:
-                result.append(t)
-        return result
+        return filtered
 
     def _build_subagent_prompt_builder(self, agent_type: str) -> SystemPromptBuilder:
         from agent_harness.prompt.sections import make_intro_section
@@ -563,5 +453,3 @@ class SubAgentTool(BaseTool):
 
 
 sub_agent = SubAgentTool()
-
-SUB_AGENT_TOOLS: list[BaseTool] = [sub_agent]
