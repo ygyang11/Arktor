@@ -266,6 +266,16 @@ class TestDirGrantSemantics:
         assert p.check(tc, resource="/foo.txt", kind="path") == EXECUTE
         assert p.check(tc, resource="/bar.txt", kind="path") == ASK
 
+    def test_workspace_root_grant_covers_relative_subpaths(self) -> None:
+        p = ApprovalPolicy(mode="auto")
+        p.grant_session("list_dir", resource=".", kind="path")
+        tc = ToolCall(name="list_dir", arguments={})
+        assert p.check(tc, resource=".", kind="path") == EXECUTE
+        assert p.check(tc, resource="src", kind="path") == EXECUTE
+        assert p.check(tc, resource="tests/x.py", kind="path") == EXECUTE
+        # external (absolute) paths are not covered by a workspace-root grant
+        assert p.check(tc, resource="/etc/passwd", kind="path") == ASK
+
 
 # ── session grant: url ───────────────────────────────────────────────────────
 

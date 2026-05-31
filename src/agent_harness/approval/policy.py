@@ -239,6 +239,8 @@ class ApprovalPolicy:
                 normed = os.path.normpath(resource)
                 if normed == prefix or normed.startswith(prefix + os.sep):
                     return True
+                if prefix == "." and not os.path.isabs(normed):
+                    return True
             elif kind == "url":
                 try:
                     if (urlparse(resource).hostname or "") == prefix:
