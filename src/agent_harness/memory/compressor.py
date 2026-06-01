@@ -148,7 +148,7 @@ class ContextCompressor:
         model: str,
         session_id: str | None = None,
         scope: str = "main",
-        prune_per_output_threshold: int = 10_000,
+        prune_per_output_threshold: int = 15_000,
         prune_tail_turns: int = 3,
     ) -> None:
         self._llm = llm

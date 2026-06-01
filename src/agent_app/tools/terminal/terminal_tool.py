@@ -18,7 +18,7 @@ from agent_harness.core.errors import ToolExecutionError, ToolValidationError
 from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.utils.token_counter import truncate_text_by_tokens
 
-_MAX_OUTPUT_TOKENS: int = 15_000
+_MAX_OUTPUT_TOKENS: int = 20_000
 _DEFAULT_TIMEOUT: int = 120  # seconds
 _MAX_TIMEOUT: int = 600  # seconds (10 minutes)
 _MAX_BG_TIMEOUT: int = 86400  # seconds (24 hours) — background tasks can run much longer
