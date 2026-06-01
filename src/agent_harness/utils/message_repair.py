@@ -7,7 +7,7 @@ from agent_harness.core.message import Message, Role
 
 logger = logging.getLogger(__name__)
 
-_DANGLING_CONTENT = "[Tool result missing due to internal error]"
+_DANGLING_CONTENT = "[Tool result missing due to an internal error or interruption]"
 
 _STRIPPED_NOTE = (
     "<system-reminder>\n"
