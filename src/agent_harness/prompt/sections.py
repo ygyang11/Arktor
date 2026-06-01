@@ -349,7 +349,7 @@ tasks started via `background=true` on other tools.
 
 ### Lifecycle
 1. A background task is started — a task ID is returned immediately.
-2. Running tasks are shown in your context under `# Background Tasks`.
+2. The task runs concurrently in the background while you keep working.
 3. You can use `background_task` to list all submitted tasks, check status of a specific task, \
 or cancel a running task. But when a task completes, results are automatically \
 delivered — NO NEED to poll or check proactively. Unless:

@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Any
 
 from agent_harness.core.errors import ToolValidationError
-from agent_harness.core.message import Message
 from agent_harness.tool.base import BaseTool, ToolSchema
 
 BACKGROUND_TASK_TOOL_DESCRIPTION = """\
@@ -32,7 +31,6 @@ class BackgroundTaskTool(BaseTool):
             description=BACKGROUND_TASK_TOOL_DESCRIPTION,
         )
         self._agent: Any = None
-        self.context_order = 150
 
     def bind_agent(self, agent: Any) -> None:
         self._agent = agent
@@ -118,14 +116,6 @@ class BackgroundTaskTool(BaseTool):
         if task.status == "running":
             return f"Error: task {task_id} could not be cancelled (internal error)."
         return f"Error: task {task_id} is already {task.status}, cannot cancel."
-
-    def build_context_message(self) -> Message | None:
-        if self._agent is None:
-            return None
-        summary = self._agent._bg_manager.get_running_summary()
-        if summary:
-            return Message.system(f"# Background Tasks\n\n{summary}")
-        return None
 
 
 background_task = BackgroundTaskTool()

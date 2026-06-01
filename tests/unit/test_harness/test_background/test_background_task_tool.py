@@ -143,23 +143,3 @@ class TestUnknown:
     async def test_unknown_action(self, tool: BackgroundTaskTool) -> None:
         with pytest.raises(ToolValidationError, match="Unknown action"):
             await tool.execute(action="explode")
-
-
-# -- context --
-
-
-class TestContext:
-    async def test_with_running(self, tool_with_tasks: BackgroundTaskTool) -> None:
-        msg = tool_with_tasks.build_context_message()
-        assert msg is not None
-        assert msg.role.value == "system"
-        assert "Background Tasks" in (msg.content or "")
-        assert "bg_001" in (msg.content or "")
-
-    async def test_none_when_idle(self, tool: BackgroundTaskTool) -> None:
-        msg = tool.build_context_message()
-        assert msg is None
-
-    def test_no_agent(self) -> None:
-        t = BackgroundTaskTool()
-        assert t.build_context_message() is None

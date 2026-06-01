@@ -192,20 +192,6 @@ class BackgroundTaskManager:
         if tasks_to_wait:
             await asyncio.gather(*tasks_to_wait, return_exceptions=True)
 
-    def get_running_summary(self) -> str | None:
-        """Build brief status summary for LLM context (running tasks only)."""
-        running = [t for t in self._tasks.values() if t.status == "running"]
-        if not running:
-            return None
-        lines = [f"{len(running)} background task(s) running:"]
-        for t in running:
-            elapsed = (datetime.now() - t.created_at).total_seconds()
-            lines.append(f"- {t.task_id} ({t.tool_name}): {t.description} [{elapsed:.0f}s]")
-        lines.append(
-            "\nOnly running tasks shown above. Use background_task(action='list') to see all previously submitted tasks and their status."
-        )
-        return "\n".join(lines)
-
     def _write_output(self, task: BackgroundTask, output: str) -> str:
         # Use the output dir captured at spawn time, not the manager's
         # current one: a task belongs to the session it was spawned under,

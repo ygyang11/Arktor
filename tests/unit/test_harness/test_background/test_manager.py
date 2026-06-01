@@ -353,26 +353,6 @@ class TestTaskIdCounter:
         assert m._next_task_id() == "bg_0013"
 
 
-# -- Summary --
-
-
-class TestSummary:
-    async def test_with_tasks(self, manager: BackgroundTaskManager) -> None:
-        manager.spawn("terminal", "pytest", _slow())
-        summary = manager.get_running_summary()
-        assert summary is not None
-        assert "1 background task" in summary
-        assert "pytest" in summary
-
-    async def test_none_when_empty(self, manager: BackgroundTaskManager) -> None:
-        assert manager.get_running_summary() is None
-
-    async def test_excludes_completed(self, manager: BackgroundTaskManager) -> None:
-        manager.spawn("terminal", "done", _immediate())
-        await asyncio.sleep(0.05)
-        assert manager.get_running_summary() is None
-
-
 # -- Get --
 
 
