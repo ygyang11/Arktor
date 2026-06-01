@@ -139,4 +139,4 @@ class TestReadFile:
         await read_file.execute(file_path=str(f))
         recorded = fs_agent.context.variables.get(_key(f))
         assert isinstance(recorded, dict)
-        assert recorded["size"] == f.stat().st_size
+        assert recorded["read"]["size"] == f.stat().st_size

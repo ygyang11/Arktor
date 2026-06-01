@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from agent_app.observability.file_freshness import record_signature
+from agent_app.observability.file_freshness import mark_read
 from agent_app.tools.filesystem._security import (
     normalize_path,
     relative_to_workspace,
@@ -87,7 +87,7 @@ class WriteFileTool(BaseTool):
             return f"Error: {exc}"
 
         if self._agent is not None:
-            record_signature(self._agent, resolved)
+            mark_read(self._agent, resolved)
 
         line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
         return f"Created {rel} ({line_count} lines)"

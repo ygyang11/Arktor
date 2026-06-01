@@ -4,16 +4,22 @@ from agent_app.observability.file_freshness import (
     Drift,
     FileSignature,
     Verdict,
-    check_freshness,
-    poll_dirty,
-    record_signature,
+    mark_read,
+    mark_seen,
+    poll_drift,
+    restore_state,
+    snapshot_state,
+    stale_guard,
 )
 
 __all__ = [
     "Drift",
     "FileSignature",
     "Verdict",
-    "check_freshness",
-    "poll_dirty",
-    "record_signature",
+    "mark_read",
+    "mark_seen",
+    "poll_drift",
+    "restore_state",
+    "snapshot_state",
+    "stale_guard",
 ]

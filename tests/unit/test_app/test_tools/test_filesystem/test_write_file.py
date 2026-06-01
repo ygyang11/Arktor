@@ -67,4 +67,4 @@ class TestWriteFile:
         await write_file.execute(file_path=str(target), content="created\n")
         recorded = fs_agent.context.variables.get(_key(target))
         assert isinstance(recorded, dict)
-        assert recorded["size"] == target.stat().st_size
+        assert recorded["read"]["size"] == target.stat().st_size

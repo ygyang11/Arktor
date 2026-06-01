@@ -8,8 +8,8 @@ from typing import Any
 
 from agent_app.observability.file_freshness import (
     Verdict,
-    check_freshness,
-    record_signature,
+    mark_read,
+    stale_guard,
 )
 from agent_app.tools.filesystem._security import (
     detect_text_file,
@@ -124,7 +124,7 @@ class EditFileTool(BaseTool):
             return f"Error: {exc}"
 
         agent = self._agent
-        if agent is not None and check_freshness(agent, resolved) is Verdict.STALE:
+        if agent is not None and stale_guard(agent, resolved) is Verdict.STALE:
             if not resolved.exists():
                 return f"Error: {file_path} was deleted since you last accessed it."
             return (
@@ -181,7 +181,7 @@ class EditFileTool(BaseTool):
             return f"Error: {exc}"
 
         if agent is not None:
-            record_signature(agent, resolved)
+            mark_read(agent, resolved)
 
         diff = _generate_diff(work_content, new_content.replace("\r\n", "\n"), rel)
         replaced = count if replace_all else 1

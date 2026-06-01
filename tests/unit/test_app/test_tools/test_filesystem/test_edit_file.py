@@ -229,7 +229,7 @@ class TestEditFileFreshness:
         assert "1 replacement" in _text(result)
         recorded = fs_agent.context.variables.get(_key(f))
         assert isinstance(recorded, dict)
-        assert recorded["size"] == f.stat().st_size
+        assert recorded["read"]["size"] == f.stat().st_size
 
     @pytest.mark.asyncio
     async def test_edit_reports_deleted_when_file_unlinked_after_read(

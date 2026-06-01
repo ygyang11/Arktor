@@ -6,7 +6,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from agent_app.observability.file_freshness import record_signature
+from agent_app.observability.file_freshness import mark_read
 from agent_app.tools.filesystem._security import (
     normalize_path,
     relative_to_workspace,
@@ -181,7 +181,7 @@ class ReadFileTool(BaseTool):
                 return f"Error: {kind} too large to attach ({human_size(size)})"
             att = make_attachment(resolved.read_bytes(), mime, resolved.name)
             if self._agent is not None:
-                record_signature(self._agent, resolved)
+                mark_read(self._agent, resolved)
             return ToolOutput(
                 content=(
                     f"Read {kind} from {file_path}; the {kind} is provided "
@@ -198,7 +198,7 @@ class ReadFileTool(BaseTool):
             return f"Error: {exc}"
 
         if self._agent is not None:
-            record_signature(self._agent, resolved)
+            mark_read(self._agent, resolved)
         return content
 
 
