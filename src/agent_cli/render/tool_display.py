@@ -19,7 +19,6 @@ from agent_cli.theme import (
     LEFT_BAR,
     SEP_DOT,
     SEP_ELLIPSIS,
-    SPINNER_STATIC,
     TASKS_HEADER,
     TODO_IN_PROGRESS,
     TODO_PENDING,
@@ -265,7 +264,7 @@ class ToolDisplay:
 
 def _format_call_line(row: _ToolRow) -> RenderableType:
     if row.status == "running":
-        glyph, style = SPINNER_STATIC, "accent"
+        glyph, style = TOOL_DONE, "muted"
     elif row.status == "done":
         glyph, style = TOOL_DONE, "success"
     elif row.status == "error":

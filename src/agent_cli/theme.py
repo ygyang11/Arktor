@@ -249,7 +249,6 @@ TOOL_DONE = "●"
 TODO_IN_PROGRESS = "●"
 TODO_PENDING = "○"
 TASKS_HEADER = "▶"
-SPINNER_STATIC = "⟳"
 SPINNER_FRAMES: tuple[str, ...] = (
     "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
 )

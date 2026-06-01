@@ -9,7 +9,7 @@ from agent_cli.render.tool_display import (
     _format_result_line,
     _ToolRow,
 )
-from agent_cli.theme import SPINNER_STATIC
+from agent_cli.theme import TOOL_DONE
 
 
 def _mock_live_display() -> ToolDisplay:
@@ -238,10 +238,11 @@ def test_end_closes_live_prints_call_and_summary_and_diff_expander() -> None:
     assert d._live is None
 
 
-def test_format_call_line_running_uses_static_glyph() -> None:
+def test_format_call_line_running_uses_muted_dot() -> None:
     row = _ToolRow(id="t1", name="x", args_preview="", status="running")
     result = _format_call_line(row)
-    assert SPINNER_STATIC in result.plain
+    assert TOOL_DONE in result.plain
+    assert any(span.style == "muted" for span in result.spans)
 
 
 def test_pause_closes_live_but_keeps_rows() -> None:
