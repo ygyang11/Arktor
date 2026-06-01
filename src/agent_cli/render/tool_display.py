@@ -155,6 +155,7 @@ class ToolDisplay:
         self._console = console
         self._live: Live | None = None
         self._rows: list[_ToolRow] = []
+        self._suspended: bool = False
 
     def _open_live(self) -> None:
         if self._live is not None:
@@ -171,6 +172,8 @@ class ToolDisplay:
         self._live.refresh()
 
     def _refresh(self) -> None:
+        if self._suspended:
+            return
         if self._live is None:
             self._open_live()
         else:
@@ -217,8 +220,20 @@ class ToolDisplay:
     def pause(self) -> None:
         self._close_live()
 
+    def suspend(self) -> None:
+        """Vacate the live region for a side channel (subagent line / inline
+        print) WITHOUT committing rows. Rows stay pending and keep updating
+        their status silently; end() flushes them — resolved — at end_step.
+
+        Tradeoff: a sibling row still running when suspended shows no live
+        spinner until end_step (rare: a normal tool co-batched with a sub_agent).
+        """
+        self._close_live()
+        self._suspended = True
+
     def end(self) -> None:
         self._close_live()
+        self._suspended = False
         if not self._rows:
             return
         for i, row in enumerate(self._rows):

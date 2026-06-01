@@ -83,13 +83,13 @@ class CliAdapter:
             self.tool_display.end()
         self._phase = "none"
 
-    async def _finalize_to_none(self) -> None:
+    async def _suppressed_handoff(self) -> None:
         await self._thinking_line.stop()
         if self._phase == "markdown":
             self.markdown.finalize()
-        elif self._phase == "tools":
-            self.tool_display.end()
-        self._phase = "none"
+            self._phase = "none"
+        # _phase == "tools": leave in-flight rows live; end_step flushes them,
+        # or a side-channel print suspends the display first.
 
     async def on_llm_call(self) -> None:
         await self._thinking_line.start()
@@ -108,7 +108,7 @@ class CliAdapter:
 
     async def on_tool_call(self, tool_call: ToolCall) -> None:
         if tool_call.name in SUPPRESSED_IN_ROW:
-            await self._finalize_to_none()
+            await self._suppressed_handoff()
             return
         await self._enter_tools()
         self.tool_display.add_call(tool_call)
@@ -165,6 +165,15 @@ class CliAdapter:
             # Prevent collision with an active live line mid-tick
             self._thinking_line.clear_no_lock()
             self._subagent_line.clear_no_lock()
+            # Vacate whichever Rich Live owns the screen so this direct print
+            # can't collide with it.
+            if self._phase == "markdown":
+                # Commit the streamed text first; this notice prints below it.
+                self.markdown.finalize()
+                self._phase = "none"
+            elif self._phase == "tools":
+                # Tool rows stay pending and flush (resolved) at end_step.
+                self.tool_display.suspend()
             self.console.print(renderable)
             self.console.print()
 

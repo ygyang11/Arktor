@@ -55,7 +55,10 @@ async def test_on_tool_call_suppressed_finalizes_markdown_not_aborts() -> None:
     assert a._phase == "none"
 
 
-async def test_on_tool_call_suppressed_in_tools_phase_ends_tool_display() -> None:
+async def test_on_tool_call_suppressed_in_tools_phase_keeps_tool_display() -> None:
+    # A suppressed tool batched after a normal one must NOT tear down the still
+    # in-flight tool rows (that froze them as running ⟳); they stay live and
+    # flush — resolved — at end_step.
     a = _adapter()
     tc1 = MagicMock(id="t1")
     tc1.name = "read_file"
@@ -64,10 +67,39 @@ async def test_on_tool_call_suppressed_in_tools_phase_ends_tool_display() -> Non
     tc2 = MagicMock(id="t2")
     tc2.name = "sub_agent"
     await a.on_tool_call(tc2)
-    a.tool_display.end.assert_called_once()
+    a.tool_display.end.assert_not_called()
     a.markdown.finalize.assert_not_called()
     a.markdown.abort.assert_not_called()
+    assert a._phase == "tools"
+
+
+async def test_print_inline_suspends_tool_display_in_tools_phase() -> None:
+    a = _adapter()
+    tc = MagicMock(id="t1")
+    tc.name = "read_file"
+    await a.on_tool_call(tc)
+    assert a._phase == "tools"
+    await a.print_inline("hi")
+    a.tool_display.suspend.assert_called_once()
+    a.markdown.finalize.assert_not_called()
+
+
+async def test_print_inline_finalizes_markdown_in_markdown_phase() -> None:
+    a = _adapter()
+    await a.on_stream_delta("partial answer")
+    assert a._phase == "markdown"
+    await a.print_inline("notice")
+    a.markdown.finalize.assert_called_once()
+    a.tool_display.suspend.assert_not_called()
     assert a._phase == "none"
+
+
+async def test_print_inline_no_vacate_outside_live_phases() -> None:
+    a = _adapter()
+    assert a._phase == "none"
+    await a.print_inline("hi")
+    a.tool_display.suspend.assert_not_called()
+    a.markdown.finalize.assert_not_called()
 
 
 async def test_on_tool_call_suppressed_in_none_phase_is_noop() -> None:

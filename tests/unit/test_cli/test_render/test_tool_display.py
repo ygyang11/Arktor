@@ -254,6 +254,42 @@ def test_pause_closes_live_but_keeps_rows() -> None:
     assert len(d._rows) == 1
 
 
+def test_suspend_closes_live_keeps_rows_and_sets_flag() -> None:
+    d = _mock_live_display()
+    tc = MagicMock(id="t1", arguments={})
+    tc.name = "x"
+    d.add_call(tc)
+    d.suspend()
+    assert d._live is None
+    assert d._suspended is True
+    assert len(d._rows) == 1
+
+
+def test_mark_result_while_suspended_records_status_without_reopen() -> None:
+    d = _mock_live_display()
+    tc = MagicMock(id="t1", arguments={})
+    tc.name = "x"
+    d.add_call(tc)
+    d.suspend()
+    d._open_live.reset_mock()
+    d.mark_result(_read_result("done"))
+    assert d._rows[0].status == "done"  # status recorded off-screen
+    d._open_live.assert_not_called()    # but the Live is not reopened
+    assert d._live is None
+
+
+def test_end_after_suspend_clears_flag_and_rows() -> None:
+    d = _mock_live_display()
+    tc = MagicMock(id="t1", arguments={})
+    tc.name = "x"
+    d.add_call(tc)
+    d.suspend()
+    d.mark_result(_read_result("done"))
+    d.end()
+    assert d._suspended is False
+    assert d._rows == []
+
+
 def test_mark_result_without_matching_row_skips_refresh() -> None:
     # Regression: suppressed tools (sub_agent/todo_write) skip add_call but
     # mark_result used to refresh anyway, opening an empty Live that collided
