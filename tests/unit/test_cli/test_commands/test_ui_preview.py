@@ -54,6 +54,14 @@ def test_preview_empty_string_returns_empty() -> None:
     assert _format_session_preview("") == ""
 
 
+def test_preview_strips_drift_reminder() -> None:
+    drift = (
+        "<system-reminder>\nNote: the following files changed on disk since "
+        "you last read them — ...\n\n- x.py (modified)\n</system-reminder>"
+    )
+    assert _format_session_preview(f"fix the bug\n\n{drift}") == "fix the bug"
+
+
 # ── envelope unwrapping via peel_user_command ────────────────────────
 
 

@@ -9,6 +9,8 @@ from agent_cli.render.notices import (
     format_shell_run,
     format_warning,
     parse_shell_run_envelope,
+    peel_drift_reminder,
+    peel_reminders,
 )
 from agent_cli.theme import TOOL_DONE
 from agent_harness.utils.token_counter import count_tokens
@@ -17,6 +19,19 @@ from agent_harness.utils.token_counter import count_tokens
 def _spans_with_style(t: Text, style: str) -> list[str]:
     plain = t.plain
     return [plain[s.start : s.end] for s in t.spans if s.style == style]
+
+
+def test_peel_drift_reminder_strips_trailing_block() -> None:
+    notice = (
+        "<system-reminder>\nNote: the following files changed on disk since "
+        "you last read them — ...\n\n- src/x.py (modified)\n</system-reminder>"
+    )
+    content = f"fix the parser\n\n{notice}"
+    assert peel_drift_reminder(content) == "fix the parser"
+
+
+def test_peel_drift_reminder_noop_without_block() -> None:
+    assert peel_drift_reminder("just a plain message") == "just a plain message"
 
 
 def test_format_warning_basic() -> None:
@@ -266,6 +281,16 @@ def test_peel_strips_consecutive_attachment_pairs() -> None:
     b = _att("list_dir", {"path": "src"}, "bbb")
     content = _embed(a, b, trailing="@a.py @src hi")
     assert peel_attachment_reminders(content) == "@a.py @src hi"
+
+
+def test_peel_reminders_strips_attachment_and_drift() -> None:
+    a = _att("read_file", {"file_path": "a.py"}, "x")
+    drift = (
+        "<system-reminder>\nNote: the following files changed on disk since "
+        "you last read them — ...\n\n- x.py (modified)\n</system-reminder>"
+    )
+    content = _embed(a, trailing=f"fix the bug\n\n{drift}")
+    assert peel_reminders(content) == "fix the bug"
 
 
 def test_peel_last_pair_followed_by_user_text() -> None:

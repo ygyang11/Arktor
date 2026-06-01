@@ -136,6 +136,16 @@ def test_export_user_block_strips_attachment_reminders() -> None:
     assert out.endswith("@a.py explain\n")
 
 
+def test_export_user_block_strips_drift_reminder() -> None:
+    drift = (
+        "<system-reminder>\nNote: the following files changed on disk since "
+        "you last read them — ...\n\n- x.py (modified)\n</system-reminder>"
+    )
+    out = _format_message(Message.user(f"fix the bug\n\n{drift}"))
+    assert "fix the bug" in out
+    assert "changed on disk" not in out
+
+
 def test_export_user_block_canonicalizes_shell_run_envelope() -> None:
     from agent_cli.render.notices import format_shell_run
 

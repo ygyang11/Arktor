@@ -20,7 +20,7 @@ from agent_cli.commands.ui import ok
 from agent_cli.render.markdown_stream import render_markdown_block
 from agent_cli.render.notices import (
     parse_shell_run_envelope,
-    peel_attachment_reminders,
+    peel_reminders,
 )
 from agent_cli.render.tool_display import (
     _is_error_result,
@@ -358,10 +358,9 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
     in_bg_block = False
     while i < len(messages):
         m = messages[i]
-        step = 1
         if m.role == Role.USER and (m.content or (m.metadata or {}).get("attachments")):
             in_bg_block = False
-            _render_user(console, peel_attachment_reminders(m.content or ""))
+            _render_user(console, peel_reminders(m.content or ""))
             attachments = (m.metadata or {}).get("attachments")
             if attachments:
                 _render_attachment_indicator(console, attachments)
@@ -372,7 +371,7 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
             if not in_bg_block:
                 _render_background_notice(console)
                 in_bg_block = True
-        i += step
+        i += 1
 
 
 def render_session_replay(

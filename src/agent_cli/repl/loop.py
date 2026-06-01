@@ -162,7 +162,6 @@ async def run_repl(
     pt_session.completer = build_input_completer(registry)
     pt_session.key_bindings = build_keybindings(paste_store=paste_store, agent=agent)
     save = make_save_session(agent, session_backend)
-    file_observer.enable(agent)
 
     state = _LoopState()
 
@@ -418,15 +417,14 @@ async def _run(
     media_rolled_back = False
     adapter.begin_run()
 
-    cb = None
-    if isinstance(text, str):
-
-        async def cb(a: BaseAgent, msg: Message, t: str) -> None:
-            if msg.role != Role.USER:
-                return
+    async def cb(a: BaseAgent, msg: Message, t: str) -> None:
+        if msg.role != Role.USER:
+            return
+        if isinstance(text, str):
             await expand_mentions(a, adapter, t)
             if pending_atts:
                 msg.attachments = list(msg.attachments or []) + pending_atts
+        file_observer.annotate_drift(a, msg)
 
     turn_ctx = take_snapshot(agent)
     cli_hooks.begin_turn(turn_ctx)

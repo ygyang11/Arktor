@@ -22,12 +22,10 @@ def _format_message(m: Message) -> str:
     header = _ROLE_HEADERS.get(m.role, f"## {m.role.value}")
     parts: list[str] = []
     if m.role == Role.USER:
-        from agent_cli.render.notices import (  # noqa: PLC0415
-            peel_attachment_reminders,
-        )
+        from agent_cli.render.notices import peel_reminders  # noqa: PLC0415
         from agent_cli.render.replay import peel_user_command  # noqa: PLC0415
 
-        peeled = peel_attachment_reminders(m.content or "")
+        peeled = peel_reminders(m.content or "")
         body_content = peel_user_command(peeled) or peeled
     else:
         body_content = m.content or ""

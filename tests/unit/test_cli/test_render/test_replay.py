@@ -81,6 +81,17 @@ def test_slice_last_turns_no_user_returns_all_non_system() -> None:
     assert slice_last_turns(msgs, 3) == msgs
 
 
+def test_replay_peels_merged_drift_reminder() -> None:
+    from agent_cli.runtime.file_observer import _format_notice
+    from agent_app.observability.file_freshness import Drift, FileSignature
+
+    notice = _format_notice([Drift(path="src/x.py", recorded=None, current=FileSignature(1, 2))])
+    out = _render(_u(f"fix the bug\n\n{notice}"), _a("done"))
+    assert "fix the bug" in out
+    assert "changed on disk" not in out
+    assert "src/x.py" not in out
+
+
 # ── _index_results ───────────────────────────────────────────────────
 
 

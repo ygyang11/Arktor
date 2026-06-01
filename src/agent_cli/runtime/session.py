@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from agent_app.observability import file_freshness
 from agent_cli.runtime import background, plan_mode
 from agent_harness.agent.base import BaseAgent
 from agent_harness.approval.policy import ApprovalPolicy
@@ -184,8 +185,6 @@ async def switch_session(
     backend.set_session_id(new_id)
     if await restore_session(agent, backend) is None:
         await agent.reset_session_state(new_id)
-    from agent_cli.runtime import file_observer
-    file_observer.enable(agent)
 
 
 async def rename_session(
@@ -205,6 +204,7 @@ class _TurnContext:
     snapshot_compressor_state: tuple[int, list[str]] | None
     snapshot_ids: frozenset[int]
     main_system_id: int | None
+    fs_state: dict[str, Any]
     committed: bool = False
 
 
@@ -231,6 +231,7 @@ def take_snapshot(agent: BaseAgent) -> _TurnContext:
         snapshot_compressor_state=compressor_state,
         snapshot_ids=frozenset(id(m) for m in originals),
         main_system_id=main_system_id,
+        fs_state=file_freshness.snapshot_state(agent),
     )
 
 
@@ -259,6 +260,7 @@ async def rollback(
         and m.metadata.get("is_background_result")
     ]
     set_messages(agent, list(ctx.snapshot_messages) + bg_added)
+    file_freshness.restore_state(agent, ctx.fs_state)
 
     compressor = agent.context.short_term_memory.compressor
     if ctx.snapshot_compressor_state is not None and compressor is not None:

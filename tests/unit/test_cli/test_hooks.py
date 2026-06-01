@@ -441,6 +441,7 @@ def _empty_turn() -> _TurnContext:
         snapshot_compressor_state=None,
         snapshot_ids=frozenset({id(a)}),
         main_system_id=id(a),
+        fs_state={},
     )
 
 

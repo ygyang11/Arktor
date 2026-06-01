@@ -148,6 +148,7 @@ def _ctx_for(snapshot: list[Message], main_idx: int | None = 0) -> _TurnContext:
         snapshot_compressor_state=None,
         snapshot_ids=frozenset(id(m) for m in snapshot),
         main_system_id=id(snapshot[main_idx]) if main_idx is not None and snapshot else None,
+        fs_state={},
     )
 
 
@@ -276,6 +277,26 @@ async def test_rollback_preserves_bg_results_added_during_turn() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rollback_restores_file_freshness(tmp_path: Any) -> None:
+    from agent_app.observability import file_freshness as ff
+    from agent_harness.context.variables import ContextVariables
+
+    agent = _agent([Message.system(SYS_PROMPT), Message.user("u1")])
+    agent.context.variables = ContextVariables()
+    f = tmp_path / "x.txt"
+    f.write_text("hello")
+    ff.mark_read(agent, f)
+    ctx = take_snapshot(agent)
+
+    f.write_text("changed")
+    ff.mark_seen(agent, f)
+    assert ff.poll_drift(agent) == []
+
+    await rollback(agent, ctx, AsyncMock())
+    assert len(ff.poll_drift(agent)) == 1
+
+
+@pytest.mark.asyncio
 async def test_rollback_restores_compressor_state() -> None:
     comp = _compressor(count=5, archives=["x.md", "y.md", "z.md"])
     a = Message.system(SYS_PROMPT)
@@ -286,6 +307,7 @@ async def test_rollback_restores_compressor_state() -> None:
         snapshot_compressor_state=(2, ["x.md"]),
         snapshot_ids=frozenset({id(a)}),
         main_system_id=id(a),
+        fs_state={},
     )
     save = AsyncMock()
 

@@ -30,6 +30,12 @@ _REMINDER_PAIR_RE = re.compile(
     re.DOTALL,
 )
 
+_DRIFT_REMINDER_RE = re.compile(
+    r"\n*<system-reminder>\nNote: the following files changed on disk\b"
+    r".*?</system-reminder>\s*\Z",
+    re.DOTALL,
+)
+
 
 def _escape_envelope(s: str) -> str:
     return s.replace(_SHELL_RUN_CLOSE_TAG, _SHELL_RUN_CLOSE_TAG_ESCAPED)
@@ -107,3 +113,13 @@ def peel_attachment_reminders(content: str) -> str:
     while (m := _REMINDER_PAIR_RE.match(s)) is not None:
         s = s[m.end():].lstrip("\n")
     return s
+
+
+def peel_drift_reminder(content: str) -> str:
+    """Strip a trailing file-drift reminder merged into a user message."""
+    return _DRIFT_REMINDER_RE.sub("", content).rstrip("\n")
+
+
+def peel_reminders(content: str) -> str:
+    """Strip all harness-injected reminders from a persisted user message."""
+    return peel_drift_reminder(peel_attachment_reminders(content))
