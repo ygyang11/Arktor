@@ -5,7 +5,7 @@ import pytest
 
 from agent_cli.commands.builtin.clear import CMD
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 async def test_clear_resets_all_runtime_state() -> None:

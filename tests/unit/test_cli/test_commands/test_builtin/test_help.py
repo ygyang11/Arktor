@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 from agent_cli.commands.builtin.help import CMD
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 async def test_help_lists_registered_completions() -> None:

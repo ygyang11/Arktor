@@ -9,7 +9,7 @@ from rich.console import Console
 from agent_cli.commands.builtin.compact import CMD
 from agent_cli.theme import DEFAULT_THEME
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 def _stub_adapter() -> MagicMock:

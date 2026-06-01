@@ -4,7 +4,7 @@ from agent_app.tools.skill.skill_tool import SkillTool
 from agent_cli.commands.builtin.reload_skill import CMD
 from agent_cli.commands.registry import CommandRegistry
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 def _ctx(*, has_skill: bool, tool: SkillTool | None = None) -> MagicMock:

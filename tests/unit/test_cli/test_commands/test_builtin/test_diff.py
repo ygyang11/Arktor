@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 from agent_cli.commands.builtin import diff as diff_mod
 from agent_cli.commands.builtin.diff import CMD
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 def _ctx() -> MagicMock:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from agent_cli.commands.ui import _format_session_preview
-from agent_cli.render.notices import format_shell_run
+from agent_cli.runtime.shell import format_shell_run
 
 
 def test_preview_plain_text_returns_collapsed() -> None:

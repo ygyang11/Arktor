@@ -18,10 +18,7 @@ from agent_cli.commands.builtin.init import _INIT_NEW, _INIT_UPDATE
 from agent_cli.commands.builtin.review import _DEFAULT_REVIEW_TARGET, _REVIEW_PROMPT
 from agent_cli.commands.ui import ok
 from agent_cli.render.markdown_stream import render_markdown_block
-from agent_cli.render.notices import (
-    parse_shell_run_envelope,
-    peel_reminders,
-)
+from agent_cli.render.notices import peel_reminders
 from agent_cli.render.tool_display import (
     _is_error_result,
     _todo_stats,
@@ -31,6 +28,7 @@ from agent_cli.render.tool_display import (
     print_todos_panel,
 )
 from agent_cli.runtime.session import get_messages
+from agent_cli.runtime.shell import parse_shell_run_envelope
 from agent_cli.theme import COMPRESSION, PROMPT, SUBAGENT, SUBAGENT_DONE, CliTheme
 from agent_harness.agent.base import BaseAgent
 from agent_harness.core.message import Message, Role, ToolCall, ToolResult

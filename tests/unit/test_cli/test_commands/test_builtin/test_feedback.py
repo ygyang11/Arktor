@@ -8,7 +8,7 @@ import pytest
 from agent_cli.commands.builtin import feedback as feedback_mod
 from agent_cli.commands.builtin.feedback import CMD
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 def _ctx() -> MagicMock:

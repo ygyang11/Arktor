@@ -6,7 +6,7 @@ import pytest
 from agent_cli import theme as theme_module
 from agent_cli.commands.builtin.theme import CMD
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 @pytest.fixture(autouse=True)

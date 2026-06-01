@@ -7,7 +7,7 @@ from agent_cli import hooks
 from agent_cli.commands.builtin.debug import CMD
 from agent_harness.utils.logging_config import setup_logging
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 @pytest.fixture(autouse=True)

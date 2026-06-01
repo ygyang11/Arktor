@@ -6,7 +6,7 @@ import asyncio
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any
 
-from agent_cli.render.notices import format_shell_run
+from agent_cli.runtime.shell import format_shell_run
 from agent_harness.agent.base import BaseAgent
 from agent_harness.core.message import Message
 

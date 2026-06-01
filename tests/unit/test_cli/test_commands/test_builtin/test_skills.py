@@ -4,7 +4,7 @@ from agent_cli.commands.base import Command, CommandResult
 from agent_cli.commands.builtin.skills import CMD
 from agent_cli.commands.registry import CommandRegistry
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 def _skill_cmd(name: str, desc: str = "do thing") -> Command:

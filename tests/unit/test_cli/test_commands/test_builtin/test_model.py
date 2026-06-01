@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent_cli.commands.builtin.model import CMD
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 async def test_switch_model_updates_all_sites_no_persistence() -> None:

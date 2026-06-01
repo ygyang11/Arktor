@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from agent_cli.commands.builtin.effort import CMD
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 async def test_set_effort_updates_llm_and_config_no_persistence() -> None:

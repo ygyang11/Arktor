@@ -1,3 +1,4 @@
+"""Tests for app.py — argument parsing, session resolution, --version."""
 from __future__ import annotations
 
 import argparse
@@ -7,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_cli.app import _build_parser
+from agent_cli import __version__
+from agent_cli.app import _build_parser, main
 from agent_cli.render.ui import print_exit_reminder
 from agent_cli.runtime.session import resolve_session_id
 from agent_harness.session.base import SessionState
@@ -249,3 +251,67 @@ async def test_restore_session_loads_and_applies(session_dir: Path) -> None:
     assert result is not None
     assert result.session_id == sid
     agent.apply_session_state.assert_awaited_once()
+
+
+# ── argument parsing (_build_parser) ─────────────────────────────────
+
+
+def test_mutual_exclusion_continue_and_resume() -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["-c", "-r", "abc"])
+
+
+def test_mutual_exclusion_continue_and_session_id() -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["-c", "-s", "abc"])
+
+
+def test_mutual_exclusion_resume_and_session_id() -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["-r", "abc", "-s", "def"])
+
+
+def test_continue_short_form() -> None:
+    assert _build_parser().parse_args(["-c"]).resume_latest is True
+
+
+def test_continue_long_form() -> None:
+    assert _build_parser().parse_args(["--continue"]).resume_latest is True
+
+
+def test_resume_requires_id() -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["-r"])
+
+
+def test_resume_with_id() -> None:
+    args = _build_parser().parse_args(["-r", "abc-123"])
+    assert args.resume == "abc-123"
+    assert args.resume_latest is False
+    assert args.session_id is None
+
+
+def test_session_id_short_alias() -> None:
+    assert _build_parser().parse_args(["-s", "abc-123"]).session_id == "abc-123"
+
+
+def test_session_id_long_alias() -> None:
+    assert _build_parser().parse_args(["--session-id", "abc"]).session_id == "abc"
+
+
+def test_no_flags_defaults() -> None:
+    args = _build_parser().parse_args([])
+    assert args.resume_latest is False
+    assert args.resume is None
+    assert args.session_id is None
+
+
+# ── --version ────────────────────────────────────────────────────────
+
+
+def test_version_flag_prints_and_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = main(["--version"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "harness" in out
+    assert __version__ in out

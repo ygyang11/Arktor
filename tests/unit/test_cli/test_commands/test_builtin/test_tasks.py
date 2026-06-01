@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 from agent_cli.commands.builtin.tasks import CMD
 from agent_harness.background import BackgroundTask
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 def _bg(

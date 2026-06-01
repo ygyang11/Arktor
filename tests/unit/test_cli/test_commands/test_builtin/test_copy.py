@@ -6,7 +6,7 @@ from agent_cli.commands.builtin import copy as copy_mod
 from agent_cli.commands.builtin.copy import CMD
 from agent_harness.core.message import Message
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 def _ctx_with_messages(*assistant_texts: str) -> MagicMock:

@@ -288,7 +288,7 @@ def test_replay_skips_expander_when_result_is_error() -> None:
 
 
 def test_replay_user_shell_run_uses_bang_form() -> None:
-    from agent_cli.render.notices import format_shell_run
+    from agent_cli.runtime.shell import format_shell_run
     raw = format_shell_run("cd Agent-Harness", 0, "")
     out = _render(_u(raw))
     # `❯ !cd Agent-Harness` echo line
@@ -303,7 +303,7 @@ def test_replay_user_shell_run_uses_bang_form() -> None:
 
 
 def test_replay_user_shell_run_with_output_renders_body() -> None:
-    from agent_cli.render.notices import format_shell_run
+    from agent_cli.runtime.shell import format_shell_run
     raw = format_shell_run("pwd", 0, "/Users/ygyang/Project")
     out = _render(_u(raw))
     assert "!pwd" in out
@@ -312,7 +312,7 @@ def test_replay_user_shell_run_with_output_renders_body() -> None:
 
 
 def test_replay_user_shell_run_failure_strips_exit_code_prefix() -> None:
-    from agent_cli.render.notices import format_shell_run
+    from agent_cli.runtime.shell import format_shell_run
     raw = format_shell_run("nope", 127, "bash: nope: not found")
     out = _render(_u(raw))
     assert "!nope" in out
@@ -440,7 +440,7 @@ def test_match_skill_returns_none_for_plain_text() -> None:
 
 
 def test_peel_user_command_shell_run_returns_bang_form() -> None:
-    from agent_cli.render.notices import format_shell_run
+    from agent_cli.runtime.shell import format_shell_run
     from agent_cli.render.replay import peel_user_command
 
     content = format_shell_run("ls -la", 0, "out")
@@ -632,7 +632,7 @@ def test_replay_at_mention_multiple_files_one_header() -> None:
 
 
 def test_peel_user_command_strips_attachments_before_envelope_match() -> None:
-    from agent_cli.render.notices import format_shell_run
+    from agent_cli.runtime.shell import format_shell_run
     from agent_cli.render.replay import peel_user_command
 
     att = _att_user(

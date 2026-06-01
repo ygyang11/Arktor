@@ -4,7 +4,7 @@ from agent_cli.commands.builtin.plan import CMD
 from agent_cli.runtime import plan_mode
 from agent_harness.context.context import AgentContext
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 def _ctx(approval_mode: str = "auto") -> MagicMock:

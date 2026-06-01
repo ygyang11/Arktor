@@ -9,7 +9,7 @@ import pytest
 from agent_cli.commands.builtin.export import CMD, _format_message, _format_tool_group
 from agent_harness.core.message import Attachment, Message, ToolCall, ToolResult
 
-from .conftest import render_output
+from ..conftest import render_output
 
 
 def _ctx_with_messages(msgs: list[Message], session_id: str = "sess") -> MagicMock:
@@ -147,7 +147,7 @@ def test_export_user_block_strips_drift_reminder() -> None:
 
 
 def test_export_user_block_canonicalizes_shell_run_envelope() -> None:
-    from agent_cli.render.notices import format_shell_run
+    from agent_cli.runtime.shell import format_shell_run
 
     msg = Message.user(format_shell_run("echo hi", 0, "hi"))
     out = _format_message(msg)
