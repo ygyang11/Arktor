@@ -52,7 +52,7 @@ class TestTodoWriteTool:
             ]
         )
         assert "[0/3]" in result
-        assert "In progress: Explore" in result
+        assert "[>] Explore  <- current" in result
         assert "Todos updated successfully" in result
 
     async def test_execute_update_status(self) -> None:
@@ -70,7 +70,7 @@ class TestTodoWriteTool:
             ]
         )
         assert "[1/2]" in result
-        assert "In progress: Step B" in result
+        assert "[>] Step B  <- current" in result
 
     async def test_execute_empty_list(self) -> None:
         tool = TodoWriteTool()
@@ -252,10 +252,10 @@ class TestRecap:
                 {"id": "3", "content": "Next", "status": "pending"},
             ]
         )
-        assert "In progress: Working" in result
-        assert "Pending: Next" in result
+        assert "[>] Working  <- current" in result
+        assert "[ ] Next" in result
 
-    async def test_recap_pending_truncation(self) -> None:
+    async def test_recap_lists_all_pending(self) -> None:
         tool = TodoWriteTool()
         result = await tool.execute(
             todos=[
@@ -266,7 +266,8 @@ class TestRecap:
                 {"id": "5", "content": "E", "status": "pending"},
             ]
         )
-        assert "(+1 more)" in result
+        for name in ("A", "B", "C", "D", "E"):
+            assert f"] {name}" in result
 
     async def test_recap_no_tasks(self) -> None:
         tool = TodoWriteTool()
@@ -286,47 +287,6 @@ class TestRecap:
             todos=[{"id": "1", "content": "X", "status": "in_progress"}]
         )
         assert "Proceed with the current task" in result
-
-
-# ── build_context_message ──
-
-
-class TestBuildContextMessage:
-    async def test_empty_returns_none(self) -> None:
-        tool = TodoWriteTool()
-        assert tool.build_context_message() is None
-
-    async def test_in_progress_shows_current(self) -> None:
-        tool = TodoWriteTool()
-        await tool.execute(
-            todos=[
-                {"id": "1", "content": "Done", "status": "completed"},
-                {"id": "2", "content": "Active", "status": "in_progress"},
-            ]
-        )
-        msg = tool.build_context_message()
-        assert msg is not None
-        assert "[>] Active  <- current" in msg.content
-        assert "[x] Done" in msg.content
-        assert "# Current Tasks [1/2]" in msg.content
-
-    async def test_all_completed_shows_fresh_list_hint(self) -> None:
-        tool = TodoWriteTool()
-        await tool.execute(
-            todos=[{"id": "1", "content": "X", "status": "completed"}]
-        )
-        msg = tool.build_context_message()
-        assert msg is not None
-        assert "Submit a fresh list for new work" in msg.content
-
-    async def test_includes_behavior_hint(self) -> None:
-        tool = TodoWriteTool()
-        await tool.execute(
-            todos=[{"id": "1", "content": "X", "status": "in_progress"}]
-        )
-        msg = tool.build_context_message()
-        assert msg is not None
-        assert "call todo_write" in msg.content
 
 
 # ── Stateful protocol ──

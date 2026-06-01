@@ -6,7 +6,6 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from agent_harness.core.errors import ToolValidationError
-from agent_harness.core.message import Message
 from agent_harness.hooks.base import DefaultHooks
 from agent_harness.tool.base import BaseTool, ToolSchema
 
@@ -40,7 +39,6 @@ class TodoWriteTool(BaseTool):
                 "Keep exactly one task in_progress at all times while working."
             ),
         )
-        self.context_order = 200
         self._todos: list[TodoItem] = []
 
     @property
@@ -173,36 +171,25 @@ class TodoWriteTool(BaseTool):
         if s.total == 0:
             return "Task list cleared."
 
+        lines = [f"[{s.completed}/{s.total}]"]
+        for t in self._todos:
+            if t.status == "completed":
+                lines.append(f"  - [x] {t.content}")
+            elif t.status == "in_progress":
+                lines.append(f"  - [>] {t.content}  <- current")
+            else:
+                lines.append(f"  - [ ] {t.content}")
+
         if s.completed == s.total:
-            return (
-                f"[{s.total}/{s.total}] All tasks completed.\n"
-                "Todos updated successfully."
+            lines.append("\nAll tasks completed. Todos updated successfully.")
+        else:
+            lines.append(
+                "\nTodos updated successfully. Ensure that you continue to use "
+                "the todo list to track your progress. "
+                "Proceed with the current task. "
+                "Call todo_write again when it is done."
             )
-
-        parts: list[str] = [f"[{s.completed}/{s.total}]"]
-
-        current = next(
-            (t for t in self._todos if t.status == "in_progress"), None
-        )
-        if current:
-            parts.append(f"In progress: {current.content}")
-
-        pending = [t for t in self._todos if t.status == "pending"]
-        if pending:
-            names = [t.content for t in pending[:3]]
-            preview = "; ".join(names)
-            if len(pending) > 3:
-                preview += f" (+{len(pending) - 3} more)"
-            parts.append(f"Pending: {preview}")
-
-        status_line = " | ".join(parts)
-        return (
-            f"{status_line}\n"
-            "Todos updated successfully. Ensure that you continue to use "
-            "the todo list to track your progress. "
-            "Proceed with the current task. "
-            "Call todo_write again when it is done."
-        )
+        return "\n".join(lines)
 
     # ── Stateful tool protocol ──
 
@@ -223,31 +210,6 @@ class TodoWriteTool(BaseTool):
             [t.model_dump() for t in self._todos],
             self.stats.model_dump(),
         )
-
-    def build_context_message(self) -> Message | None:
-        if not self._todos:
-            return None
-        s = self.stats
-        lines = [f"# Current Tasks [{s.completed}/{s.total}]"]
-        for t in self._todos:
-            if t.status == "completed":
-                lines.append(f"  - [x] {t.content}")
-            elif t.status == "in_progress":
-                lines.append(f"  - [>] {t.content}  <- current")
-            else:
-                lines.append(f"  - [ ] {t.content}")
-
-        if s.completed == s.total:
-            lines.append(
-                "\nAll tasks completed. Submit a fresh list for new work."
-            )
-        else:
-            lines.append(
-                "\nAfter completing the current task, call todo_write "
-                "to update progress before doing any other work."
-            )
-
-        return Message.system("\n".join(lines))
 
 
 todo_write = TodoWriteTool()
