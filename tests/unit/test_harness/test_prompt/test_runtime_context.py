@@ -45,11 +45,11 @@ class TestBuildContextMessage:
         today = datetime.now().strftime("%Y-%m-%d")
         assert today in msg.content
 
-    def test_contains_git_info_in_git_repo(self) -> None:
+    def test_contains_git_repo_flag(self) -> None:
         msg = RuntimeContextProvider().build_context_message()
         assert msg is not None
         # Test runs from project root which is a git repo
-        assert "Git status" in msg.content or "Is a git repository" not in msg.content
+        assert "Is a git repository: True" in msg.content
 
     def test_git_failure_silent(
         self,
@@ -61,6 +61,7 @@ class TestBuildContextMessage:
         msg = provider.build_context_message()
         assert msg is not None
         assert "# Environment" in msg.content
+        assert "Is a git repository: False" in msg.content
 
 
 class TestGitHelpers:
@@ -70,13 +71,3 @@ class TestGitHelpers:
 
     def test_is_git_repo_false(self, tmp_path: Path) -> None:
         assert RuntimeContextProvider._is_git_repo(str(tmp_path)) is False
-
-    def test_read_git_status(self) -> None:
-        status = RuntimeContextProvider._read_git_status(".")
-        assert status is not None
-        assert "##" in status  # branch info line
-
-    def test_read_git_log(self) -> None:
-        log = RuntimeContextProvider._read_git_log(".")
-        assert log is not None
-        assert len(log.splitlines()) <= 5
