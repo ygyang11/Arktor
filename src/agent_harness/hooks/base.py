@@ -118,5 +118,6 @@ class DefaultHooks:
         steps: int,
         tool_calls: int,
         duration_ms: float,
+        error: str | None = None,
     ) -> None:
         pass

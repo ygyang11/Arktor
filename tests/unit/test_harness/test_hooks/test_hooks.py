@@ -153,6 +153,39 @@ class TestTracingHooksLifecycle:
         assert "test error" in hooks._all_spans[0].error_message
 
     @pytest.mark.asyncio
+    async def test_subagent_error_marks_span_status(self) -> None:
+        hooks = TracingHooks(trace_dir="/tmp/test_traces")
+        await hooks.on_run_start("agent", "input")
+        await hooks.on_subagent_start(
+            "agent", "agent.sub.research.1", "research", "do X", "prompt",
+        )
+
+        await hooks.on_subagent_end(
+            "agent", "agent.sub.research.1", "research", "do X",
+            0, 0, 12.0, error="boom",
+        )
+
+        sub = next(s for s in hooks._all_spans if s.kind == "subagent")
+        assert sub.status == "error"
+        assert sub.error_message == "boom"
+
+    @pytest.mark.asyncio
+    async def test_subagent_success_keeps_ok_status(self) -> None:
+        hooks = TracingHooks(trace_dir="/tmp/test_traces")
+        await hooks.on_run_start("agent", "input")
+        await hooks.on_subagent_start(
+            "agent", "agent.sub.research.1", "research", "do X", "prompt",
+        )
+
+        await hooks.on_subagent_end(
+            "agent", "agent.sub.research.1", "research", "do X", 3, 5, 12.0,
+        )
+
+        sub = next(s for s in hooks._all_spans if s.kind == "subagent")
+        assert sub.status == "ok"
+        assert sub.error_message is None
+
+    @pytest.mark.asyncio
     async def test_tool_call_records_sanitized_args(self) -> None:
         hooks = TracingHooks(trace_dir="/tmp/test_traces")
         await hooks.on_run_start("agent", "input")

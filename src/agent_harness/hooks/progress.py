@@ -236,6 +236,7 @@ class ProgressHooks(DefaultHooks):
         self, parent_name: str, subagent_name: str,
         agent_type: str, description: str,
         steps: int, tool_calls: int, duration_ms: float,
+        error: str | None = None,
     ) -> None:
         if self._streaming:
             self._output.write("\n")
@@ -245,6 +246,16 @@ class ProgressHooks(DefaultHooks):
         icon = ICONS.get("summary", "")
         preview = description[:60] + "..." if len(description) > 60 else description
         duration_s = duration_ms / 1000
+        if error is not None:
+            red = self._c("red")
+            first = error.splitlines()[0] if error.strip() else error
+            err_short = first if len(first) <= 60 else first[:59] + "…"
+            self._write(
+                f"  {icon} {red}✗{reset} [{agent_type}] "
+                f"\"{preview}\" "
+                f"{dim}(failed after {duration_s:.1f}s: {err_short}){reset}\n"
+            )
+            return
         self._write(
             f"  {icon} {green}✓{reset} [{agent_type}] "
             f"\"{preview}\" "

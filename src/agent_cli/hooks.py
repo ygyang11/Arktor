@@ -223,6 +223,7 @@ class CliHooks(DefaultHooks):
         steps: int,
         tool_calls: int,
         duration_ms: float,
+        error: str | None = None,
     ) -> None:
         if self._is_background():
             return
@@ -232,6 +233,16 @@ class CliHooks(DefaultHooks):
         short = description if len(description) <= 60 else description[:59] + "…"
         safe_type = rich_escape(f"[{agent_type}]")
         safe_desc = rich_escape(short)
+        if error is not None:
+            first = error.splitlines()[0] if error.strip() else error
+            err_short = first if len(first) <= 60 else first[:59] + "…"
+            safe_err = rich_escape(err_short)
+            await self.adapter.print_inline(
+                f"[error]╰─ {SUBAGENT_DONE} Failed · SubAgent {safe_type}[/error] "
+                f'[dim]"{safe_desc}" — {safe_err} '
+                f"({fmt_duration(int(duration_ms / 1000))})[/dim]"
+            )
+            return
         await self.adapter.print_inline(
             f"[accent]╰─ {SUBAGENT_DONE} Done · SubAgent {safe_type}[/accent] "
             f'[dim]"{safe_desc}" '

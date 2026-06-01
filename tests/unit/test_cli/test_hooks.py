@@ -391,6 +391,23 @@ async def test_subagent_end_fires_in_foreground_context() -> None:
     hooks = CliHooks(a, approval_handler=handler)
     await hooks.on_subagent_end("parent", "sub", "generic", "do X", 3, 2, 1234.5)
     a.print_inline.assert_called_once()
+    assert "Done" in a.print_inline.call_args[0][0]
+
+
+async def test_subagent_end_renders_failed_on_error() -> None:
+    a = _mock_adapter()
+    handler = MagicMock()
+    handler.is_in_background_task = MagicMock(return_value=False)
+    hooks = CliHooks(a, approval_handler=handler)
+    await hooks.on_subagent_end(
+        "parent", "sub", "generic", "do X", 0, 0, 1234.5, error="boom\nsecond line"
+    )
+    a.print_inline.assert_called_once()
+    rendered = a.print_inline.call_args[0][0]
+    assert "Failed" in rendered
+    assert "Done" not in rendered
+    assert "boom" in rendered
+    assert "second line" not in rendered  # only the first line is surfaced
 
 
 async def test_on_llm_retry_skipped_in_subagent() -> None:

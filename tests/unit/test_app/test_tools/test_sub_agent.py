@@ -537,6 +537,9 @@ class TestExecution:
 
         hooks.on_subagent_start.assert_called_once()
         hooks.on_subagent_end.assert_called_once()
+        end_args = hooks.on_subagent_end.call_args
+        assert end_args[0][7] is not None          # error passed as 8th positional
+        assert "boom" in end_args[0][7]
 
     async def test_subagent_name_includes_type_and_seq(self) -> None:
         tool = _make_bound_tool()

@@ -143,9 +143,10 @@ class CompositeHooks(DefaultHooks):
         self, parent_name: str, subagent_name: str,
         agent_type: str, description: str,
         steps: int, tool_calls: int, duration_ms: float,
+        error: str | None = None,
     ) -> None:
         for h in self._hooks:
             await h.on_subagent_end(
                 parent_name, subagent_name, agent_type, description,
-                steps, tool_calls, duration_ms,
+                steps, tool_calls, duration_ms, error,
             )

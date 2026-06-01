@@ -355,6 +355,7 @@ class SubAgentTool(BaseTool):
         start_time = time.monotonic()
         _steps = 0
         _tool_calls = 0
+        _error: str | None = None
         token = _subagent_active.set(True)
         try:
             await self._agent.hooks.on_subagent_start(
@@ -365,13 +366,18 @@ class SubAgentTool(BaseTool):
             tool_usage = self._extract_tool_usage(result)
             _tool_calls = sum(tool_usage.values())
             return result, tool_usage, (time.monotonic() - start_time) * 1000
+        except Exception as e:
+            # Cancellation (BaseException) is intentionally not caught here due to SDK design
+            # considerations, so a Ctrl-C still renders as the plain "Done" line, not "Failed".
+            _error = str(e) or type(e).__name__
+            raise
         finally:
             _subagent_active.reset(token)
             elapsed_ms = (time.monotonic() - start_time) * 1000
             try:
                 await self._agent.hooks.on_subagent_end(
                     parent_name, subagent_name, agent_type, description,
-                    _steps, _tool_calls, elapsed_ms,
+                    _steps, _tool_calls, elapsed_ms, _error,
                 )
             except Exception:
                 pass

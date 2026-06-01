@@ -525,6 +525,7 @@ class TracingHooks(DefaultHooks):
         self, parent_name: str, subagent_name: str,
         agent_type: str, description: str,
         steps: int, tool_calls: int, duration_ms: float,
+        error: str | None = None,
     ) -> None:
         _active_orchestration_parent.set(None)
         span = self._subagent_spans.pop(subagent_name, None)
@@ -532,4 +533,7 @@ class TracingHooks(DefaultHooks):
             span.attributes["steps"] = steps
             span.attributes["tool_calls"] = tool_calls
             span.attributes["duration_ms"] = duration_ms
+            if error is not None:
+                span.status = "error"
+                span.error_message = error
             self._finish_span(span)
