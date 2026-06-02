@@ -48,6 +48,8 @@ async def glob_files(
         raise ToolValidationError("offset must be non-negative.")
     if ".." in pattern.split("/"):
         raise ToolValidationError("glob pattern must not contain '..' path segments")
+    if any("**" in seg and seg != "**" for seg in pattern.split("/")):
+        raise ToolValidationError("invalid glob pattern: '**' must be a whole path segment")
 
     try:
         base = normalize_path(path, must_exist=True)
