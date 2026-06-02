@@ -4,13 +4,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from rich.syntax import Syntax
 from rich.console import Group, RenderableType
+from rich.padding import Padding
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.text import Text
 
 from agent_cli.commands.base import Command
+from agent_cli.runtime.prefs import PREFS_PATH
 from agent_cli.runtime.status import (
     BucketView, StatusSnapshot, UsageView, WindowView,
 )
@@ -336,6 +339,53 @@ def render_session_list(metas: list[SessionMeta]) -> RenderableType:
     if truncated > 0:
         rows.append(Text(""))
         rows.append(soft((f"… and {truncated} more", "")))
+    return Group(*rows)
+
+
+# ── /provider list ───────────────────────────────────────────────────
+
+_PROFILE_EXAMPLE = """{
+  "llm_profiles": {
+    "<name>": { "provider": "..", "model": "..", "base_url": "..", "api_key": ".." }
+  }
+}"""
+
+
+def render_provider_list(
+    profiles: dict[str, Any], active: str | None,
+) -> RenderableType:
+    if not profiles:
+        return Group(
+            info("No provider profiles yet"),
+            Text(""),
+            Text(f"  Add to  {home_relative_path(PREFS_PATH)} :", style="muted"),
+            Text(""),
+            Padding(
+                Syntax(
+                    _PROFILE_EXAMPLE, "json", theme="ansi_dark",
+                    background_color="default", word_wrap=False,
+                ),
+                (0, 0, 0, 2),
+            ),
+            Text(""),
+            Text(
+                "  Add as many providers as you need, then  "
+                "/provider <name>  to switch",
+                style="muted",
+            ),
+        )
+
+    name_w = max(len(n) for n in profiles)
+    prov_w = max(len(str(p.get("provider", ""))) for p in profiles.values())
+    rows: list[RenderableType] = [info("Provider profiles"), Text("")]
+    for name, prof in profiles.items():
+        line = Text("  ")
+        line.append("▌" if name == active else " ", style="primary")
+        line.append(" ")
+        line.append(name.ljust(name_w + 4), style="primary")
+        line.append(str(prof.get("provider", "")).ljust(prov_w + 4), style="muted")
+        line.append(str(prof.get("model", "")))
+        rows.append(line)
     return Group(*rows)
 
 
