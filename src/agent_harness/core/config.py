@@ -12,10 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import yaml
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
-
-load_dotenv()
 
 if TYPE_CHECKING:
     from agent_harness.hooks import DefaultHooks

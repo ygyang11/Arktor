@@ -35,7 +35,11 @@ def _bootstrap_user_config(dest: Path) -> bool:
 
 
 def load_config() -> ConfigLoadResult:
+    from dotenv import find_dotenv, load_dotenv
+
     from agent_harness.core.config import HarnessConfig
+
+    load_dotenv(find_dotenv(usecwd=True))
 
     project_cfg = Path.cwd() / "config.yaml"
     if project_cfg.exists():

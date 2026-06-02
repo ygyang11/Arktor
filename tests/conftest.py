@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import os
 from typing import Any, AsyncIterator
 
 import pytest
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+@pytest.fixture(autouse=True)
+def _ensure_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        if not os.environ.get(key):
+            monkeypatch.setenv(key, "sk-test-dummy")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
