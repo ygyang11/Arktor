@@ -149,7 +149,7 @@ class AnthropicProvider(BaseLLM):
                             continue
                         if dtype == "text_delta":
                             yield StreamDelta(
-                                chunk=MessageChunk(delta_content=delta.text),
+                                chunk=MessageChunk(delta_content=getattr(delta, "text", "")),
                             )
                             continue
                         if dtype == "thinking_delta":

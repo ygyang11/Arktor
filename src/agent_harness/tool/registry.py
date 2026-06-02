@@ -54,11 +54,11 @@ class ToolRegistry:
         """Get schemas for all registered tools (for LLM function calling)."""
         return [tool.get_schema() for tool in self.list_tools()]
 
-    def get_openai_schemas(self) -> list[dict]:
+    def get_openai_schemas(self) -> list[dict[str, Any]]:
         """Get all tool schemas in OpenAI format."""
         return [schema.to_openai_format() for schema in self.get_schemas()]
 
-    def get_anthropic_schemas(self) -> list[dict]:
+    def get_anthropic_schemas(self) -> list[dict[str, Any]]:
         """Get all tool schemas in Anthropic format."""
         return [schema.to_anthropic_format() for schema in self.get_schemas()]
 

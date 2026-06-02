@@ -850,9 +850,9 @@ class BaseAgent(ABC, EventEmitter):
             await self.hooks.on_tool_result(self.name, r)
 
         if approved:
-            async for result in self.tool_executor.execute_stream(approved):
-                result_map[result.tool_call_id] = result
-                await self.hooks.on_tool_result(self.name, result)
+            async for tool_result in self.tool_executor.execute_stream(approved):
+                result_map[tool_result.tool_call_id] = tool_result
+                await self.hooks.on_tool_result(self.name, tool_result)
 
         # ── Memory: write in original call order (transcript stable) ──
         self.context.state.transition(AgentState.OBSERVING)

@@ -359,10 +359,10 @@ async def _handle_line(
         refresh_completer=lambda: refresh_input_completer(pt_session, registry),
         adapter=adapter,
     )
-    task = asyncio.create_task(registry.dispatch(line, ctx))
+    cmd_task = asyncio.create_task(registry.dispatch(line, ctx))
     try:
-        with bind_work(task):
-            result = await task
+        with bind_work(cmd_task):
+            result = await cmd_task
     except asyncio.CancelledError:
         # Keep REPL alive on Ctrl+C during a command
         console.print("[dim]Command cancelled.[/dim]")

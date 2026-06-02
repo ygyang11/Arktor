@@ -136,4 +136,5 @@ class NumpyVectorStore(BaseVectorStore):
         # Avoid division by zero
         matrix_norms = np.maximum(matrix_norms, 1e-10)
 
-        return (matrix @ query) / (matrix_norms * query_norm)
+        result: np.ndarray = (matrix @ query) / (matrix_norms * query_norm)
+        return result

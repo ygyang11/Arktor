@@ -420,7 +420,7 @@ class SubAgentTool(BaseTool):
         from agent_harness.prompt.sections import make_intro_section
 
         assert self._agent is not None
-        builder = self._agent._prompt_builder.fork()
+        builder: SystemPromptBuilder = self._agent._prompt_builder.fork()
 
         type_spec = self._get_available_types()[agent_type]
         intro = type_spec.get("intro") or _SUBAGENT_INTRO

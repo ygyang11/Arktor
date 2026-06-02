@@ -9,7 +9,7 @@ import inspect
 import logging
 import re
 from collections.abc import Callable
-from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints, overload
 
 from agent_harness.core.message import ToolOutput
 from agent_harness.tool.base import BaseTool, ToolSchema
@@ -93,7 +93,7 @@ def _parse_docstring_params(docstring: str | None) -> dict[str, str]:
 
 
 def _build_schema_from_function(
-    fn: Callable,
+    fn: Callable[..., Any],
     name: str | None,
     description: str | None,
 ) -> ToolSchema:
@@ -168,14 +168,26 @@ class FunctionTool(BaseTool):
         return self._schema
 
 
+@overload
+def tool(fn: Callable[..., Any]) -> FunctionTool:
+    ...
+@overload
 def tool(
-    fn: Callable | None = None,
+    *,
+    name: str | None = ...,
+    description: str | None = ...,
+    executor_timeout: float | None = ...,
+    approval_resource_key: str | None = ...,
+) -> Callable[[Callable[..., Any]], FunctionTool]:
+    ...
+def tool(
+    fn: Callable[..., Any] | None = None,
     *,
     name: str | None = None,
     description: str | None = None,
     executor_timeout: float | None = None,
     approval_resource_key: str | None = None,
-) -> Any:
+) -> FunctionTool | Callable[[Callable[..., Any]], FunctionTool]:
     """Decorator to convert a function into a Tool.
 
     Can be used with or without arguments:
@@ -188,7 +200,7 @@ def tool(
         async def my_tool(query: str) -> str:
             ...
     """
-    def decorator(f: Callable) -> FunctionTool:
+    def decorator(f: Callable[..., Any]) -> FunctionTool:
         schema = _build_schema_from_function(f, name, description)
         return FunctionTool(
             fn=f,

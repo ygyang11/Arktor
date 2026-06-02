@@ -146,9 +146,9 @@ class Tracer:
             _current_trace_id.reset(token_trace)
             _current_span_id.reset(token_span)
 
-    def trace(self, name: str, kind: str = "internal") -> Callable:
+    def trace(self, name: str, kind: str = "internal") -> Callable[..., Any]:
         """Decorator to trace an async function."""
-        def decorator(fn: Callable) -> Callable:
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(fn)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 async with self.span(name, kind=kind) as s:
