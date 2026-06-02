@@ -1,8 +1,10 @@
 """Agent execution state management."""
 from __future__ import annotations
-from datetime import datetime, timezone
+
+from collections.abc import Callable
+from datetime import datetime
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 
 class AgentState(str, Enum):
@@ -19,10 +21,16 @@ class AgentState(str, Enum):
 # Valid state transitions
 _TRANSITIONS: dict[AgentState, set[AgentState]] = {
     AgentState.IDLE: {AgentState.THINKING, AgentState.PLANNING, AgentState.FINISHED},
-    AgentState.THINKING: {AgentState.ACTING, AgentState.FINISHED, AgentState.ERROR, AgentState.PLANNING},
+    AgentState.THINKING: {
+        AgentState.ACTING, AgentState.FINISHED, AgentState.ERROR, AgentState.PLANNING,
+    },
     AgentState.ACTING: {AgentState.OBSERVING, AgentState.ERROR},
-    AgentState.OBSERVING: {AgentState.THINKING, AgentState.FINISHED, AgentState.PLANNING, AgentState.ERROR},
-    AgentState.PLANNING: {AgentState.THINKING, AgentState.ACTING, AgentState.FINISHED, AgentState.ERROR},
+    AgentState.OBSERVING: {
+        AgentState.THINKING, AgentState.FINISHED, AgentState.PLANNING, AgentState.ERROR,
+    },
+    AgentState.PLANNING: {
+        AgentState.THINKING, AgentState.ACTING, AgentState.FINISHED, AgentState.ERROR,
+    },
     AgentState.FINISHED: {AgentState.IDLE},  # can reset
     AgentState.ERROR: {AgentState.IDLE},  # can reset
 }

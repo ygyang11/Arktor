@@ -1,13 +1,9 @@
 """/diff — show uncommitted changes (staged + unstaged)."""
 from __future__ import annotations
 
-from rich.console import Group, RenderableType
-from rich.panel import Panel
-from rich.text import Text
-
 from agent_cli.commands.base import Command, CommandContext, CommandResult
 from agent_cli.commands.builtin._git import run as _run_git
-from agent_cli.commands.ui import render_diff, err, soft
+from agent_cli.commands.ui import err, render_diff, soft
 
 
 async def _handler(ctx: CommandContext, args: str) -> CommandResult:

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING
 
 from agent_harness.core.errors import HttpResponseTooLargeError
 from agent_harness.utils.host_throttler import throttle

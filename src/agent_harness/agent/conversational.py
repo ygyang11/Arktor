@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from agent_harness.agent.base import BaseAgent, StepResult
-from agent_harness.llm.types import FinishReason
 
 
 class ConversationalAgent(BaseAgent):

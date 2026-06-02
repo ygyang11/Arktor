@@ -6,12 +6,13 @@ and purpose-built for agent execution tracking.
 from __future__ import annotations
 
 import contextvars
-import uuid
 import logging
-from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timezone
+import uuid
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+from datetime import datetime
 from functools import wraps
-from typing import Any, AsyncIterator, Callable, Iterator
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -107,7 +108,9 @@ class Tracer:
         return self._collector
 
     @asynccontextmanager
-    async def span(self, name: str, kind: str = "internal", **attributes: Any) -> AsyncIterator[Span]:
+    async def span(
+        self, name: str, kind: str = "internal", **attributes: Any,
+    ) -> AsyncIterator[Span]:
         """Create a span as an async context manager.
 
         Uses contextvars for async-safe parent tracking, so concurrent

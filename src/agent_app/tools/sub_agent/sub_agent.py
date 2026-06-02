@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agent_app.tools.sub_agent.types import (
     _ALWAYS_EXCLUDE,
@@ -99,7 +99,8 @@ This is a self-contained implementation task: read each source file, \
 write corresponding tests, and run them to verify — many steps where \
 only the outcome matters. Use general when the task requires file \
 modifications or command execution, the scope is well-defined, and \
-you don't need the intermediate details in your context. If the task is small or you need the details in your own context \
+you don't need the intermediate details in your context. If the task is small \
+or you need the details in your own context \
 for subsequent work, do it yourself instead.
 </commentary>
 </example>

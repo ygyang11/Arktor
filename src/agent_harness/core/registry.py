@@ -1,7 +1,8 @@
 """Generic registry pattern for named component discovery."""
 from __future__ import annotations
 
-from typing import Generic, TypeVar, Iterator
+from collections.abc import Iterator
+from typing import Generic, TypeVar
 
 T = TypeVar("T")
 

@@ -9,8 +9,6 @@ from agent_harness.core.config import HarnessConfig, ToolConfig, resolve_tool_co
 from agent_harness.core.errors import (
     ToolError,
     ToolNotFoundError,
-    ToolTimeoutError,
-    ToolValidationError,
 )
 from agent_harness.core.event import EventEmitter
 from agent_harness.core.message import ToolCall, ToolOutput, ToolResult
@@ -104,7 +102,7 @@ class ToolExecutor(EventEmitter):
             )
             return result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             error_msg = f"Tool '{tool_call.name}' timed out after {effective_timeout}s"
             logger.debug(error_msg)
             await self.emit(

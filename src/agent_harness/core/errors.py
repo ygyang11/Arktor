@@ -30,7 +30,10 @@ class LLMError(HarnessError):
 
 class LLMRateLimitError(LLMError):
     """LLM API rate limit exceeded. Retryable."""
-    def __init__(self, message: str = "Rate limit exceeded", *, retry_after: float | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self, message: str = "Rate limit exceeded", *,
+        retry_after: float | None = None, **kwargs: Any,
+    ) -> None:
         super().__init__(message, **kwargs)
         self.retry_after = retry_after
 

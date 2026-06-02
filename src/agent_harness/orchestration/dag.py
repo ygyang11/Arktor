@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
-from agent_harness.agent.base import BaseAgent, AgentResult
-from agent_harness.hooks import DefaultHooks, resolve_hooks
+from agent_harness.agent.base import AgentResult, BaseAgent
 from agent_harness.core.config import HarnessConfig
 from agent_harness.core.errors import CyclicDependencyError, OrchestrationError
+from agent_harness.hooks import DefaultHooks, resolve_hooks
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,9 @@ class DAGOrchestrator:
             if node:
                 for dep in node.dependencies:
                     if dep not in self.nodes:
-                        raise OrchestrationError(f"Node '{node_id}' depends on unknown node '{dep}'")
+                        raise OrchestrationError(
+                            f"Node '{node_id}' depends on unknown node '{dep}'"
+                        )
                     dfs(dep)
             in_stack.discard(node_id)
             visited.add(node_id)

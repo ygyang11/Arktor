@@ -86,9 +86,14 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+ignore = ["UP042"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["E501", "E402", "F401", "F841", "I001"]
+"src/agent_harness/__init__.py" = ["E402"]
+"src/agent_cli/runtime/plan_mode.py" = ["E501"]
+"src/agent_cli/commands/builtin/review.py" = ["E501"]
+"src/agent_cli/commands/builtin/init.py" = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

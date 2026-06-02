@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import anthropic
 from anthropic import AsyncAnthropic
@@ -130,7 +131,7 @@ class AnthropicProvider(BaseLLM):
                             yield StreamDelta(
                                 chunk=MessageChunk(
                                     delta_provider_metadata={
-                                        _PROTOCOL_KEY: {"thinking_blocks": list(completed_thinking)},
+                                        _PROTOCOL_KEY: {"thinking_blocks": list(completed_thinking)},  # noqa: E501
                                     },
                                 ),
                             )
@@ -171,7 +172,7 @@ class AnthropicProvider(BaseLLM):
                             yield StreamDelta(
                                 chunk=MessageChunk(
                                     delta_provider_metadata={
-                                        _PROTOCOL_KEY: {"thinking_blocks": list(completed_thinking)},
+                                        _PROTOCOL_KEY: {"thinking_blocks": list(completed_thinking)},  # noqa: E501
                                     },
                                 ),
                             )
@@ -215,7 +216,9 @@ class AnthropicProvider(BaseLLM):
                             for buf_idx in sorted(tc_buffer):
                                 buf = tc_buffer[buf_idx]
                                 try:
-                                    args = json.loads(buf["input_json"]) if buf["input_json"] else {}
+                                    args = (
+                                        json.loads(buf["input_json"]) if buf["input_json"] else {}
+                                    )
                                 except json.JSONDecodeError:
                                     args = {}
                                 delta_tool_calls.append(

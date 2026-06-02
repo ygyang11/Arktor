@@ -7,10 +7,10 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from agent_harness.agent.base import BaseAgent, AgentResult
-from agent_harness.hooks import DefaultHooks, resolve_hooks
+from agent_harness.agent.base import AgentResult, BaseAgent
 from agent_harness.core.config import HarnessConfig
 from agent_harness.core.message import Message
+from agent_harness.hooks import DefaultHooks, resolve_hooks
 from agent_harness.llm.base import BaseLLM
 from agent_harness.utils.json_utils import parse_json_lenient
 
@@ -49,7 +49,8 @@ TEAM_PROMPTS: dict[str, str] = {
         "- Write subtasks as concrete deliverables with scope boundaries.\n"
         "- Preserve core intent, required constraints, and decision criteria.\n"
         "- Minimize redundant work and dependency conflicts.\n"
-        "- If the task is simple, you may assign the same core objective to all workers with distinct angles.\n\n"
+        "- If the task is simple, you may assign the same core objective to all "
+        "workers with distinct angles.\n\n"
         "## Output Format\n"
         "Return ONLY JSON:\n"
         "{{\"assignments\": {{\"worker_name\": \"subtask description\"}}}}"
@@ -295,7 +296,8 @@ class AgentTeam:
         self._fork_worker_contexts(judge)
         worker_map = {worker.name: worker for worker in self.agents}
         worker_info = "\n".join(
-            f"- {worker.name}: {worker.system_prompt}" if worker.system_prompt else f"- {worker.name}"
+            f"- {worker.name}: {worker.system_prompt}" if worker.system_prompt
+            else f"- {worker.name}"
             for worker in self.agents
         )
 
