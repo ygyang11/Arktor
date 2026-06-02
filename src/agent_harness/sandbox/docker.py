@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 try:
     import docker as _docker_lib
 except ImportError:
-    _docker_lib = None  # type: ignore[assignment]
+    _docker_lib = None
 
 _CONTAINER_WORKDIR = "/workspace"
 _STOP_TIMEOUT = 5
@@ -144,7 +144,7 @@ class DockerBackend(SandboxBackend):
                 stdout=True,
                 stderr=True,
             )
-            return resp["Id"]
+            return str(resp["Id"])
 
         exec_id: str = await loop.run_in_executor(None, _create_exec)
 
@@ -174,7 +174,7 @@ class DockerBackend(SandboxBackend):
 
         def _inspect() -> int:
             info = api_client.exec_inspect(exec_id)
-            return info.get("ExitCode", -1)
+            return int(info.get("ExitCode", -1))
 
         exit_code = await loop.run_in_executor(None, _inspect)
 

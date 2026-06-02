@@ -7,9 +7,10 @@ from agent_cli.commands.base import Command, CommandContext, CommandResult
 from agent_cli.commands.ui import home_relative_path, ok, soft
 from agent_cli.render.status_lines import make_command_status_line
 from agent_cli.runtime import session as sess
+from agent_harness.memory.compressor import CompressionResult
 
 
-def _compacted_output(res: object) -> Text:
+def _compacted_output(res: CompressionResult) -> Text:
     """Render ``Compacted: N → M msgs · K archived to ~/...``."""
     archived = res.original_count - res.compressed_count
     detail = ""

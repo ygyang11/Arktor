@@ -106,3 +106,7 @@ markers = [
 python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["docker.*", "sklearn.*", "tavily.*", "serpapi.*"]
+ignore_missing_imports = true

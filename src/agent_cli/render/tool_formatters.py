@@ -151,7 +151,7 @@ def _render_diff_lines(
             continue
 
         # write_file pseudo-diff: no @@ header, synthesize counters from 1
-        if new_ln is None:
+        if new_ln is None or old_ln is None:
             old_ln, new_ln = 1, 1
 
         first = raw[0]

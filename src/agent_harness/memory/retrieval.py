@@ -82,7 +82,8 @@ class HybridRetriever:
             tfidf_matrix = vectorizer.fit_transform(corpus)
             query_vec = vectorizer.transform([query])
             scores = cosine_similarity(query_vec, tfidf_matrix)[0]
-            return scores.tolist()
+            scores_list: list[float] = scores.tolist()
+            return scores_list
         except Exception:
             logger.debug("TF-IDF vectorization failed, falling back to keywords")
             return None
