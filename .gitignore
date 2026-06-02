@@ -36,7 +36,7 @@ config.yaml
 .plan
 .research
 .review
-.agent-harness
+.arktor
 
 # ===== Output & Traces =====
 .notes

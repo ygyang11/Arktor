@@ -1,5 +1,5 @@
 # ============================================================
-# # Agent-Harness — Example Configuration File
+# # Arktor — Example Configuration File
 # ============================================================
 # Copy this file to `config.yaml` and fill in your values.
 # ============================================================
@@ -68,7 +68,7 @@ paper:
 # --- Skills ---
 skill:
   dirs:                         # Skill directories to scan (must end with "skills")
-    - "~/.agent-harness/skills" # Personal global skills
+    - "~/.arktor/skills" # Personal global skills
     - "skills"                  # Project root skills
     # - "/path/to/shared/skills"# Team-shared skills
 

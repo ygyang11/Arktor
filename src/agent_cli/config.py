@@ -42,7 +42,7 @@ def load_config() -> ConfigLoadResult:
         HarnessConfig.load(project_cfg)
         return ConfigLoadResult(path=project_cfg, bootstrapped=False)
 
-    user_cfg = Path.home() / ".agent-harness" / "config.yaml"
+    user_cfg = Path.home() / ".arktor" / "config.yaml"
     bootstrapped = False
     if not user_cfg.exists():
         bootstrapped = _bootstrap_user_config(user_cfg)

@@ -11,7 +11,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_HARNESS_DIR = Path.home() / ".agent-harness"
+_HARNESS_DIR = Path.home() / ".arktor"
 
 
 @dataclass

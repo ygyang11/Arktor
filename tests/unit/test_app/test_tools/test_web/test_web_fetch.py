@@ -579,7 +579,7 @@ class TestCloudflareUaFlip:
         assert "real content" in result
         assert len(uas) == 2
         assert uas[0] == module._CFG.user_agent
-        assert uas[1] == f"agent-harness/{module._HARNESS_VERSION}"
+        assert uas[1] == f"arktor/{module._HARNESS_VERSION}"
 
     @pytest.mark.asyncio
     async def test_plain_403_does_not_retry(

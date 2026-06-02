@@ -24,8 +24,8 @@ _VALID_SCOPES = frozenset({"project", "global"})
 _RESERVED_SLUGS = frozenset({"memory"})
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 
-_GLOBAL_MEMORY_DIR = Path.home() / ".agent-harness" / "memory"
-_PROJECT_MEMORY_DIRNAME = ".agent-harness/memory"
+_GLOBAL_MEMORY_DIR = Path.home() / ".arktor" / "memory"
+_PROJECT_MEMORY_DIRNAME = ".arktor/memory"
 
 MEMORY_TOOL_DESCRIPTION = """\
 Manage persistent memories that survive across sessions. Memories are \

@@ -10,7 +10,7 @@ from agent_harness.session.base import BaseSession, SessionMeta, SessionState
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SESSION_DIR = Path.home() / ".agent-harness" / "sessions"
+_DEFAULT_SESSION_DIR = Path.home() / ".arktor" / "sessions"
 
 
 class FileSession(BaseSession):

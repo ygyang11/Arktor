@@ -98,13 +98,13 @@ async def resolve_session_id(
     if new_id:
         if not probe._is_valid_id(new_id):
             print(
-                f"harness: invalid session id (allowed: [a-zA-Z0-9_-]): {new_id}",
+                f"arktor: invalid session id (allowed: [a-zA-Z0-9_-]): {new_id}",
                 file=sys.stderr,
             )
             return None
         if await probe.has_session(new_id):
             print(
-                f"harness: session id already exists: {new_id} "
+                f"arktor: session id already exists: {new_id} "
                 f"(use --resume to resume it)",
                 file=sys.stderr,
             )
@@ -113,7 +113,7 @@ async def resolve_session_id(
     resume_id: str | None = args.resume
     if resume_id:
         if not await probe.has_session(resume_id):
-            print(f"harness: session not found: {resume_id}", file=sys.stderr)
+            print(f"arktor: session not found: {resume_id}", file=sys.stderr)
             return None
         return resume_id
     if args.resume_latest:
@@ -123,7 +123,7 @@ async def resolve_session_id(
         # explicit corruption reporting on a specific session.
         metas = await probe.list_states()
         if not metas:
-            print("harness: no prior session found", file=sys.stderr)
+            print("arktor: no prior session found", file=sys.stderr)
             return None
         return metas[0].session_id
     return str(uuid.uuid4())

@@ -509,7 +509,7 @@ class ContextCompressor:
     def _archive(self, messages: list[Message], round_num: int) -> Path:
         """Write compressed messages to session-bound archive file."""
         archive_dir = (
-            Path.home() / ".agent-harness" / "sessions"
+            Path.home() / ".arktor" / "sessions"
             / str(self._session_id) / "compact"
         )
         archive_dir.mkdir(parents=True, exist_ok=True)
@@ -607,7 +607,7 @@ class ContextCompressor:
     def _archive_pruned(self, tr: ToolResult) -> Path:
         """Write original tool_result content under sessions/{sid}/compact/pruned/."""
         archive_dir = (
-            Path.home() / ".agent-harness" / "sessions"
+            Path.home() / ".arktor" / "sessions"
             / str(self._session_id) / "compact" / "pruned"
         )
         archive_dir.mkdir(parents=True, exist_ok=True)

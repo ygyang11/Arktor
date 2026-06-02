@@ -9,7 +9,7 @@ from pathlib import Path
 
 from agent_harness.core.message import Attachment
 
-_BLOB_DIR = Path.home() / ".agent-harness" / "blobs"
+_BLOB_DIR = Path.home() / ".arktor" / "blobs"
 
 _BASE64_DATA_URI_RE = re.compile(
     r"data:[\w.+-]+/[\w.+-]+;base64,[A-Za-z0-9+/=]{40,}"

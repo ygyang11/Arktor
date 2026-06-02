@@ -68,7 +68,7 @@ _EXECUTOR_TIMEOUT = (
 
 
 def _honest_user_agent() -> str:
-    return f"agent-harness/{_HARNESS_VERSION}"
+    return f"arktor/{_HARNESS_VERSION}"
 
 
 def _is_cf_challenge(response: HttpTextResponse) -> bool:

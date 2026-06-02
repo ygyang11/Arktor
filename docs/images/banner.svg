@@ -34,7 +34,7 @@
   <circle cx="400" cy="245" r="1.5" fill="#b8886e" opacity="0.1"/>
   <circle cx="800" cy="240" r="2" fill="#cc785c" opacity="0.1"/>
   <!-- Title -->
-  <text x="600" y="138" text-anchor="middle" font-family="'SF Pro Display', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif" font-size="64" font-weight="700" fill="#2d1f14" letter-spacing="-1">Agent Harness</text>
+  <text x="600" y="138" text-anchor="middle" font-family="'SF Pro Display', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif" font-size="64" font-weight="700" fill="#2d1f14" letter-spacing="-1">Arktor</text>
   <!-- Accent line -->
   <rect x="480" y="158" width="240" height="2.5" rx="1.25" fill="url(#accent)"/>
   <!-- Subtitle -->

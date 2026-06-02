@@ -32,7 +32,7 @@ def _stub_webbrowser(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
 async def test_feedback_opens_url_and_returns_link(_stub_webbrowser: dict[str, str]) -> None:
     result = await CMD.handler(_ctx(), "broken plan mode")
     url = _stub_webbrowser["url"]
-    assert url.startswith("https://github.com/ygyang11/Agent-Harness/issues/new")
+    assert url.startswith("https://github.com/ygyang11/Arktor/issues/new")
     assert "title=broken%20plan%20mode" in url
     rendered = render_output(result.output)
     assert "Feedback form" in rendered

@@ -30,8 +30,8 @@ TOOLS: list[BaseTool] = [*FILESYSTEM_TOOLS, *TERMINAL_TOOLS, *WEB_TOOLS, *PAPER_
 
 def _memory_dir(scope: str = "project") -> Path:
     if scope == "global":
-        return Path.home() / ".agent-harness" / "memory"
-    return Path.cwd() / ".agent-harness" / "memory"
+        return Path.home() / ".arktor" / "memory"
+    return Path.cwd() / ".arktor" / "memory"
 
 
 def _cleanup() -> None:

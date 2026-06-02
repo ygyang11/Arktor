@@ -1,4 +1,4 @@
-"""Agent Harness: A complete, extensible agent framework."""
+"""Arktor: A complete, extensible agent framework."""
 from agent_harness.utils.logging_config import setup_logging
 
 # Auto-configure logging on import

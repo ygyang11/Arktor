@@ -1,1 +1,1 @@
-"""Agent App: built-in tools and application components for Agent Harness."""
+"""Agent App: built-in tools and application components for Arktor."""

@@ -1,11 +1,11 @@
-"""CLI preferences: atomic JSON read/write at ~/.agent-harness/cli-prefs.json."""
+"""CLI preferences: atomic JSON read/write at ~/.arktor/cli-prefs.json."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Any
 
-PREFS_PATH = Path.home() / ".agent-harness" / "cli-prefs.json"
+PREFS_PATH = Path.home() / ".arktor" / "cli-prefs.json"
 
 
 def read_prefs() -> dict[str, Any]:

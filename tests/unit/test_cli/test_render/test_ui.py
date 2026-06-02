@@ -26,14 +26,14 @@ def test_render_welcome_emits_tagline_and_meta() -> None:
         version="0.4.10",
         model="gpt-5",
         cwd="/home/user/proj",
-        config_source="/home/user/.agent-harness/config.yaml",
+        config_source="/home/user/.arktor/config.yaml",
     )
     out = buf.getvalue()
     assert "Agents, harnessed." in out
     assert "v0.4.10" in out
     assert "model" in out and "gpt-5" in out
     assert "cwd" in out and "/home/user/proj" in out
-    assert "config" in out and ".agent-harness/config.yaml" in out
+    assert "config" in out and ".arktor/config.yaml" in out
     assert "session" in out
     assert "fresh" in out
     assert "/resume to restore" in out

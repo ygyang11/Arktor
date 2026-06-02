@@ -206,7 +206,7 @@ async def test_exit_reminder_uses_current_backend_id(session_dir: Path) -> None:
 
     await print_exit_reminder(console, backend)
     out = buf.getvalue()
-    assert "harness --resume switched-id" in out
+    assert "arktor --resume switched-id" in out
     assert "start-id" not in out  # the (hypothetical) startup id never appears
 
 
@@ -313,5 +313,5 @@ def test_version_flag_prints_and_exits_zero(capsys: pytest.CaptureFixture[str]) 
     rc = main(["--version"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "harness" in out
+    assert "arktor" in out
     assert __version__ in out

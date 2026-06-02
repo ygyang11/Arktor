@@ -49,7 +49,7 @@ class TestLLMConfig:
 
     def test_blank_fields_fall_back_to_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        monkeypatch.setenv("HARNESS_LLM_BASE_URL", "https://example.com/v1")
+        monkeypatch.setenv("ARKTOR_LLM_BASE_URL", "https://example.com/v1")
         cfg = LLMConfig(api_key="", base_url="")
         assert cfg.api_key == "sk-test"
         assert cfg.base_url == "https://example.com/v1"
@@ -124,10 +124,10 @@ class TestHarnessConfig:
         assert cfg.tracing.enabled is True
 
     def test_from_env_llm_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HARNESS_LLM_PROVIDER", "anthropic")
-        monkeypatch.setenv("HARNESS_LLM_MODEL", "claude-3")
-        monkeypatch.setenv("HARNESS_LLM_TEMPERATURE", "0.5")
-        monkeypatch.setenv("HARNESS_LLM_MAX_TOKENS", "2048")
+        monkeypatch.setenv("ARKTOR_LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("ARKTOR_LLM_MODEL", "claude-3")
+        monkeypatch.setenv("ARKTOR_LLM_TEMPERATURE", "0.5")
+        monkeypatch.setenv("ARKTOR_LLM_MAX_TOKENS", "2048")
 
         cfg = HarnessConfig.from_env()
         assert cfg.llm.provider == "anthropic"
@@ -136,27 +136,27 @@ class TestHarnessConfig:
         assert cfg.llm.max_tokens == 2048
 
     def test_from_env_verbose(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HARNESS_VERBOSE", "true")
+        monkeypatch.setenv("ARKTOR_VERBOSE", "true")
         cfg = HarnessConfig.from_env()
         assert cfg.verbose is True
 
     def test_from_env_verbose_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HARNESS_VERBOSE", "no")
+        monkeypatch.setenv("ARKTOR_VERBOSE", "no")
         cfg = HarnessConfig.from_env()
         assert cfg.verbose is False
 
     def test_from_env_tracing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("HARNESS_TRACING_ENABLED", "0")
+        monkeypatch.setenv("ARKTOR_TRACING_ENABLED", "0")
         cfg = HarnessConfig.from_env()
         assert cfg.tracing.enabled is False
 
     def test_from_env_no_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("HARNESS_LLM_PROVIDER", raising=False)
-        monkeypatch.delenv("HARNESS_LLM_MODEL", raising=False)
-        monkeypatch.delenv("HARNESS_LLM_TEMPERATURE", raising=False)
-        monkeypatch.delenv("HARNESS_LLM_MAX_TOKENS", raising=False)
-        monkeypatch.delenv("HARNESS_VERBOSE", raising=False)
-        monkeypatch.delenv("HARNESS_TRACING_ENABLED", raising=False)
+        monkeypatch.delenv("ARKTOR_LLM_PROVIDER", raising=False)
+        monkeypatch.delenv("ARKTOR_LLM_MODEL", raising=False)
+        monkeypatch.delenv("ARKTOR_LLM_TEMPERATURE", raising=False)
+        monkeypatch.delenv("ARKTOR_LLM_MAX_TOKENS", raising=False)
+        monkeypatch.delenv("ARKTOR_VERBOSE", raising=False)
+        monkeypatch.delenv("ARKTOR_TRACING_ENABLED", raising=False)
         cfg = HarnessConfig.from_env()
         assert cfg.llm.provider == "openai"
 
@@ -199,7 +199,7 @@ class TestHarnessConfig:
             "tracing:\n"
             "  enabled: false\n"
         )
-        monkeypatch.setenv("HARNESS_LLM_MODEL", "env-model")
+        monkeypatch.setenv("ARKTOR_LLM_MODEL", "env-model")
 
         cfg = HarnessConfig.load(path, env_override=True)
 
@@ -214,7 +214,7 @@ class TestHarnessConfig:
             "  provider: openai\n"
             "  model: yaml-model\n"
         )
-        monkeypatch.setenv("HARNESS_LLM_MODEL", "env-model")
+        monkeypatch.setenv("ARKTOR_LLM_MODEL", "env-model")
 
         cfg = HarnessConfig.load(path, env_override=False)
 

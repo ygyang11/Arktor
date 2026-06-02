@@ -9,7 +9,7 @@ from agent_cli.commands.base import Command, CommandContext, CommandResult
 from agent_cli.commands.ui import ok
 from agent_harness import __version__ as _HARNESS_VERSION
 
-_REPO = "ygyang11/Agent-Harness"
+_REPO = "ygyang11/Arktor"
 
 
 def _build_body(ctx: CommandContext) -> str:

@@ -45,13 +45,13 @@ class _EnvVars:
     SERPAPI_API_KEY = "SERPAPI_API_KEY"
     MINERU_API_KEY = "MINERU_API_KEY"
     PADDLEOCR_API_KEY = "PADDLEOCR_API_KEY"
-    HARNESS_LLM_PROVIDER = "HARNESS_LLM_PROVIDER"
-    HARNESS_LLM_MODEL = "HARNESS_LLM_MODEL"
-    HARNESS_LLM_TEMPERATURE = "HARNESS_LLM_TEMPERATURE"
-    HARNESS_LLM_MAX_TOKENS = "HARNESS_LLM_MAX_TOKENS"
-    HARNESS_LLM_BASE_URL = "HARNESS_LLM_BASE_URL"
-    HARNESS_VERBOSE = "HARNESS_VERBOSE"
-    HARNESS_TRACING_ENABLED = "HARNESS_TRACING_ENABLED"
+    ARKTOR_LLM_PROVIDER = "ARKTOR_LLM_PROVIDER"
+    ARKTOR_LLM_MODEL = "ARKTOR_LLM_MODEL"
+    ARKTOR_LLM_TEMPERATURE = "ARKTOR_LLM_TEMPERATURE"
+    ARKTOR_LLM_MAX_TOKENS = "ARKTOR_LLM_MAX_TOKENS"
+    ARKTOR_LLM_BASE_URL = "ARKTOR_LLM_BASE_URL"
+    ARKTOR_VERBOSE = "ARKTOR_VERBOSE"
+    ARKTOR_TRACING_ENABLED = "ARKTOR_TRACING_ENABLED"
     SEMANTIC_SCHOLAR_API_KEY = "SEMANTIC_SCHOLAR_API_KEY"
 
 
@@ -86,7 +86,7 @@ class LLMConfig(BaseModel):
                 self.api_key = os.environ.get(env_var, "").strip() or None
         # Auto-resolve base_url from environment if not set
         if self.base_url is None:
-            self.base_url = os.environ.get(_EnvVars.HARNESS_LLM_BASE_URL, "").strip() or None
+            self.base_url = os.environ.get(_EnvVars.ARKTOR_LLM_BASE_URL, "").strip() or None
 
 
 class DockerConfig(BaseModel):
@@ -294,31 +294,31 @@ class HarnessConfig(BaseModel):
         """Build configuration from environment variables.
 
         Recognized env vars:
-            HARNESS_LLM_PROVIDER, HARNESS_LLM_MODEL, HARNESS_LLM_TEMPERATURE,
-            HARNESS_LLM_MAX_TOKENS, HARNESS_LLM_BASE_URL,
-            HARNESS_VERBOSE, HARNESS_TRACING_ENABLED
+            ARKTOR_LLM_PROVIDER, ARKTOR_LLM_MODEL, ARKTOR_LLM_TEMPERATURE,
+            ARKTOR_LLM_MAX_TOKENS, ARKTOR_LLM_BASE_URL,
+            ARKTOR_VERBOSE, ARKTOR_TRACING_ENABLED
         """
         data: dict[str, Any] = {}
 
         llm_data: dict[str, Any] = {}
-        if v := os.environ.get(_EnvVars.HARNESS_LLM_PROVIDER):
+        if v := os.environ.get(_EnvVars.ARKTOR_LLM_PROVIDER):
             llm_data["provider"] = v
-        if v := os.environ.get(_EnvVars.HARNESS_LLM_MODEL):
+        if v := os.environ.get(_EnvVars.ARKTOR_LLM_MODEL):
             llm_data["model"] = v
-        if v := os.environ.get(_EnvVars.HARNESS_LLM_TEMPERATURE):
+        if v := os.environ.get(_EnvVars.ARKTOR_LLM_TEMPERATURE):
             llm_data["temperature"] = float(v)
-        if v := os.environ.get(_EnvVars.HARNESS_LLM_MAX_TOKENS):
+        if v := os.environ.get(_EnvVars.ARKTOR_LLM_MAX_TOKENS):
             llm_data["max_tokens"] = int(v)
-        if v := os.environ.get(_EnvVars.HARNESS_LLM_BASE_URL):
+        if v := os.environ.get(_EnvVars.ARKTOR_LLM_BASE_URL):
             llm_data["base_url"] = v
         if llm_data:
             data["llm"] = llm_data
 
-        if v := os.environ.get(_EnvVars.HARNESS_VERBOSE):
+        if v := os.environ.get(_EnvVars.ARKTOR_VERBOSE):
             data["verbose"] = v.lower() in ("1", "true", "yes")
 
         tracing_data: dict[str, Any] = {}
-        if v := os.environ.get(_EnvVars.HARNESS_TRACING_ENABLED):
+        if v := os.environ.get(_EnvVars.ARKTOR_TRACING_ENABLED):
             tracing_data["enabled"] = v.lower() in ("1", "true", "yes")
         if tracing_data:
             data["tracing"] = tracing_data

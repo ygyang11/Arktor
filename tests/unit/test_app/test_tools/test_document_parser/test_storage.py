@@ -146,7 +146,7 @@ class TestInspectRemote:
         await inspect_target("https://upload.wikimedia.org/x.jpg")
         hdrs = captured.get("headers") or {}
         ua = hdrs.get("User-Agent") or hdrs.get("user-agent")
-        assert ua and "agent-harness" in ua
+        assert ua and "arktor" in ua
 
 
 class TestSlug:

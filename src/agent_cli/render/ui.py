@@ -16,14 +16,14 @@ from agent_harness.agent.base import BaseAgent
 from agent_harness.session.base import BaseSession
 
 _BANNER_LINES: tuple[str, ...] = (
-    "██╗  ██╗ █████╗ ██████╗ ███╗   ██╗███████╗███████╗███████╗",
-    "██║  ██║██╔══██╗██╔══██╗████╗  ██║██╔════╝██╔════╝██╔════╝",
-    "███████║███████║██████╔╝██╔██╗ ██║█████╗  ███████╗███████╗",
-    "██╔══██║██╔══██║██╔══██╗██║╚██╗██║██╔══╝  ╚════██║╚════██║",
-    "██║  ██║██║  ██║██║  ██║██║ ╚████║███████╗███████║███████║",
-    "╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚══════╝",
+    " █████╗ ██████╗ ██╗  ██╗████████╗ ██████╗ ██████╗ ",
+    "██╔══██╗██╔══██╗██║ ██╔╝╚══██╔══╝██╔═══██╗██╔══██╗",
+    "███████║██████╔╝█████╔╝    ██║   ██║   ██║██████╔╝",
+    "██╔══██║██╔══██╗██╔═██╗    ██║   ██║   ██║██╔══██╗",
+    "██║  ██║██║  ██║██║  ██╗   ██║   ╚██████╔╝██║  ██║",
+    "╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝",
 )
-_BANNER_WIDTH = 58
+_BANNER_WIDTH = 50
 _LABEL_WIDTH = 9
 
 
@@ -106,7 +106,7 @@ async def print_exit_reminder(console: Console, backend: BaseSession) -> None:
     if not await backend.has_session(sid):
         return
     console.print("[muted]Resume this session with:[/muted]")
-    console.print(f"[muted]  harness --resume {sid}[/muted]")
+    console.print(f"[muted]  arktor --resume {sid}[/muted]")
 
 
 def make_status_bar_text(agent: BaseAgent) -> Callable[[], HTML]:

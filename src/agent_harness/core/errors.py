@@ -1,4 +1,4 @@
-"""Agent Harness exception hierarchy.
+"""Arktor exception hierarchy.
 
 All framework exceptions inherit from HarnessError, enabling broad catch
 while allowing fine-grained handling of specific error categories.

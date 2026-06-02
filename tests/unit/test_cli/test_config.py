@@ -52,7 +52,7 @@ def test_bootstrap_from_repo_template_when_user_config_missing(
     with patch("agent_harness.core.config.HarnessConfig.load") as mock_load:
         result = load_config()
 
-    user_cfg = isolated_home / ".agent-harness" / "config.yaml"
+    user_cfg = isolated_home / ".arktor" / "config.yaml"
     assert result == ConfigLoadResult(path=user_cfg, bootstrapped=True)
     assert user_cfg.exists()
     assert "anthropic" in user_cfg.read_text()

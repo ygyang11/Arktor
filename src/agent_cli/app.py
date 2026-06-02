@@ -10,8 +10,8 @@ from pathlib import Path
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="harness",
-        description="Agent-Harness interactive CLI",
+        prog="arktor",
+        description="Arktor interactive CLI",
     )
     parser.add_argument("--version", action="store_true", help="show version and exit")
     grp = parser.add_mutually_exclusive_group()
@@ -100,7 +100,7 @@ async def _async_main(args: argparse.Namespace) -> int:
 
     if args.resume_latest or args.resume:
         if await restore_session(agent, backend) is None:
-            print(f"harness: session corrupted: {session_id}", file=sys.stderr)
+            print(f"arktor: session corrupted: {session_id}", file=sys.stderr)
             return 2
 
     config_source = str(config_result.path) if config_result.path else "Defaults env"
@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.version:
         from agent_cli import __version__
-        print(f"harness {__version__}")
+        print(f"arktor {__version__}")
         return 0
     try:
         return asyncio.run(_async_main(args))

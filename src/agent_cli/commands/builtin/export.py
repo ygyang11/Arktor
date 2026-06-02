@@ -72,7 +72,7 @@ def _format_tool_group(
 
 async def _handler(ctx: CommandContext, args: str) -> CommandResult:
     out_dir = (
-        Path.home() / ".agent-harness" / "sessions" / ctx.session_id / "export"
+        Path.home() / ".arktor" / "sessions" / ctx.session_id / "export"
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     fp = out_dir / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"

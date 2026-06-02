@@ -48,7 +48,7 @@ class DockerBackend(SandboxBackend):
         if _docker_lib is None:
             raise ImportError(
                 "Docker backend requires the 'docker' package.\n"
-                "Install it with: pip install agent-harness[sandbox]"
+                "Install it with: pip install arktor[sandbox]"
             )
 
         loop = asyncio.get_running_loop()

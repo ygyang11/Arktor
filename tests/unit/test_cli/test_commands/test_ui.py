@@ -25,8 +25,8 @@ def test_preview_truncates_long_prose() -> None:
 
 
 def test_preview_shell_run_returns_bang_form() -> None:
-    raw = format_shell_run("cd Agent-Harness", 0, "")
-    assert _format_session_preview(raw) == "! cd Agent-Harness"
+    raw = format_shell_run("cd Arktor", 0, "")
+    assert _format_session_preview(raw) == "! cd Arktor"
 
 
 def test_preview_shell_run_with_output_still_shows_command() -> None:
@@ -109,9 +109,9 @@ def test_home_relative_path_strips_home() -> None:
     from agent_cli.commands.ui import home_relative_path
 
     home = Path.home()
-    p = home / ".agent-harness" / "exports" / "file.md"
-    assert home_relative_path(p) == "~/.agent-harness/exports/file.md"
-    assert home_relative_path(str(p)) == "~/.agent-harness/exports/file.md"
+    p = home / ".arktor" / "exports" / "file.md"
+    assert home_relative_path(p) == "~/.arktor/exports/file.md"
+    assert home_relative_path(str(p)) == "~/.arktor/exports/file.md"
 
 
 def test_home_relative_path_absolute_when_outside_home() -> None:

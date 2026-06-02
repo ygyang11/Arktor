@@ -16,7 +16,7 @@ from agent_harness import __version__ as _HARNESS_VERSION
 
 _UNSAFE_SLUG = re.compile(r"[^A-Za-z0-9._-]")
 
-_USER_AGENT = f"agent-harness/{_HARNESS_VERSION}"
+_USER_AGENT = f"arktor/{_HARNESS_VERSION}"
 
 _PDF_SUFFIXES = frozenset({".pdf"})
 _IMAGE_SUFFIXES = frozenset(
@@ -155,7 +155,7 @@ def _read_head_metadata(
 
 
 def session_documents_root(session_id: str | None) -> Path:
-    base = Path.home() / ".agent-harness"
+    base = Path.home() / ".arktor"
     if session_id:
         return base / "sessions" / session_id / "documents"
     return base / "anonymous" / "documents"

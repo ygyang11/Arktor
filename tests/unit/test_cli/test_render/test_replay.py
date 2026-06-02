@@ -289,12 +289,12 @@ def test_replay_skips_expander_when_result_is_error() -> None:
 
 def test_replay_user_shell_run_uses_bang_form() -> None:
     from agent_cli.runtime.shell import format_shell_run
-    raw = format_shell_run("cd Agent-Harness", 0, "")
+    raw = format_shell_run("cd Arktor", 0, "")
     out = _render(_u(raw))
-    # `❯ !cd Agent-Harness` echo line
-    assert "!cd Agent-Harness" in out
+    # `❯ !cd Arktor` echo line
+    assert "!cd Arktor" in out
     # live shell-run renderables: `● Run(cmd)` call line + `⎿  ...` body
-    assert "Run(cd Agent-Harness)" in out
+    assert "Run(cd Arktor)" in out
     assert "(Completed with no output)" in out
     # envelope tags must not leak through
     assert "<user-shell-run>" not in out

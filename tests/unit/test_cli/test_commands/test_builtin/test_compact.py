@@ -23,7 +23,7 @@ def _stub_adapter() -> MagicMock:
 def _home_archive_path(name: str = "compression_round_1.md") -> str:
     """A path under $HOME so _display_archive renders it as `~/...`."""
     return str(
-        Path.home() / ".agent-harness" / "sessions" / "test-session" / "compact" / name
+        Path.home() / ".arktor" / "sessions" / "test-session" / "compact" / name
     )
 
 
@@ -50,7 +50,7 @@ async def test_compact_passes_extra_instructions_and_saves() -> None:
     assert "Compacted: 10 → 3 msgs" in out
     # archive detail: count + home-relative path so user can cat the file
     assert (
-        "7 archived to ~/.agent-harness/sessions/test-session/compact/compression_round_1.md"
+        "7 archived to ~/.arktor/sessions/test-session/compact/compression_round_1.md"
         in out
     )
 
