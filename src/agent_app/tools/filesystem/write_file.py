@@ -20,7 +20,8 @@ WRITE_FILE_DESCRIPTION = (
     "Writes content to a new file in the filesystem.\n\n"
     "Usage:\n"
     "- This tool creates NEW files only. If the file already exists, "
-    "it will return an error — to change an existing file (even a full rewrite), MUST use edit_file\n"
+    "it will return an error — to change an existing file (even a full rewrite), "
+    "MUST use edit_file\n"
     "- Parent directories are created automatically if they don't exist\n"
     "- ALWAYS prefer editing existing files (with edit_file) over creating new ones "
     "when possible, as this prevents file bloat and builds on existing work"
@@ -75,7 +76,10 @@ class WriteFileTool(BaseTool):
             return f"Error: {file_path} is a directory."
 
         if resolved.exists():
-            return f"Error: File already exists: {file_path}. Use edit_file to modify existing files."
+            return (
+                f"Error: File already exists: {file_path}. "
+                "Use edit_file to modify existing files."
+            )
 
         rel = relative_to_workspace(resolved)
         try:

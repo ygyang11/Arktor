@@ -58,7 +58,7 @@ def _inspect_all_memories() -> dict[str, list[str]]:
         idx = _memory_dir(scope) / "MEMORY.md"
         if idx.exists():
             content = idx.read_text(encoding="utf-8")
-            entries = [l.strip() for l in content.splitlines() if l.strip().startswith("- [")]
+            entries = [line.strip() for line in content.splitlines() if line.strip().startswith("- [")]
             if entries:
                 out[scope] = entries
     return out

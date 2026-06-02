@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agent_harness.background import BackgroundTask
     from agent_harness.prompt.system_builder import SystemPromptBuilder
     from agent_harness.sandbox.backend import SandboxBackend
     from agent_harness.session.base import BaseSession, SessionState

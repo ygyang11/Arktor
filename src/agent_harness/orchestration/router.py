@@ -4,15 +4,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Callable, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from agent_harness.agent.base import BaseAgent, AgentResult
-from agent_harness.hooks import DefaultHooks, resolve_hooks
+from agent_harness.agent.base import AgentResult, BaseAgent
 from agent_harness.core.config import HarnessConfig
 from agent_harness.core.errors import OrchestrationError
 from agent_harness.core.message import Message
+from agent_harness.hooks import DefaultHooks, resolve_hooks
 from agent_harness.utils.json_utils import parse_json_lenient
 
 if TYPE_CHECKING:

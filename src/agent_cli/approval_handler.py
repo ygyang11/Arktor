@@ -22,8 +22,8 @@ from agent_cli.theme import APPROVAL, SEP_DOT
 from agent_harness.agent.base import BaseAgent
 from agent_harness.approval.handler import ApprovalHandler
 from agent_harness.approval.policy import (
-    ApprovalPolicy,
     _UNSAFE_SHELL_RE,
+    ApprovalPolicy,
     derive_session_prefix,
 )
 from agent_harness.approval.types import ApprovalDecision, ApprovalRequest, ApprovalResult

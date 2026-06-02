@@ -73,7 +73,10 @@ async def _search_serpapi(query: str, max_results: int, api_key: str) -> str:
     try:
         from serpapi import GoogleSearch  # noqa: PLC0415
     except ImportError:
-        return "Error: google-search-results is not installed. Run `pip install google-search-results`."
+        return (
+            "Error: google-search-results is not installed. "
+            "Run `pip install google-search-results`."
+        )
 
     def _do_search() -> dict[str, list[dict[str, str]]]:
         search = GoogleSearch({"q": query, "num": max_results, "api_key": api_key})

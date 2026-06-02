@@ -1,5 +1,6 @@
 """Type-safe shared variables with scope support."""
 from __future__ import annotations
+
 from enum import Enum
 from typing import Any, TypeVar
 
@@ -65,4 +66,7 @@ class ContextVariables:
         return ContextVariables(global_store=self._global_store)
 
     def __repr__(self) -> str:
-        return f"ContextVariables(agent={list(self._agent_store)}, global={list(self._global_store)})"
+        return (
+            f"ContextVariables(agent={list(self._agent_store)}, "
+            f"global={list(self._global_store)})"
+        )

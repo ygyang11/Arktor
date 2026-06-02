@@ -12,10 +12,10 @@ from agent_harness.approval.rules import (
     has_tool_level_rule,
     parse_rules,
 )
-
-ApprovalMode = Literal["never", "ask", "auto"]
 from agent_harness.approval.types import ApprovalAction
 from agent_harness.core.message import ToolCall
+
+ApprovalMode = Literal["never", "ask", "auto"]
 
 _CHAIN_RE = re.compile(r"\s*(?:&&|\|\||[;|])\s*")
 _UNSAFE_SHELL_RE = re.compile(

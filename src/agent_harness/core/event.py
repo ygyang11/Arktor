@@ -8,8 +8,9 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 

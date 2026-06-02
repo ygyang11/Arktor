@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
-from agent_harness.hooks import DefaultHooks, resolve_hooks
-from agent_harness.agent.base import BaseAgent, AgentResult
+from agent_harness.agent.base import AgentResult, BaseAgent
 from agent_harness.core.config import HarnessConfig
+from agent_harness.hooks import DefaultHooks, resolve_hooks
 
 logger = logging.getLogger(__name__)
 

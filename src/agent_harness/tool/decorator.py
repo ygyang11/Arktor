@@ -8,7 +8,8 @@ from __future__ import annotations
 import inspect
 import logging
 import re
-from typing import Any, Callable, Coroutine, Literal, Union, get_args, get_origin, get_type_hints
+from collections.abc import Callable
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 from agent_harness.core.message import ToolOutput
 from agent_harness.tool.base import BaseTool, ToolSchema

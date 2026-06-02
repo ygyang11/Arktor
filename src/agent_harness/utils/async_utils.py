@@ -5,7 +5,8 @@ import asyncio
 import atexit
 import concurrent.futures
 import functools
-from typing import Any, Callable, Coroutine, TypeVar
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 

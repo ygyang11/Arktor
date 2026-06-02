@@ -6,7 +6,7 @@ across conversation turns and across sessions.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -24,7 +24,10 @@ class MemoryItem(BaseModel):
 
     def __repr__(self) -> str:
         preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
-        score_str = f", importance={self.importance_score:.3f}" if self.importance_score is not None else ""
+        score_str = (
+            f", importance={self.importance_score:.3f}"
+            if self.importance_score is not None else ""
+        )
         return f"MemoryItem({preview!r}{score_str})"
 
 

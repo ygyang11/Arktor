@@ -10,7 +10,6 @@ from agent_cli.render.tool_display import args_repr
 from agent_harness.core.message import Message, Role
 from agent_harness.utils.media import describe_attachment_full
 
-
 _ROLE_HEADERS: dict[Role, str] = {
     Role.USER: "## User",
     Role.ASSISTANT: "## Assistant",

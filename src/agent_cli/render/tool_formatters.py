@@ -28,8 +28,8 @@ from agent_cli.render.tool_display import (
     register_result_formatter,
 )
 from agent_cli.theme import SEP_DOT, SEP_ELLIPSIS
-from agent_harness.utils.media import human_size as _human_size
 from agent_harness.core.message import ToolCall, ToolResult
+from agent_harness.utils.media import human_size as _human_size
 
 _PREVIEW_CAP = 10
 _INDENT = "    "
@@ -204,7 +204,11 @@ def _fmt_read(tc: ToolCall, r: ToolResult) -> str:
         return "Read file"
     start, end, total = int(m[2]), int(m[3]), int(m[4])
     shown = end - start + 1
-    return f"Read {shown} lines totally" if shown == total else f"Read lines {start}-{end} of {total}"
+    return (
+        f"Read {shown} lines totally"
+        if shown == total
+        else f"Read lines {start}-{end} of {total}"
+    )
 
 
 @register_result_formatter("write_file")
@@ -269,7 +273,8 @@ def _fmt_term(tc: ToolCall, r: ToolResult) -> str:
     body = c[m.end():].lstrip() if m else c
     # Prefer last non-empty line: pytest "N passed", npm "added N packages",
     lines = [s for s in body.splitlines() if s.strip()]
-    sep_only = lambda s: bool(s) and all(ch in "=-_*#" or ch.isspace() for ch in s)
+    def sep_only(s: str) -> bool:
+        return bool(s) and all(ch in "=-_*#" or ch.isspace() for ch in s)
     lines = [s for s in lines if not sep_only(s)]
     picked = lines[-1].strip() if lines else "(no output)"
     return f"exit {code} {SEP_DOT} {_truncate(picked, 50)}"
@@ -281,7 +286,6 @@ def _fmt_websearch(tc: ToolCall, r: ToolResult) -> str:
     if c.startswith("No results"):
         return "No results"
     n = len(re.findall(r"^\d+\. ", c, re.MULTILINE))
-    q = _truncate(str(tc.arguments.get("query", "")), 40)
     return f'Found {n} {_plural(n, "result")}'
 
 
@@ -318,7 +322,6 @@ def _fmt_papersearch(tc: ToolCall, r: ToolResult) -> str:
         return "No papers"
     n = len(re.findall(r"^\d+\. ", c, re.MULTILINE))
     src = tc.arguments.get("source", "arxiv")
-    q = _truncate(str(tc.arguments.get("query", "")), 40)
     return f'Found {n} {_plural(n, "paper")} (via {src})'
 
 

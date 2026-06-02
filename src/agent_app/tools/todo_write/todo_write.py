@@ -72,7 +72,8 @@ class TodoWriteTool(BaseTool):
                                 "id": {
                                     "type": "string",
                                     "description": (
-                                        "Short stable task identifier (e.g. '1', 'Step1', 'Phase2')."
+                                        "Short stable task identifier "
+                                        "(e.g. '1', 'Step1', 'Phase2')."
                                     ),
                                 },
                                 "content": {

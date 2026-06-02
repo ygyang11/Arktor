@@ -45,7 +45,10 @@ class BackgroundTaskTool(BaseTool):
                     "action": {
                         "type": "string",
                         "enum": ["list", "status", "cancel"],
-                        "description": "'list' all tasks, 'status' for one task detail, 'cancel' a running task.",
+                        "description": (
+                            "'list' all tasks, 'status' for one task detail, "
+                            "'cancel' a running task."
+                        ),
                     },
                     "task_id": {
                         "type": "string",

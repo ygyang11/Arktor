@@ -5,9 +5,9 @@ Useful for development and debugging.
 """
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from typing import TextIO
-import sys
 
 from agent_harness.tracing.tracer import Span
 from agent_harness.utils.token_counter import truncate_text_by_tokens
@@ -97,7 +97,10 @@ class ConsoleExporter:
         duration = f"{span.duration_ms:.1f}ms" if span.duration_ms is not None else "..."
         status_indicator = "✓" if span.status == "ok" else f"{error_color}✗{reset}"
 
-        line = f"{prefix}{status_indicator} {kind_color}[{span.kind}]{reset} {span.name} ({duration})"
+        line = (
+            f"{prefix}{status_indicator} {kind_color}[{span.kind}]{reset} "
+            f"{span.name} ({duration})"
+        )
         self._stream.write(line + "\n")
 
         if span.attributes:

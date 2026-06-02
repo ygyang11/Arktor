@@ -7,7 +7,8 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any, AsyncIterator, Callable, Coroutine, TypeVar
+from collections.abc import AsyncIterator, Callable, Coroutine
+from typing import Any, TypeVar
 
 from agent_harness.core.config import LLMConfig
 from agent_harness.core.errors import LLMConnectionError, LLMError, LLMRateLimitError

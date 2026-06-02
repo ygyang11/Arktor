@@ -15,7 +15,10 @@ from rich.text import Text
 from agent_cli.commands.base import Command
 from agent_cli.runtime.prefs import PREFS_PATH
 from agent_cli.runtime.status import (
-    BucketView, StatusSnapshot, UsageView, WindowView,
+    BucketView,
+    StatusSnapshot,
+    UsageView,
+    WindowView,
 )
 from agent_cli.theme import APPROVAL, BAR_EMPTY, BAR_FILLED, SEP_DOT, TOOL_DONE
 from agent_harness.approval.policy import ApprovalPolicy

@@ -19,6 +19,7 @@ from agent_cli.commands.base import CommandContext
 from agent_cli.commands.registry import CommandRegistry
 from agent_cli.hooks import CliHooks
 from agent_cli.render.notices import format_expired_notice
+from agent_cli.render.replay import render_post_switch
 from agent_cli.render.ui import make_status_bar_text
 from agent_cli.repl.completer import build_input_completer, refresh_input_completer
 from agent_cli.repl.fill_block import (
@@ -47,7 +48,6 @@ from agent_cli.runtime.session import (
 )
 from agent_cli.runtime.shell import ShellState
 from agent_cli.runtime.sigint import bind_work
-from agent_cli.render.replay import render_post_switch
 from agent_cli.theme import APPROVAL, COMPRESSION, CliTheme
 from agent_harness.agent.base import BaseAgent
 from agent_harness.core.errors import LLMUnsupportedContentError

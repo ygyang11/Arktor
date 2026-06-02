@@ -81,7 +81,10 @@ class StdinApprovalHandler(ApprovalHandler):
 
         if k == "command":
             segments = [s.strip() for s in _CHAIN_RE.split(r) if s.strip()]
-            prefixes = sorted({derive_session_prefix(s, k) for s in segments}) if segments else [derive_session_prefix(r, k)]
+            prefixes = (
+                sorted({derive_session_prefix(s, k) for s in segments})
+                if segments else [derive_session_prefix(r, k)]
+            )
             label = ", ".join(f"'{p}'" for p in prefixes)
             return f"[A]lways allow {label} commands this session"
 
