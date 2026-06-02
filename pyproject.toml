@@ -3,14 +3,28 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-harness"
+name = "arktor"
 version = "0.5.1"
 description = "A complete, extensible agent framework for building AI agents and multi-agent systems"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "agent_harness contributors"}
+    {name = "Arktor contributors"}
+]
+
+keywords = ["agents", "agent-sdk", "agent-cli", "ai", "llm", "agentic", "research"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 dependencies = [
@@ -35,7 +49,7 @@ document = [
     "pypdf>=4.0,<8.0",
 ]
 app = [
-    "agent-harness[web,document]",
+    "arktor[web,document]",
 ]
 cli = [
     "prompt-toolkit>=3.0.50",
@@ -54,10 +68,17 @@ dev = [
 ]
 
 [project.scripts]
-harness = "agent_cli.app:main"
+arktor = "agent_cli.app:main"
+
+[project.urls]
+Repository = "https://github.com/ygyang11/Arktor"
+Issues = "https://github.com/ygyang11/Arktor/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
 
 [tool.ruff]
 target-version = "py311"
