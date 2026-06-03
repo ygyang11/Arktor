@@ -37,6 +37,7 @@ config.yaml
 .research
 .review
 .arktor
+branding/
 
 # ===== Output & Traces =====
 .notes

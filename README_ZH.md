@@ -1,106 +1,104 @@
 <p align="center">
-  <img src="docs/images/banner.svg" alt="Agent Harness" width="100%">
+  <img src="docs/images/banner.png" alt="Arktor" width="100%">
 </p>
 
 <p align="center">
-  <b>轻量 · 易上手 · 可扩展的 AI Agent 框架</b>
+  <b>可作为CLI直接使用，或者SDK 二次构建的 Agent 框架。</b>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License MIT">
+  <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python 3.11+">
   <a href="README.md"><img src="https://img.shields.io/badge/📄_English-click-lightgrey" alt="English"></a>
 </p>
 
-十行代码，跑通一个能调用工具的 Agent。
-再组合几个组件，就是一套 Multi-Agent 并行工作流。
+Arktor 是一个轻量、可改造的 Agent Harness，覆盖 Agent，以及围绕它的工具、上下文与编排等。
+同一个包提供两种使用方式：
 
-Agent-Harness 备好了构建 Agent 要用的东西 ——
-工具调用、上下文管理、任务编排 ——
-剩下的事情是你的：读懂它，改造它，搭出你自己的框架。
-
-> **No magic, no lock-in. Clone it, hack it, make it yours.**
+- **`arktor`** —— 终端中的交互式 Agent：流式输出、工具调用、Plan 模式、会话持久化、多模态输入。
+- **`arktor-sdk`** —— 其底层的 Python SDK：Agent、工具、编排、记忆、Tracing 与 Hook，
+  每一处都为继承与替换而设计。
 
 ---
 
-## 近期更新
+## 特性
 
-- `2026.03.27` **v0.2.0** — 上线 Skill 系统，Agent 按需加载领域技能，自动适配行为。
-  内置 `humanizer` 和 `comm-lit-review` 两个skill。
-- `2026.03.26` 新增内置工具 `paper_search`、`paper_fetch`，接入 arXiv 和 Semantic Scholar。
-  `pdf_parser` 可靠性增强。
-- `2026.03.22` **v0.1.0** — 首次发布。三种 Agent、四种编排模式、三层记忆、双 Provider、
-  完整 Tracing，以及 5 个内置工具（`web_search`、`web_fetch`、`terminal`、`pdf_parser`、`take_notes`）。
+- **内置工具开箱即用** —— 文件系统与可沙箱化的终端、网页搜索与抓取、子 Agent、todo list、跨会话记忆
+  与 Skill等，还有面向科研的工具 —— arXiv 与 Semantic Scholar 论文检索，以及把 PDF / 扫描件 /
+  图片解析为干净 markdown 的 文档解析工具。图片与 PDF 全程作为一等 attachment 流转。
+- **内置可观测性** —— 每一次 LLM 调用、工具执行与推理步骤都是一个 trace span，
+  导出至控制台与 JSONL，并通过丰富的 Hook 对外暴露（CLI 的实时进度即由此驱动）。
+- **Agent 与编排** —— ReAct、Plan-and-Execute、Conversational 三类 Agent，
+  可组合为 Pipeline、DAG、Router 或 Team。
+- **处处可改** —— 不绑定供应商的 LLM 层（内置重试与降级）、三层记忆（自动压缩）、
+  审批策略、可选的 Docker 沙箱，以及预写调优的内置 Prompt —— 清晰可扩展。
 
 ---
 
-## 亮点
+## 安装
 
-### 即刻上手
+```bash
+git clone https://github.com/ygyang11/Arktor.git
+cd Arktor
 
-⚡ **极简 API** — `@tool` 定义工具，创建 Agent，调用 `run()`。十行代码，直接跑。
+# 创建虚拟环境（任选其一）
+conda create -n arktor python=3.11 && conda activate arktor
+# 或：python -m venv .venv && source .venv/bin/activate
+# 或：uv venv && source .venv/bin/activate
 
-🔧 **零模板代码** — `@tool` 装饰器根据你的类型注解和 docstring，自动生成 Tool JSON Schema。同步异步都行。
+pip install -e ".[cli,app]"     # arktor CLI + 内置工具
+```
 
-🧩 **天生可改** — 没有藏起来的魔法。Agent、工具、记忆、LLM Provider，每个组件都能继承、替换、重写。
+仅作为 SDK 使用（不含 REPL）：
 
-### 从简单到复杂
+```bash
+pip install -e ".[dev,app]"
+```
 
-🤖 **多种 Agent 模式** — `ReActAgent` 工具调用循环，`PlanAndExecuteAgent` 多步任务拆解 + 动态重规划，`ConversationalAgent` 直接对话。
+若需 Docker 隔离的工具执行，追加 `sandbox` 扩展。
 
-🔀 **四种编排方式** — `Pipeline` 顺序链式，`DAGOrchestrator` 并行依赖图，`AgentRouter` 意图路由，`AgentTeam` 多 Agent 协作（supervisor / debate / round-robin）。
+### 配置
 
-🧱 **结构化上下文** — 对话缓冲、工作暂存、长期知识检索。Agent 每一步都在构建自己需要的上下文。
+仅需填写三项：模型、API key 与 base URL。可在项目目录放置 `config.yaml`
+（复制 [`config_example.yaml`](config_example.yaml)），或首次运行 `arktor`，
+它会自动在 `~/.arktor/config.yaml` 生成一份模板供你编辑：
 
-### 为生产环境打造
+```yaml
+llm:
+  provider: openai           # 或：anthropic
+  model: gpt-5.4
+  api_key: sk-...
+  base_url: https://api.openai.com/v1
+```
 
-🔍 **内置 Tracing** — LLM 调用、工具执行、推理步骤，全部自动追踪，Span 层级清晰可查。支持控制台和 JSON 导出。
-
-🌐 **不绑定供应商** — 开箱支持 OpenAI 和 Anthropic，内置重试、限流、降级链。换 Provider 不用改 Agent 代码。
-
-⚙️ **灵活配置** — 一个 YAML 文件管理所有组件，环境变量随时覆盖，也可以按 Agent 单独定制。
+其余配置项均有合理默认且可自由定制；任意字段都可用 `HARNESS_` 前缀的环境变量覆盖。
 
 ---
 
 ## 快速开始
 
-### 1. 环境准备
+### 命令行
 
 ```bash
-git clone https://github.com/yourname/Agent-Harness.git
-cd Agent-Harness
-
-# 选一种方式创建环境
-conda env create -f environment.yml    # conda
-# 或: python -m venv .venv && source .venv/bin/activate
-# 或: uv venv && source .venv/bin/activate
-
-pip install -e ".[dev]"
+arktor
 ```
 
-### 2. 配置
+`arktor` 会在当前项目目录启动一个交互式 Agent。以 `@path` 引入文件，以 `!cmd` 执行 shell，
+以 `/` 调用命令。会话自动持久化，可随时 `/resume` 续接；审批模式可在
+**Ask · Auto · Yolo** 之间切换。
 
-创建 `config.yaml`（完整选项见 [config_example.yaml](config_example.yaml)）：
+斜杠命令覆盖完整工作流，以下为常用部分：
 
-```yaml
-llm:
-  provider: openai
-  model: gpt-5.4
-  api_key: sk-...
-  base_url: https://api.openai.com/v1
-  reasoning_effort: high
-  # ...
-```
+- **规划与审查** —— `/plan`（只读规划）、`/review`（审查当前改动）、`/diff`、
+  `/init`（生成 `AGENTS.md`）
+- **会话** —— `/resume`、`/new`、`/compact`（压缩上下文）、`/export`、`/status`、`/context`
+- **模型与运行时** —— `/model`、`/effort`、`/provider`、`/permissions`、`/skills`、`/tasks`
 
-> 所有配置项都能用 `HARNESS_` 前缀的环境变量覆盖，比如 `HARNESS_LLM_MODEL`。
+`/help` 可列出全部命令。
 
-### 3. 运行示例
+### SDK
 
-```bash
-python examples/react_agent.py           # ReAct Agent + 工具调用
-python examples/react_agent.py --stream  # 流式输出
-```
-
-### 4. 写你自己的 Agent
+十行代码，一个会调用工具的 Agent：
 
 ```python
 import asyncio
@@ -111,78 +109,48 @@ def calculate(expression: str) -> str:
     """Evaluate a math expression.
 
     Args:
-        expression: A valid Python math expression like '2 + 3 * 4'.
+        expression: A Python math expression like '2 + 3 * 4'.
     """
     return str(eval(expression))
 
 async def main():
-    config = HarnessConfig.load("config.yaml")
     agent = ReActAgent(
         name="assistant",
         tools=[calculate],
-        config=config,
+        config=HarnessConfig.load("config.yaml"),
     )
     result = await agent.run("What is (42 * 37 + 15) / 3?")
-    print(result.output)
-    print(f"Steps: {result.step_count}, Tokens: {result.usage.total_tokens}")
+    print(result.output, "·", result.step_count, "steps")
 
 asyncio.run(main())
 ```
 
----
-
-## 架构
-
-<p align="center">
-  <img src="docs/images/architecture.svg" alt="Architecture" width="100%">
-</p>
-
-### 内置 Tracing
-
-LLM 调用、工具执行、推理过程，跑的时候自动追踪：
-
-```
-▶ [agent] agent.assistant (start)
-  input: What's the weather in Paris and Tokyo? Also, what is the population of France divided by 4?
-  ✓ [internal] step.1 (9073.0ms)
-    agent: assistant
-    • llm_call {agent=assistant, message_count=2}
-    • tool_call {agent=assistant, tool=get_weather, args={'city': 'Paris'}}
-    • tool_call {agent=assistant, tool=get_weather, args={'city': 'Tokyo'}}
-    • tool_call {agent=assistant, tool=get_population, args={'country': 'France'}}
-    • tool_result {content='Paris: 17°C, rainy'}
-    • tool_result {content='Tokyo: 20°C, partly cloudy'}
-    • tool_result {content='68 million'}
-  ✓ [internal] step.2 (1464.4ms)
-    agent: assistant
-    • llm_call {agent=assistant, message_count=6}
-    • tool_call {agent=assistant, tool=calculate, args={'expression': '68_000_000/4'}}
-    • tool_result {content='17000000.0'}
-  ✓ [internal] step.3 (2119.9ms)
-    agent: assistant
-    • llm_call {agent=assistant, message_count=8}
-✓ [agent] agent.assistant (12659.1ms)
-```
+`@tool` 直接从类型注解与 docstring 生成 JSON Schema。
+核心类型从 `agent_harness` 导入，内置工具位于 `agent_app`
+（如 `from agent_app.tools import WEB_TOOLS, FILESYSTEM_TOOLS`）。
 
 ---
 
 ## 示例
 
-`examples/` 包含覆盖核心能力的示例：
+[`examples/`](examples/) 下提供可直接运行的脚本：
 
-- **[react_agent.py](examples/react_agent.py)** — ReAct 推理循环 + 自定义工具
-- **[plan_and_execute.py](examples/plan_and_execute.py)** — 自动拆解任务，逐步调用工具执行，支持动态重规划
-- **[multi_agent_pipeline.py](examples/multi_agent_pipeline.py)** — 一个文件跑通三种编排：Pipeline 顺序、DAG 并行、Router 路由
-- **[agent_team.py](examples/agent_team.py)** — 多 Agent 协作：supervisor、debate、round-robin
-- **[deep_research.py](examples/deep_research.py)** — 完整流程：规划 → 并行研究（DAG）→ 交叉评审（Team）→ 综合报告
-- **[skill_demo.py](examples/skill_demo.py)** — 展示如何使用 `skills` 来做特定任务，以文本润色为例
+- **agents/** —— [`react_agent`](examples/agents/react_agent.py)、
+  [`plan_and_execute`](examples/agents/plan_and_execute.py)、
+  [`multi_agent_pipeline`](examples/agents/multi_agent_pipeline.py)、[`agent_team`](examples/agents/agent_team.py)、
+  [`deep_research`](examples/agents/deep_research.py)。
+- **features/** —— [`coding_demo`](examples/features/coding_demo.py)、
+  [`session_demo`](examples/features/session_demo.py)、
+  [`skill_demo`](examples/features/skill_demo.py)。
+
+```bash
+python examples/agents/react_agent.py        # ReAct 循环 + 自定义工具
+```
 
 ---
 
 ## 参与贡献
 
-写了好用的 Tool、新的 Agent 模式、或者改进了某个模块？欢迎贡献。
+欢迎贡献。请先开 issue 讨论方案，并保持与现有代码风格一致。
 
-保持现有风格就好，enjoy building.
-
-本项目基于 [MIT License](LICENSE) 开源。
+本项目以 [MIT License](LICENSE) 开源。
