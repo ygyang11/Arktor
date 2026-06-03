@@ -1,7 +1,7 @@
 """Arktor interactive CLI layer."""
 from __future__ import annotations
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
 _MISSING_DEPS_TEMPLATE = (
     "Arktor CLI requires the following missing dependencies: {deps}.\n"
