@@ -66,9 +66,9 @@ pip install -e ".[dev,app]"
 ```yaml
 llm:
   provider: openai           # 或：anthropic
-  model: gpt-5.4
+  model: gpt-5.5
   api_key: sk-...
-  base_url: https://api.openai.com/v1
+  base_url: ...
 ```
 
 其余配置项均有合理默认且可自由定制；任意字段都可用 `HARNESS_` 前缀的环境变量覆盖。
@@ -78,6 +78,10 @@ llm:
 ## 快速开始
 
 ### 命令行
+
+<p align="center">
+  <img src="docs/images/cli.png" alt="arktor CLI" width="100%">
+</p>
 
 ```bash
 arktor

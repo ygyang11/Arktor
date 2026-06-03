@@ -70,9 +70,9 @@ You only need to set three fields — model, API key, and base URL. Either drop 
 ```yaml
 llm:
   provider: openai           # or: anthropic
-  model: gpt-5.4
+  model: gpt-5.5
   api_key: sk-...
-  base_url: https://api.openai.com/v1
+  base_url: ...
 ```
 
 Everything else has sensible defaults and is fully customizable; override any field with a
@@ -83,6 +83,10 @@ Everything else has sensible defaults and is fully customizable; override any fi
 ## Quickstart
 
 ### The CLI
+
+<p align="center">
+  <img src="docs/images/cli.png" alt="arktor CLI" width="100%">
+</p>
 
 ```bash
 arktor
