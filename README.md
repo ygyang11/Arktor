@@ -1,105 +1,111 @@
 <p align="center">
-  <img src="docs/images/banner.svg" alt="Agent Harness" width="100%">
+  <img src="docs/images/banner.png" alt="Arktor" width="100%">
 </p>
 
 <p align="center">
-  <b>Lightweight, Easy-to-use, and Extensible Agent Framework</b>
+  <b>An agent harness you can run as a CLI and build on as an SDK.</b>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License MIT">
+  <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python 3.11+">
   <a href="README_ZH.md"><img src="https://img.shields.io/badge/📄_中文文档-click-lightgrey" alt="中文文档"></a>
 </p>
 
-Build AI agents your way — from a simple tool-calling assistant to multi-agent
-parallel workflows. Agent Harness provides production-ready building blocks for
-tool use, context management, and orchestration, with every component designed
-to be understood, modified, and extended.
+Arktor is a lightweight, hackable framework for building AI agents — and the tools, context,
+and orchestration around them. It comes two ways in one package:
 
-> **No magic, no lock-in. Clone it, hack it, make it yours.**
-
----
-
-## Recent Updates
-
-- `2026.03.27` **v0.2.0** — Skill system. Agents can load domain-specific instructions on demand
-  and adapt their behavior automatically. Ships with `humanizer` and `comm-lit-review` skills.
-- `2026.03.26` New built-in tools: `paper_search` and `paper_fetch` for arXiv & Semantic Scholar.
-  Enhanced `pdf_parser` reliability.
-- `2026.03.22` **v0.1.0** — Initial release. ReAct / Plan-and-Execute / Conversational agents,
-  4 orchestration modes, 3-layer memory, OpenAI & Anthropic providers, built-in tracing, and
-  5 built-in tools (`web_search`, `web_fetch`, `terminal`, `pdf_parser`, `take_notes`).
+- **`arktor`** — an interactive agent in your terminal: streaming output, tool use, plan
+  mode, persistent sessions, multimodal input.
+- **`arktor-sdk`** — the Python SDK underneath: agents, tools, orchestration, memory,
+  tracing, and hooks, every piece designed to be subclassed and swapped.
 
 ---
 
-## Highlights
+## Features
 
-### Get Started in Minutes
-
-⚡ **Simple Agent API** — Define tools with `@tool`, create an agent, call `run()`. A working agent in under 10 lines of code.
-
-🔧 **Zero-Boilerplate Tools** — The `@tool` decorator auto-generates Tool JSON Schema from type hints and docstrings. Sync and async functions both work out of the box.
-
-🧩 **Hackable by Design** — Clean abstractions, no hidden magic. Every component — agents, tools, memory, LLM providers — can be subclassed, swapped, or rewritten to fit your needs.
-
-### Scale to Complex Workflows
-
-🤖 **Agent Patterns** — `ReActAgent` for tool-calling loops, `PlanAndExecuteAgent` for multi-step task decomposition with replanning, `ConversationalAgent` for direct LLM interaction.
-
-🔀 **Orchestration Modes** — Chain agents in a `Pipeline`, run them in parallel with `DAGOrchestrator`, dispatch by intent with `AgentRouter`, or collaborate as an `AgentTeam` (supervisor / debate / round-robin).
-
-🧱 **Structured Context** — Conversation buffer, working scratchpad, and long-term knowledge retrieval — agents build and maintain the context they need across steps.
-
-### Production Ready
-
-🔍 **Built-in Tracing** — Every LLM call, tool invocation, and reasoning step is traced automatically with span hierarchy. Console and JSON exporters included.
-
-🌐 **Provider Agnostic** — OpenAI and Anthropic supported out of the box, with built-in retry, rate limiting, and fallback chains. Swap providers without changing agent code.
-
-⚙️ **Flexible Configuration** — YAML config for all components, environment variable overrides, per-agent customization.
+- **Batteries-included tools** — filesystem and a sandboxable terminal, web search & fetch,
+  sub-agents, todo lists, cross-session memory, and skills..., plus research tools — paper search across
+  arXiv & Semantic Scholar, and a document_parser that turns PDFs, scans, and images into
+  clean markdown. Images and PDFs flow through as first-class attachments.
+- **Observability built in** — every LLM call, tool, and step is a traced span, exported
+  to the console and JSONL and surfaced through a rich set of hooks (the CLI's live
+  progress runs on them).
+- **Agents & orchestration** — ReAct, Plan-and-Execute, and Conversational agents,
+  composable into pipelines, DAGs, routers, or teams.
+- **Hackable throughout** — provider-agnostic LLMs with retry and fallback, 3-layer memory
+  with auto-compression, approval policies, an optional Docker sandbox, and tuned built-in
+  prompts — clean extension point.
 
 ---
 
-## Quick Start
-
-### 1. Setup
+## Install
 
 ```bash
-git clone https://github.com/yourname/Agent-Harness.git
-cd Agent-Harness
+git clone https://github.com/ygyang11/Arktor.git
+cd Arktor
 
-# Create environment (choose one)
-conda env create -f environment.yml    # conda
+# create an environment (pick one)
+conda create -n arktor python=3.11 && conda activate arktor
 # or: python -m venv .venv && source .venv/bin/activate
 # or: uv venv && source .venv/bin/activate
 
-pip install -e ".[dev]"
+pip install -e ".[cli,app]"     # arktor CLI + built-in tools
 ```
 
-### 2. Configure
+For SDK use without the REPL:
 
-Create a `config.yaml` (see [config_example.yaml](config_example.yaml) for all options):
+```bash
+pip install -e ".[dev,app]"
+```
+
+Add the `sandbox` extra for Docker-isolated tool execution.
+
+### Configure
+
+You only need to set three fields — model, API key, and base URL. Either drop a
+`config.yaml` in your project (copy [`config_example.yaml`](config_example.yaml)), or run
+`arktor` once and it writes a starter `~/.arktor/config.yaml` for you to edit:
 
 ```yaml
 llm:
-  provider: openai
+  provider: openai           # or: anthropic
   model: gpt-5.4
   api_key: sk-...
   base_url: https://api.openai.com/v1
-  reasoning_effort: high
-  # ...
 ```
 
-> All values can be overridden via environment variables with `HARNESS_` prefix (e.g. `HARNESS_LLM_MODEL`).
+Everything else has sensible defaults and is fully customizable; override any field with a
+`HARNESS_`-prefixed env var.
 
-### 3. Run an Example
+---
+
+## Quickstart
+
+### The CLI
 
 ```bash
-python examples/react_agent.py           # ReAct agent with tool calling
-python examples/react_agent.py --stream  # streaming mode
+arktor
 ```
 
-### 4. Build Your Own Agent
+`arktor` starts an interactive agent rooted at your project directory. Attach files with
+`@path`, run a shell command with `!cmd`, and open commands with `/`. Sessions persist, so
+you can `/resume` later, and approval can switch between **Ask · Auto · Yolo** at any time.
+
+Slash commands cover the whole loop — the most-used ones:
+
+- **Plan & review** — `/plan` (read-only planning), `/review` (review the working diff),
+  `/diff`, `/init` (generate `AGENTS.md`)
+- **Session** — `/resume`, `/new`, `/compact` (compress context), `/export`, `/status`,
+  `/context`
+- **Model & runtime** — `/model`, `/effort`, `/provider`, `/permissions`, `/skills`,
+  `/tasks`
+
+Run `/help` to list them all.
+
+### The SDK
+
+Ten lines for a working tool-calling agent:
 
 ```python
 import asyncio
@@ -110,79 +116,48 @@ def calculate(expression: str) -> str:
     """Evaluate a math expression.
 
     Args:
-        expression: A valid Python math expression like '2 + 3 * 4'.
+        expression: A Python math expression like '2 + 3 * 4'.
     """
     return str(eval(expression))
 
 async def main():
-    config = HarnessConfig.load("config.yaml")
     agent = ReActAgent(
         name="assistant",
         tools=[calculate],
-        config=config,
+        config=HarnessConfig.load("config.yaml"),
     )
     result = await agent.run("What is (42 * 37 + 15) / 3?")
-    print(result.output)
-    print(f"Steps: {result.step_count}, Tokens: {result.usage.total_tokens}")
+    print(result.output, "·", result.step_count, "steps")
 
 asyncio.run(main())
 ```
 
----
-
-## Architecture
-
-<p align="center">
-  <img src="docs/images/architecture.svg" alt="Architecture" width="100%">
-</p>
-
-### Built-in Observability
-
-Every LLM call, tool invocation, and reasoning step is traced automatically:
-
-```
-▶ [agent] agent.assistant (start)
-  input: What's the weather in Paris and Tokyo? Also, what is the population of France divided by 4?
-  ✓ [internal] step.1 (9073.0ms)
-    agent: assistant
-    • llm_call {agent=assistant, message_count=2}
-    • tool_call {agent=assistant, tool=get_weather, args={'city': 'Paris'}}
-    • tool_call {agent=assistant, tool=get_weather, args={'city': 'Tokyo'}}
-    • tool_call {agent=assistant, tool=get_population, args={'country': 'France'}}
-    • tool_result {content='Paris: 17°C, rainy'}
-    • tool_result {content='Tokyo: 20°C, partly cloudy'}
-    • tool_result {content='68 million'}
-  ✓ [internal] step.2 (1464.4ms)
-    agent: assistant
-    • llm_call {agent=assistant, message_count=6}
-    • tool_call {agent=assistant, tool=calculate, args={'expression': '68_000_000/4'}}
-    • tool_result {content='17000000.0'}
-  ✓ [internal] step.3 (2119.9ms)
-    agent: assistant
-    • llm_call {agent=assistant, message_count=8}
-✓ [agent] agent.assistant (12659.1ms)
-```
+`@tool` derives the JSON schema from your type hints and docstring. Core types import from `agent_harness`; the built-in tools live in `agent_app`
+(e.g. `from agent_app.tools import WEB_TOOLS, FILESYSTEM_TOOLS`).
 
 ---
 
 ## Examples
+  
+For SDK users, Ready-to-run scripts under [`examples/`](examples/):
 
-The `examples/` directory contains ready-to-run scripts covering core capabilities:
+- **agents/** — [`react_agent`](examples/agents/react_agent.py),
+  [`plan_and_execute`](examples/agents/plan_and_execute.py),
+  [`multi_agent_pipeline`](examples/agents/multi_agent_pipeline.py), [`agent_team`](examples/agents/agent_team.py),
+  [`deep_research`](examples/agents/deep_research.py).
+- **features/** — [`coding_demo`](examples/features/coding_demo.py), [`session_demo`](examples/features/session_demo.py),
+  [`skill_demo`](examples/features/skill_demo.py).
 
-- **[react_agent.py](examples/react_agent.py)** — ReAct reasoning loop with custom tools, supporting both generate and stream modes
-- **[plan_and_execute.py](examples/plan_and_execute.py)** — Automatic task decomposition into steps, step-by-step execution with tools, and dynamic replanning
-- **[multi_agent_pipeline.py](examples/multi_agent_pipeline.py)** — Three orchestration patterns in one file: sequential Pipeline, parallel DAG, and intent-based Router
-- **[agent_team.py](examples/agent_team.py)** — Multi-agent collaboration with supervisor, debate, and round-robin modes
-- **[deep_research.py](examples/deep_research.py)** — Full-stack orchestration: planning → parallel research (DAG) → cross-review (Team) → final synthesis
-- **[skill_demo.py](examples/skill_demo.py)** — Demonstrates how to use `skills` for specific tasks, with a writing refinement example
+```bash
+python examples/agents/react_agent.py        # ReAct loop with custom tools
+```
 
 ---
 
 ## Contributing
 
-Agent Harness is built to be extended. If you've built a useful tool, added a new agent pattern,
-or improved an existing module, we'd love to see it contributed.
+Contributions are welcome. For
+anything substantial, please open an issue to discuss the approach first, and keep changes
+consistent with the existing style.
 
-All contributions are welcome — just keep the existing style and have fun building.
-
-This project is released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE).
