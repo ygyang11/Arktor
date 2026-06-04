@@ -354,6 +354,20 @@ class TestOpenAIMediaRejection:
         with pytest.raises(LLMUnsupportedContentError):
             await p.generate([])
 
+    async def test_responses_input_file_rejection(self) -> None:
+        p = _openai()
+        msg = (
+            "[OneOfParam] [input[63].content[1]] [invalid_enum_value] "
+            "Invalid value: 'input_file'. Supported values are: 'input_text'."
+        )
+
+        def raiser() -> Any:
+            raise _FakeOpenAIBadRequest(msg)
+
+        _wire_openai(p, raiser)
+        with pytest.raises(LLMUnsupportedContentError):
+            await p.generate([])
+
     async def test_context_length_still_raises_context_error(self) -> None:
         p = _openai()
 
