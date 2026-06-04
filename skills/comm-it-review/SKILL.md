@@ -1,10 +1,9 @@
 ---
-name: comm-lit-review-claude-single
-description: Communications-domain literature review with Claude-style knowledge-base-first retrieval. Use when the task is about communications, wireless, networking, satellite/NTN, Wi-Fi, cellular, transport protocols, congestion control, routing, scheduling, MAC/PHY, rate adaptation, channel estimation, beamforming, or communication-system research and the user wants papers, related work, a survey, or a landscape summary. Search Zotero, Obsidian, and local paper folders first when available, then search IEEE Xplore, ScienceDirect, ACM Digital Library, and broader web in that order.
-allowed-tools: Bash(*), Read, Glob, Grep, WebSearch, WebFetch, Write, Agent, mcp__zotero__*, mcp__obsidian-vault__*
+name: comm-lit-review
+description: Communications-domain literature review with knowledge-base-first retrieval. Use when the task is about communications, wireless, networking, satellite/NTN, Wi-Fi, cellular, transport protocols, congestion control, routing, scheduling, MAC/PHY, rate adaptation, channel estimation, beamforming, or communication-system research and the user wants papers, related work, a survey, or a landscape summary. Search Zotero, Obsidian, and local paper folders first when available, then search IEEE Xplore, ScienceDirect, ACM Digital Library, and broader web in that order.
 ---
 
-# Comm Lit Review Claude Single
+# Comm Lit Review
 
 Research topic: $ARGUMENTS
 
@@ -28,7 +27,6 @@ If the center of gravity is generic ML architecture research, pure control theor
 - **PAPER_LIBRARY**: Check local PDFs in this order:
   1. `papers/` in the current project
   2. `literature/` in the current project
-  3. Custom path specified by the user in `CLAUDE.md` under `## Paper Library`
 - **MAX_LOCAL_PAPERS = 20**: Maximum number of local PDFs to scan. If there are more, prioritize by filename and first-page relevance.
 
 ## Source Selection

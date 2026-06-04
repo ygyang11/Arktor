@@ -17,6 +17,7 @@ MEDIA_REJECTION_PHRASES: tuple[str, ...] = (
     "does not support image", "does not support file", "does not support video",
     "does not support audio", "does not support multimodal", "does not support vision",
     "support image input", "support file input",
+    "invalid value: 'input_file'", "invalid value: 'input_image'",
     "could not process image", "could not process file",
     "image does not match", "media type mismatch",
     "unsupported mimetype", "unsupported image",
@@ -41,7 +42,7 @@ def is_media_mime(mime: str) -> bool:
 def is_media_rejection(err_msg: str) -> bool:
     """Substring-match an LLM provider error message against known media-rejection phrases."""
     low = err_msg.lower()
-    return any(p in low for p in MEDIA_REJECTION_PHRASES)
+    return any(p.lower() in low for p in MEDIA_REJECTION_PHRASES)
 
 
 def media_safe_filename(name: str | None, mime: str) -> str:

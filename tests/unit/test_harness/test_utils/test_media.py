@@ -86,6 +86,8 @@ def test_is_media_mime_union() -> None:
         # openai
         "Invalid file 'image': unsupported mimetype ('application/octet-stream')",
         "Expected file type to be a supported format: .jpeg, .jpg, .png, .gif, .webp",
+        "[OneOfParam] [input[63].content[1]] [invalid_enum_value] "
+        "Invalid value: 'input_file'. Supported values are: 'input_text'.",
         # gemini
         "Unable to submit request because it has an empty inlineData parameter",
         # capitalization stress
