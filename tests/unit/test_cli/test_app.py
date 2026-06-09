@@ -304,6 +304,36 @@ def test_no_flags_defaults() -> None:
     assert args.resume_latest is False
     assert args.resume is None
     assert args.session_id is None
+    assert args.prompt is None
+
+
+# ── -p / --prompt (headless) ─────────────────────────────────────────
+
+
+def test_prompt_short_form() -> None:
+    assert _build_parser().parse_args(["-p", "do x"]).prompt == "do x"
+
+
+def test_prompt_long_form() -> None:
+    assert _build_parser().parse_args(["--prompt", "do x"]).prompt == "do x"
+
+
+def test_prompt_combines_with_session_id() -> None:
+    args = _build_parser().parse_args(["-p", "task", "-s", "sid"])
+    assert args.prompt == "task"
+    assert args.session_id == "sid"
+
+
+def test_prompt_combines_with_continue() -> None:
+    args = _build_parser().parse_args(["-p", "task", "-c"])
+    assert args.prompt == "task"
+    assert args.resume_latest is True
+
+
+def test_prompt_combines_with_resume() -> None:
+    args = _build_parser().parse_args(["-p", "task", "-r", "sid"])
+    assert args.prompt == "task"
+    assert args.resume == "sid"
 
 
 # ── --version ────────────────────────────────────────────────────────
@@ -315,3 +345,13 @@ def test_version_flag_prints_and_exits_zero(capsys: pytest.CaptureFixture[str]) 
     assert rc == 0
     assert "arktor" in out
     assert __version__ in out
+
+
+def test_main_dispatches_headless_empty_prompt(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # main() routes -p to run_headless; empty task short-circuits to 2 before
+    # any session/agent setup, exercising the dispatch end-to-end.
+    rc = main(["-p", "   "])
+    assert rc == 2
+    assert "non-empty task" in capsys.readouterr().err

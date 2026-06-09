@@ -1,5 +1,7 @@
 import sys
 
+import pytest
+
 from agent_app.tools import BUILTIN_TOOLS
 from agent_cli.agent_factory import create_cli_agent
 from agent_cli.prompt import USER_ACTIONS_NAME
@@ -39,6 +41,21 @@ def test_cli_agent_user_actions_after_guidelines_before_tools() -> None:
     assert USER_ACTIONS_NAME in names
     assert names.index("guidelines") < names.index(USER_ACTIONS_NAME)
     assert names.index(USER_ACTIONS_NAME) < names.index("tools")
+
+
+def test_passing_handler_skips_cli_approval_handler_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agent_cli.approval_handler as ah_mod
+    from agent_harness.approval.handler import AutoApproveHandler
+
+    def _boom(*a: object, **k: object) -> None:
+        raise AssertionError("CliApprovalHandler must not be constructed")
+
+    monkeypatch.setattr(ah_mod.CliApprovalHandler, "__init__", _boom)
+    agent = create_cli_agent(approval_handler=AutoApproveHandler())
+    assert isinstance(agent, ReActAgent)
+    assert isinstance(agent._approval_handler, AutoApproveHandler)
 
 
 def test_sub_agent_fork_drops_user_actions_section() -> None:

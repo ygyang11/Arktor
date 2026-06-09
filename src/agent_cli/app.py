@@ -14,6 +14,10 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Arktor interactive CLI",
     )
     parser.add_argument("--version", action="store_true", help="show version and exit")
+    parser.add_argument(
+        "-p", "--prompt", dest="prompt", metavar="TASK", default=None,
+        help="run a single task non-interactively, print the result, and exit",
+    )
     grp = parser.add_mutually_exclusive_group()
     grp.add_argument(
         "-c", "--continue", dest="resume_latest", action="store_true",
@@ -164,6 +168,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"arktor {__version__}")
         return 0
     try:
+        if args.prompt is not None:
+            from agent_cli.headless import run_headless
+            return asyncio.run(run_headless(args))
         return asyncio.run(_async_main(args))
     except KeyboardInterrupt:
         return 130

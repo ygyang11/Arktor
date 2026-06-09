@@ -1,5 +1,9 @@
 """Approval module — human-in-the-loop tool execution approval."""
-from agent_harness.approval.handler import ApprovalHandler, StdinApprovalHandler
+from agent_harness.approval.handler import (
+    ApprovalHandler,
+    AutoApproveHandler,
+    StdinApprovalHandler,
+)
 from agent_harness.approval.policy import ApprovalPolicy
 from agent_harness.approval.types import (
     ApprovalAction,
@@ -44,6 +48,7 @@ __all__ = [
     "ApprovalPolicy",
     "ApprovalRequest",
     "ApprovalResult",
+    "AutoApproveHandler",
     "StdinApprovalHandler",
     "resolve_approval",
     "resolve_approval_handler",
