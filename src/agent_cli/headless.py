@@ -7,8 +7,13 @@ only the final result to stdout, and exit. No renderer, no REPL, no chrome.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Awaitable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agent_harness import AgentResult
 
 
 async def _safe(coro: Awaitable[object], what: str) -> None:
@@ -16,6 +21,29 @@ async def _safe(coro: Awaitable[object], what: str) -> None:
         await coro
     except Exception as e:
         print(f"arktor: failed to {what}: {e}", file=sys.stderr)
+
+
+def _emit_json(session_id: str, result: AgentResult | None, err: str) -> None:
+    """Emit the run as NDJSON on stdout: one object per step, then a final
+    result line carrying session_id, output and usage. On failure a single
+    is_error result line stands in for the whole run."""
+    lines: list[dict[str, Any]] = []
+    if result is None:
+        lines.append({
+            "type": "result", "is_error": True, "session_id": session_id,
+            "output": None, "error": err,
+        })
+    else:
+        for i, step in enumerate(result.steps):
+            lines.append({"type": "step", "index": i, **step.model_dump(mode="json")})
+        lines.append({
+            "type": "result", "is_error": False, "session_id": session_id,
+            "output": result.output, "num_steps": len(result.steps),
+            "usage": result.usage.model_dump(mode="json"),
+        })
+    for line in lines:
+        sys.stdout.write(json.dumps(line, ensure_ascii=False, default=str) + "\n")
+    sys.stdout.flush()
 
 
 async def run_headless(args: argparse.Namespace) -> int:
@@ -66,13 +94,14 @@ async def run_headless(args: argparse.Namespace) -> int:
     policy.set_mode("never")
     save = make_save_session(agent, backend)
 
+    fmt = args.output_format or "text"
     rc = 0
-    output = ""
+    result = None
+    err = ""
     try:
         result = await agent.run(task, session=backend)
-        output = result.output
     except Exception as e:
-        print(f"arktor: {e}", file=sys.stderr)
+        err = str(e)
         rc = 1
     finally:
         policy.set_mode(original_mode)
@@ -82,6 +111,10 @@ async def run_headless(args: argparse.Namespace) -> int:
         await _safe(background.shutdown(agent), "shut down background tasks")
         await _safe(stop_sandbox(agent), "stop sandbox")
 
-    if rc == 0:
-        print(output)
+    if fmt == "json":
+        _emit_json(session_id, result, err)
+    elif result is not None:
+        print(result.output)
+    else:
+        print(f"arktor: {err}", file=sys.stderr)
     return rc

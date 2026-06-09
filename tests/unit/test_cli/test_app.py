@@ -336,6 +336,38 @@ def test_prompt_combines_with_resume() -> None:
     assert args.resume == "sid"
 
 
+# ── --output-format (headless, owned by -p) ──────────────────────────
+
+
+def test_output_format_default_is_none() -> None:
+    assert _build_parser().parse_args([]).output_format is None
+
+
+def test_output_format_parses_with_prompt() -> None:
+    args = _build_parser().parse_args(["-p", "x", "--output-format", "json"])
+    assert args.output_format == "json"
+
+
+def test_output_format_rejects_unknown_value() -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["-p", "x", "--output-format", "yaml"])
+
+
+def test_output_format_requires_prompt(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = main(["--output-format", "json"])
+    assert rc == 2
+    assert "requires -p" in capsys.readouterr().err
+
+
+def test_output_format_text_value_still_requires_prompt(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # ownership: --output-format belongs to -p; even the text value errors without it
+    rc = main(["--output-format", "text"])
+    assert rc == 2
+    assert "requires -p" in capsys.readouterr().err
+
+
 # ── --version ────────────────────────────────────────────────────────
 
 
