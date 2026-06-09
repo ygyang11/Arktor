@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -294,13 +295,17 @@ async def run_repl(
                 state.pending_input = outcome.buffered
 
     finally:
-        if background.has_running(agent):
-            count = background.cancel_all(agent)
-            if count:
-                console.print(f"[dim]Cancelled {count} background task(s).[/dim]")
-        await background.shutdown(agent)
-        handler.cancel_pending()
-        await adapter.end_step()
+        with suppress(Exception):
+            if background.has_running(agent):
+                count = background.cancel_all(agent)
+                if count:
+                    console.print(f"[dim]Cancelled {count} background task(s).[/dim]")
+        with suppress(Exception):
+            await background.shutdown(agent)
+        with suppress(Exception):
+            handler.cancel_pending()
+        with suppress(Exception):
+            await adapter.end_step()
 
 
 async def _handle_line(

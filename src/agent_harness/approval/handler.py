@@ -97,3 +97,20 @@ class StdinApprovalHandler(ApprovalHandler):
                 return f"[A]lways allow {tc.name} on '{prefix}' this session"
             return f"[A]lways allow {tc.name} under '{prefix}/' this session"
         return f"[A]lways allow {tc.name} this session"
+
+
+class AutoApproveHandler(ApprovalHandler):
+    """Non-interactive handler that allows every request without prompting.
+
+    For headless or programmatic runs where no human can answer. Pair with
+    policy mode ``never`` for fully unrestricted execution; on its own it
+    auto-allows any request the policy escalates to ASK.
+    """
+
+    async def request_approval(self, request: ApprovalRequest) -> ApprovalResult:
+        tc = request.tool_call
+        return ApprovalResult(
+            tool_call_id=tc.id,
+            tool_name=tc.name,
+            decision=ApprovalDecision.ALLOW_ONCE,
+        )

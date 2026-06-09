@@ -15,6 +15,7 @@ from agent_harness.approval import (
     ApprovalPolicy,
     ApprovalRequest,
     ApprovalResult,
+    AutoApproveHandler,
     StdinApprovalHandler,
 )
 from agent_harness.context.context import AgentContext
@@ -55,6 +56,7 @@ __all__ = [
     "ApprovalPolicy",
     "ApprovalRequest",
     "ApprovalResult",
+    "AutoApproveHandler",
     "StdinApprovalHandler",
     # Core
     "Attachment",
