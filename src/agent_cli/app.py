@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 
@@ -152,12 +153,16 @@ async def _async_main(args: argparse.Namespace) -> int:
             theme,
         )
     finally:
-        shell_state.cleanup()
-        uninstall()
-        await adapter.end_step()
+        with suppress(Exception):
+            shell_state.cleanup()
+        with suppress(Exception):
+            uninstall()
+        with suppress(Exception):
+            await adapter.end_step()
         await asyncio.sleep(0)
 
-    await print_exit_reminder(console, backend)
+    with suppress(Exception):
+        await print_exit_reminder(console, backend)
     return 0
 
 
