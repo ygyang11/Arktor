@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -11,10 +11,13 @@ import pytest
 
 from agent_cli.app import _build_parser
 from agent_cli.headless import run_headless
+from agent_harness import AgentResult
+from agent_harness.agent.base import StepResult
 from agent_harness.approval.handler import AutoApproveHandler
 from agent_harness.approval.types import ApprovalDecision, ApprovalRequest
 from agent_harness.core.message import ToolCall
 from agent_harness.hooks.base import DefaultHooks
+from agent_harness.llm.types import Usage
 
 
 @pytest.fixture
@@ -45,7 +48,8 @@ class _FakeApproval:
 
 class _FakeAgent:
     def __init__(
-        self, *, output: str = "", error: Exception | None = None, mode: str = "auto",
+        self, *, output: str = "", error: Exception | None = None,
+        mode: str = "auto", steps: list[StepResult] | None = None,
     ) -> None:
         self._approval = _FakeApproval(mode)
         self._session_metadata_extras: dict[str, Any] = {}
@@ -53,9 +57,11 @@ class _FakeAgent:
         if error is not None:
             self.run = AsyncMock(side_effect=error)
         else:
-            async def _run(task: str, *, session: Any = None, **kw: Any) -> Any:
+            res = AgentResult(output=output, steps=steps or [], usage=Usage())
+
+            async def _run(task: str, *, session: Any = None, **kw: Any) -> AgentResult:
                 self.run_mode_seen = self._approval.mode
-                return SimpleNamespace(output=output)
+                return res
 
             self.run = _run  # type: ignore[assignment]
 
@@ -150,6 +156,42 @@ async def test_cleanup_failure_preserves_output(
     assert out.out == "result\n"
     assert "stop sandbox" in out.err
     assert "docker boom" in out.err
+
+
+async def test_json_output_emits_ndjson_steps_and_result(
+    session_dir: Path, patch_runtime: Any, capsys: pytest.CaptureFixture[str],
+) -> None:
+    steps = [StepResult(thought="thinking"), StepResult(response="done")]
+    patch_runtime(_FakeAgent(output="done", steps=steps))
+    rc = await run_headless(_args("-p", "go", "-s", "sess1", "--output-format", "json"))
+    out = capsys.readouterr()
+    assert rc == 0
+    assert out.err == ""
+    lines = [json.loads(x) for x in out.out.splitlines()]
+    assert [line["type"] for line in lines] == ["step", "step", "result"]
+    assert lines[0]["index"] == 0
+    assert lines[0]["thought"] == "thinking"
+    res = lines[-1]
+    assert res["is_error"] is False
+    assert res["session_id"] == "sess1"
+    assert res["output"] == "done"
+    assert res["num_steps"] == 2
+    assert "usage" in res
+
+
+async def test_json_output_error_is_single_result_line(
+    session_dir: Path, patch_runtime: Any, capsys: pytest.CaptureFixture[str],
+) -> None:
+    patch_runtime(_FakeAgent(error=RuntimeError("kaboom")))
+    rc = await run_headless(_args("-p", "go", "-s", "sess2", "--output-format", "json"))
+    out = capsys.readouterr()
+    assert rc == 1
+    assert out.err == ""  # json mode: error lives in the result line, not stderr
+    lines = [json.loads(x) for x in out.out.splitlines()]
+    assert lines == [{
+        "type": "result", "is_error": True, "session_id": "sess2",
+        "output": None, "error": "kaboom",
+    }]
 
 
 async def test_corrupted_resume_returns_2(

@@ -19,6 +19,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "-p", "--prompt", dest="prompt", metavar="TASK", default=None,
         help="run a single task non-interactively, print the result, and exit",
     )
+    parser.add_argument(
+        "--output-format", dest="output_format", choices=("text", "json"),
+        default=None,
+        help="-p output format: text (default) or json "
+             "(NDJSON)",
+    )
     grp = parser.add_mutually_exclusive_group()
     grp.add_argument(
         "-c", "--continue", dest="resume_latest", action="store_true",
@@ -172,6 +178,9 @@ def main(argv: list[str] | None = None) -> int:
         from agent_cli import __version__
         print(f"arktor {__version__}")
         return 0
+    if args.output_format is not None and args.prompt is None:
+        print("arktor: --output-format requires -p/--prompt", file=sys.stderr)
+        return 2
     try:
         if args.prompt is not None:
             from agent_cli.headless import run_headless
