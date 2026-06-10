@@ -29,7 +29,7 @@ dist/
 build/
 
 # ===== Project Private Files =====
-config.yaml
+arktor.yaml
 .env
 .claude
 .copilot

@@ -77,7 +77,7 @@ def parse_args() -> argparse.Namespace:
 
 
 async def main() -> None:
-    config = HarnessConfig.load(PROJECT_ROOT / "config.yaml")
+    config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
     args = parse_args()
 
     if args.resume:

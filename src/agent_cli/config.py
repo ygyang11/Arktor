@@ -23,7 +23,7 @@ def current_effort() -> str | None:
 
 
 def _bootstrap_user_config(dest: Path) -> bool:
-    template = Path(agent_cli.__file__).resolve().parents[2] / "config_example.yaml"
+    template = Path(agent_cli.__file__).resolve().parents[2] / "arktor_example.yaml"
     if not template.exists():
         return False
     try:
@@ -41,12 +41,12 @@ def load_config() -> ConfigLoadResult:
 
     load_dotenv(find_dotenv(usecwd=True))
 
-    project_cfg = Path.cwd() / "config.yaml"
+    project_cfg = Path.cwd() / "arktor.yaml"
     if project_cfg.exists():
         HarnessConfig.load(project_cfg)
         return ConfigLoadResult(path=project_cfg, bootstrapped=False)
 
-    user_cfg = Path.home() / ".arktor" / "config.yaml"
+    user_cfg = Path.home() / ".arktor" / "arktor.yaml"
     bootstrapped = False
     if not user_cfg.exists():
         bootstrapped = _bootstrap_user_config(user_cfg)

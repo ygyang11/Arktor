@@ -120,7 +120,7 @@ def build_review_team(config: HarnessConfig) -> AgentTeam:
 
 
 async def main() -> None:
-    config = HarnessConfig.load(PROJECT_ROOT / "config.yaml")
+    config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
     research_tools: list[BaseTool] = [
         *WEB_TOOLS,
         *PAPER_TOOLS,

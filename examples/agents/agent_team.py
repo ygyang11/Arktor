@@ -105,7 +105,7 @@ async def demo_round_robin(agents: AgentsTriple, topic: str, config: HarnessConf
 
 
 async def main() -> None:
-    config = HarnessConfig.load(PROJECT_ROOT / "config.yaml")
+    config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
     agents = create_agents(config)
 
     topic = "Should a mid-size company invest heavily in AI automation this year?"

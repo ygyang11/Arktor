@@ -63,9 +63,9 @@ Add the `sandbox` extra for Docker-isolated tool execution.
 
 ### Configure
 
-You only need to set three fields — model, API key, and base URL. Either drop a
-`config.yaml` in your project (copy [`config_example.yaml`](config_example.yaml)), or run
-`arktor` once and it writes a starter `~/.arktor/config.yaml` for you to edit:
+You only need to set three fields — model, API key, and base URL. Either drop an
+`arktor.yaml` in your project (copy [`arktor_example.yaml`](arktor_example.yaml)), or run
+`arktor` once and it writes a starter `~/.arktor/arktor.yaml` for you to edit:
 
 ```yaml
 llm:
@@ -75,8 +75,8 @@ llm:
   base_url: ...
 ```
 
-Everything else has sensible defaults and is fully customizable; override any field with a
-`HARNESS_`-prefixed env var.
+Everything else has sensible defaults and is fully customizable; common fields can also be
+overridden with `ARKTOR_`-prefixed env vars (see [`.env_example`](.env_example)).
 
 ---
 
@@ -128,7 +128,7 @@ async def main():
     agent = ReActAgent(
         name="assistant",
         tools=[calculate],
-        config=HarnessConfig.load("config.yaml"),
+        config=HarnessConfig.load("arktor.yaml"),
     )
     result = await agent.run("What is (42 * 37 + 15) / 3?")
     print(result.output, "·", result.step_count, "steps")

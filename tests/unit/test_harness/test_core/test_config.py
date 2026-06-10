@@ -183,7 +183,7 @@ class TestHarnessConfig:
 
     def test_from_yaml_file_not_found(self) -> None:
         with pytest.raises(FileNotFoundError):
-            HarnessConfig.from_yaml("/nonexistent/config.yaml")
+            HarnessConfig.from_yaml("/nonexistent/arktor.yaml")
 
     def test_search_config_in_harness(self) -> None:
         cfg = HarnessConfig()
@@ -191,7 +191,7 @@ class TestHarnessConfig:
         assert cfg.search.tavily_api_key is None or isinstance(cfg.search.tavily_api_key, str)
 
     def test_load_merges_yaml_and_env(self, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-        path = tmp_path / "config.yaml"
+        path = tmp_path / "arktor.yaml"
         path.write_text(
             "llm:\n"
             "  provider: openai\n"
@@ -208,7 +208,7 @@ class TestHarnessConfig:
         assert HarnessConfig.get() is cfg
 
     def test_load_without_env_override_keeps_yaml(self, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-        path = tmp_path / "config.yaml"
+        path = tmp_path / "arktor.yaml"
         path.write_text(
             "llm:\n"
             "  provider: openai\n"
