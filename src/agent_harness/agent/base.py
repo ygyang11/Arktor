@@ -50,10 +50,10 @@ logger = logging.getLogger(__name__)
 class StepResult(BaseModel):
     """Result of a single agent step."""
 
-    thought: str | None = None
+    thought: str | None = None  # model reasoning
     action: list[ToolCall] | None = None
     observation: list[ToolResult] | None = None
-    response: str | None = None  # final response if step produced one
+    response: str | None = None  # model visible text
 
 
 class AgentResult(BaseModel):
@@ -465,7 +465,7 @@ class BaseAgent(ABC, EventEmitter):
                 if step_result.action:
                     await self._check_loop(step_result.action)
 
-                if step_result.response is not None:
+                if not step_result.action and step_result.response is not None:
                     final_output = step_result.response
                     self.context.state.transition(AgentState.FINISHED)
                     break
@@ -623,7 +623,8 @@ class BaseAgent(ABC, EventEmitter):
         - ConversationalAgent: generate response
 
         Returns:
-            StepResult. If response is not None, the run loop ends.
+            StepResult. The run loop ends when a step returns no action
+            and a non-None response.
         """
         ...
 

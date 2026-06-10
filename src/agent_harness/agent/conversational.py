@@ -18,5 +18,6 @@ class ConversationalAgent(BaseAgent):
         response = await self.call_llm(tools=None)
 
         return StepResult(
+            thought=self.llm.reasoning_text(response.message),
             response=response.message.content or "",
         )

@@ -62,4 +62,7 @@ class ReplannerAgent(BaseAgent):
 
     async def step(self) -> StepResult:
         response = await self.call_llm(tools=None)
-        return StepResult(response=response.message.content)
+        return StepResult(
+            thought=self.llm.reasoning_text(response.message),
+            response=response.message.content,
+        )

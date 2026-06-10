@@ -214,6 +214,17 @@ class OpenAIProvider(BaseLLM):
         except openai.APIError as e:
             raise LLMError(str(e)) from e
 
+    def reasoning_text(self, message: Message) -> str | None:
+        """Decode the OpenAI-compatible reasoning sidecar into plain text."""
+        sidecar = message.provider_metadata.get(_PROTOCOL_KEY, {})
+        rc = sidecar.get("reasoning_content")
+        if isinstance(rc, str) and rc:
+            return rc
+        rd = sidecar.get("reasoning_details")
+        if isinstance(rd, list):
+            return _flatten_reasoning_details(rd) or None
+        return None
+
     def _build_request(
         self,
         messages: list[Message],
@@ -395,6 +406,16 @@ def _is_reasoning_details_rejection(e: openai.BadRequestError) -> bool:
     return "Extra inputs are not permitted" in s and "reasoning_details" in s
 
 
+def _flatten_reasoning_details(rd: list[Any]) -> str:
+    """Flatten OpenRouter reasoning_details blocks into plain text."""
+    parts = [
+        b.get("text") or b.get("summary") or ""
+        for b in rd
+        if isinstance(b, dict)
+    ]
+    return "".join(p for p in parts if p)
+
+
 def _normalize_reasoning_for_strict_input(request_kwargs: dict[str, Any]) -> None:
     """Sticky workaround for relays that emit reasoning_details but reject it
     as input (opencode-zen → Moonshot). Flatten its block text into
@@ -409,12 +430,7 @@ def _normalize_reasoning_for_strict_input(request_kwargs: dict[str, Any]) -> Non
         if rd is None:
             continue
         if not m.get("reasoning_content") and isinstance(rd, list):
-            parts = [
-                b.get("text") or b.get("summary") or ""
-                for b in rd
-                if isinstance(b, dict)
-            ]
-            joined = "".join(p for p in parts if p)
+            joined = _flatten_reasoning_details(rd)
             if joined:
                 m["reasoning_content"] = joined
         m.pop("reasoning_details", None)
