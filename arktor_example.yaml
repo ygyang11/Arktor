@@ -1,7 +1,7 @@
 # ============================================================
 # # Arktor — Example Configuration File
 # ============================================================
-# Copy this file to `config.yaml` and fill in your values.
+# Copy this file to `arktor.yaml` and fill in your values.
 # ============================================================
 
 # --- LLM Provider ---
@@ -74,7 +74,7 @@ skill:
 
 # --- Approval (Human-in-the-Loop) ---
 approval:
-  mode: "never"                 # "never" | "auto" | "ask" 
+  mode: "never"                 # "never" | "auto" | "ask"
                                 # "auto" ask for tools not in always_allow; "ask" — ask for every tool call
   always_allow:                 # Rules: "tool_name" (tool-level) or "tool_name(pattern)" (resource-level)
     # Tool-level: all invocations auto-allowed
@@ -101,7 +101,7 @@ sub_agent:
 # --- Tracing & Observability ---
 tracing:
   enabled: false                # Enable tracing
-  exporter: "both"              # "both" | "console" | "json_file" 
+  exporter: "both"              # "both" | "console" | "json_file"
   export_path: "./traces"       # Directory for trace exports
 
 # --- General ---

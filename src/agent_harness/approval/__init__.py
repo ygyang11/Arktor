@@ -20,7 +20,7 @@ def resolve_approval(
 ) -> ApprovalPolicy:
     """Resolve approval parameter to an ApprovalPolicy instance.
 
-    Priority: explicit parameter > config.yaml > default.
+    Priority: explicit parameter > arktor.yaml > default.
     """
     if isinstance(approval, ApprovalPolicy):
         return approval

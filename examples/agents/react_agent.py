@@ -64,7 +64,7 @@ async def get_population(country: str) -> str:
 
 
 async def run_agent(use_stream: bool) -> None:
-    config = HarnessConfig.load(PROJECT_ROOT / "config.yaml")
+    config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
     mode = "stream" if use_stream else "generate"
 
     print(f"=== Mode: {mode} ===\n")

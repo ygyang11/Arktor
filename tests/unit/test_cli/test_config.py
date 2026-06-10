@@ -28,7 +28,7 @@ def isolated_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_project_config_wins(
     isolated_home: Path, isolated_cwd: Path,
 ) -> None:
-    project = isolated_cwd / "config.yaml"
+    project = isolated_cwd / "arktor.yaml"
     project.write_text("llm:\n  provider: openai\n")
     with patch("agent_harness.core.config.HarnessConfig.load") as mock_load:
         result = load_config()
@@ -42,7 +42,7 @@ def test_bootstrap_from_repo_template_when_user_config_missing(
     fake_repo = isolated_cwd.parent / "repo"
     fake_pkg_dir = fake_repo / "src" / "agent_cli"
     fake_pkg_dir.mkdir(parents=True)
-    (fake_repo / "config_example.yaml").write_text("# example\nllm:\n  provider: anthropic\n")
+    (fake_repo / "arktor_example.yaml").write_text("# example\nllm:\n  provider: anthropic\n")
     fake_init = fake_pkg_dir / "__init__.py"
     fake_init.write_text("")
 
@@ -52,7 +52,7 @@ def test_bootstrap_from_repo_template_when_user_config_missing(
     with patch("agent_harness.core.config.HarnessConfig.load") as mock_load:
         result = load_config()
 
-    user_cfg = isolated_home / ".arktor" / "config.yaml"
+    user_cfg = isolated_home / ".arktor" / "arktor.yaml"
     assert result == ConfigLoadResult(path=user_cfg, bootstrapped=True)
     assert user_cfg.exists()
     assert "anthropic" in user_cfg.read_text()

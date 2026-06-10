@@ -45,7 +45,7 @@ async def write_summary(topic: str, key_points: str) -> str:
 
 
 async def main() -> None:
-    config = HarnessConfig.load(PROJECT_ROOT / "config.yaml")
+    config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
 
     agent = PlanAndExecuteAgent(
         name="researcher",

@@ -25,7 +25,7 @@ def _unset_to_none(value: str | None) -> str | None:
     """Treat empty strings and ``__SET_*__`` placeholders as unset.
 
     Both forms route through `model_post_init`'s env-var fallback so an
-    unfilled `config.yaml` does not override an exported credential.
+    unfilled `arktor.yaml` does not override an exported credential.
     """
     if isinstance(value, str):
         stripped = value.strip()

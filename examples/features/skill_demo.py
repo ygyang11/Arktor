@@ -47,10 +47,10 @@ async def run_demo(config: HarnessConfig) -> None:
 
 
 async def main() -> None:
-    config = HarnessConfig.load(PROJECT_ROOT / "config.yaml")
+    config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
     has_skills = print_skill_catalog_preview()
     if not has_skills:
-        print("No skills available. Check config.yaml -> skill.dirs and SKILL.md files.")
+        print("No skills available. Check arktor.yaml -> skill.dirs and SKILL.md files.")
         return
     await run_demo(config)
 

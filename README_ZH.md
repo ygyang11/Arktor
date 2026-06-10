@@ -59,9 +59,9 @@ pip install -e ".[dev,app]"
 
 ### 配置
 
-仅需填写三项：模型、API key 与 base URL。可在项目目录放置 `config.yaml`
-（复制 [`config_example.yaml`](config_example.yaml)），或首次运行 `arktor`，
-它会自动在 `~/.arktor/config.yaml` 生成一份模板供你编辑：
+仅需填写三项：模型、API key 与 base URL。可在项目目录放置 `arktor.yaml`
+（复制 [`arktor_example.yaml`](arktor_example.yaml)），或首次运行 `arktor`，
+它会自动在 `~/.arktor/arktor.yaml` 生成一份模板供你编辑：
 
 ```yaml
 llm:
@@ -71,7 +71,7 @@ llm:
   base_url: ...
 ```
 
-其余配置项均有合理默认且可自由定制；任意字段都可用 `HARNESS_` 前缀的环境变量覆盖。
+其余配置项均有合理默认且可自由定制；常用字段亦可用 `ARKTOR_` 前缀的环境变量覆盖（见 [`.env_example`](.env_example)）。
 
 ---
 
@@ -121,7 +121,7 @@ async def main():
     agent = ReActAgent(
         name="assistant",
         tools=[calculate],
-        config=HarnessConfig.load("config.yaml"),
+        config=HarnessConfig.load("arktor.yaml"),
     )
     result = await agent.run("What is (42 * 37 + 15) / 3?")
     print(result.output, "·", result.step_count, "steps")

@@ -94,7 +94,7 @@ def _report_final() -> None:
 async def test_mixed() -> None:
     """Scenario 1: Realistic mixed work session (10 turns)."""
     _cleanup()
-    config = HarnessConfig.load(PROJECT_ROOT / "config.yaml")
+    config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
     agent = ReActAgent(name="mixed_test", tools=TOOLS, max_steps=15, config=config)
 
     print(f"\n{'='*60}")
@@ -106,7 +106,7 @@ async def test_mixed() -> None:
         ("Turn 2: regular task", "What does the README say? Give me a brief summary"),
         ("Turn 3: regular task", "Read the first 50 lines of src/agent_harness/agent/base.py"),
         ("Turn 4: user info (expect save)", "I work in wireless communications, these agent concepts are new to me. Use communication system analogies when explaining"),
-        ("Turn 5: regular task", "What configuration options are in config.yaml?"),
+        ("Turn 5: regular task", "What configuration options are in arktor.yaml?"),
         ("Turn 6: project info (expect save)", "Our team does code review on Wednesdays and releases on Fridays, so large changes should have PRs ready by Monday or Tuesday"),
         ("Turn 7: regular task", "Run pytest tests/unit/ -x -q"),
         ("Turn 8: feedback (expect save)", "Your replies are too long. Keep them concise from now on"),
@@ -124,7 +124,7 @@ async def test_mixed() -> None:
 async def test_research() -> None:
     """Scenario 2: Deep research — test proactive knowledge save."""
     _cleanup()
-    config = HarnessConfig.load(PROJECT_ROOT / "config.yaml")
+    config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
     agent = ReActAgent(name="research_test", tools=TOOLS, max_steps=20, config=config)
 
     print(f"\n{'='*60}")
@@ -149,7 +149,7 @@ async def test_research() -> None:
 async def test_noise() -> None:
     """Scenario 3: Noise resistance — daily work with few save-worthy items."""
     _cleanup()
-    config = HarnessConfig.load(PROJECT_ROOT / "config.yaml")
+    config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
     agent = ReActAgent(name="noise_test", tools=TOOLS, max_steps=15, config=config)
 
     print(f"\n{'='*60}")
