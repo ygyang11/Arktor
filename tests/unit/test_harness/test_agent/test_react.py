@@ -11,7 +11,8 @@ from agent_app.tools.skill import skill_tool
 from agent_harness.agent.react import ReActAgent
 from agent_harness.core.config import HarnessConfig, SkillConfig
 from agent_harness.core.errors import MaxStepsExceededError
-from agent_harness.core.message import Message, Role
+from agent_harness.core.message import Message, Role, ToolCall
+from agent_harness.llm.types import FinishReason, LLMResponse, Usage
 from agent_harness.prompt.sections import DEFAULT_INTRO
 from agent_harness.session.base import SessionState
 from agent_harness.session.memory_session import InMemorySession
@@ -78,6 +79,76 @@ class TestReActToolUsage:
         registered = agent.tool_registry.get("mock_tool")
         assert len(registered.call_history) == 1
         assert registered.call_history[0] == {"query": "search this"}
+
+
+class _ReasoningMockLLM(MockLLM):
+    """MockLLM that decodes reasoning from a 'mock' sidecar namespace."""
+
+    def reasoning_text(self, message: Message) -> str | None:
+        return message.provider_metadata.get("mock", {}).get("reasoning")
+
+    def add_response(
+        self,
+        content: str | None,
+        reasoning: str | None = None,
+        tool_calls: list[ToolCall] | None = None,
+    ) -> None:
+        pm = {"mock": {"reasoning": reasoning}} if reasoning else {}
+        self.responses.append(
+            LLMResponse(
+                message=Message(
+                    role=Role.ASSISTANT,
+                    content=content,
+                    tool_calls=tool_calls,
+                    provider_metadata=pm,
+                ),
+                usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+                finish_reason=(
+                    FinishReason.TOOL_CALLS if tool_calls else FinishReason.STOP
+                ),
+            )
+        )
+
+
+class TestReActStepSemantics:
+    @pytest.mark.asyncio
+    async def test_thought_is_reasoning_and_response_is_visible_text(self) -> None:
+        """thought carries provider reasoning; response carries the visible
+        assistant text on tool steps too — without ending the run."""
+        llm = _ReasoningMockLLM()
+        llm.add_response(
+            "Let me check.",
+            reasoning="user wants X, search first",
+            tool_calls=[ToolCall(name="mock_tool", arguments={"query": "x"})],
+        )
+        llm.add_response("The answer is X.", reasoning="results confirm X")
+
+        agent = ReActAgent(
+            name="test", llm=llm, tools=[MockTool(response="found")], max_steps=5,
+        )
+        result = await agent.run("Find X")
+
+        # Tool step: visible text in response must NOT terminate the loop.
+        assert result.step_count == 2
+        assert result.steps[0].thought == "user wants X, search first"
+        assert result.steps[0].response == "Let me check."
+        assert result.steps[0].action is not None
+
+        # Final step: reasoning captured alongside the answer.
+        assert result.steps[1].thought == "results confirm X"
+        assert result.steps[1].response == "The answer is X."
+        assert result.output == "The answer is X."
+
+    @pytest.mark.asyncio
+    async def test_thought_none_when_provider_has_no_sidecar(self) -> None:
+        llm = MockLLM()  # base reasoning_text → None
+        llm.add_text_response("done")
+
+        agent = ReActAgent(name="test", llm=llm, max_steps=5)
+        result = await agent.run("go")
+
+        assert result.steps[0].thought is None
+        assert result.steps[0].response == "done"
 
 
 class TestReActMaxSteps:

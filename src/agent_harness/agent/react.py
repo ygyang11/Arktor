@@ -41,10 +41,12 @@ class ReActAgent(BaseAgent):
         """Execute one ReAct cycle: Think -> (Act -> Observe)? -> Response?"""
         # THINK: Call LLM with current context and available tools
         response = await self.call_llm()
+        message = response.message
+        thought = self.llm.reasoning_text(message)
 
         # Check if LLM wants to call tools
         if response.has_tool_calls:
-            tool_calls = response.message.tool_calls or []
+            tool_calls = message.tool_calls or []
 
             logger.debug(
                 "Agent '%s' calling %d tool(s): %s",
@@ -57,15 +59,16 @@ class ReActAgent(BaseAgent):
             results = await self.execute_tools(tool_calls)
 
             # OBSERVE: Results are now in short-term memory
-            # Return step without response — loop continues
+            # Return step with action — loop continues
             return StepResult(
-                thought=response.message.content,
+                thought=thought,
                 action=tool_calls,
                 observation=results,
+                response=message.content,
             )
 
         # No tool calls — LLM is providing a final answer
         return StepResult(
-            thought=None,
-            response=response.message.content or "",
+            thought=thought,
+            response=message.content or "",
         )

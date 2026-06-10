@@ -271,6 +271,16 @@ class AnthropicProvider(BaseLLM):
         except anthropic.APIError as e:
             raise LLMError(str(e)) from e
 
+    def reasoning_text(self, message: Message) -> str | None:
+        """Join readable thinking blocks from the Anthropic sidecar."""
+        sidecar = message.provider_metadata.get(_PROTOCOL_KEY, {})
+        parts = [
+            b.get("thinking", "")
+            for b in sidecar.get("thinking_blocks", [])
+            if isinstance(b, dict) and b.get("type") == "thinking"
+        ]
+        return "\n".join(p for p in parts if p) or None
+
     def _build_request(
         self,
         messages: list[Message],

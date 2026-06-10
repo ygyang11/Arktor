@@ -47,12 +47,15 @@ class ExecutorAgent(BaseAgent):
 
     async def step(self) -> StepResult:
         response = await self.call_llm()
+        message = response.message
+        thought = self.llm.reasoning_text(message)
         if response.has_tool_calls:
-            tool_calls = response.message.tool_calls or []
+            tool_calls = message.tool_calls or []
             results = await self.execute_tools(tool_calls)
             return StepResult(
-                thought=response.message.content,
+                thought=thought,
                 action=tool_calls,
                 observation=results,
+                response=message.content,
             )
-        return StepResult(response=response.message.content or "")
+        return StepResult(thought=thought, response=message.content or "")

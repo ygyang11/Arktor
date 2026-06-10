@@ -336,6 +336,15 @@ class BaseLLM(ABC, EventEmitter):
 
         raise RuntimeError("Unreachable")  # pragma: no cover
 
+    def reasoning_text(self, message: Message) -> str | None:
+        """Extract model reasoning from this provider's sidecar, if any.
+
+        Best-effort: providers that persist reasoning into
+        ``message.provider_metadata`` override this to decode their own
+        namespace. The default covers providers without a reasoning sidecar.
+        """
+        return None
+
     def _resolve_temperature(self, temperature: float | None) -> float:
         return temperature if temperature is not None else self.config.temperature
 

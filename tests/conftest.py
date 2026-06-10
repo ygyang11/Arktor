@@ -116,6 +116,7 @@ class MockLLM(BaseLLM):
             chunk=MessageChunk(
                 delta_content=response.message.content,
                 delta_tool_calls=response.message.tool_calls,
+                delta_provider_metadata=response.message.provider_metadata or None,
                 finish_reason=response.finish_reason.value,
             ),
             usage=response.usage,
