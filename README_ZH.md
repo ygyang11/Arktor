@@ -155,6 +155,6 @@ python examples/agents/react_agent.py        # ReAct 循环 + 自定义工具
 
 ## 参与贡献
 
-欢迎贡献。请先开 issue 讨论方案，并保持与现有代码风格一致。
+欢迎贡献。请先开 issue 讨论方案，并保持与现有代码风格一致。提交 PR 前请确保 CI 所跑的检查全部通过。
 
 本项目以 [MIT License](LICENSE) 开源。

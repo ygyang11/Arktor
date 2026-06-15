@@ -142,7 +142,7 @@ asyncio.run(main())
 ---
 
 ## Examples
-  
+
 For SDK users, Ready-to-run scripts under [`examples/`](examples/):
 
 - **agents/** — [`react_agent`](examples/agents/react_agent.py),
@@ -162,6 +162,6 @@ python examples/agents/react_agent.py        # ReAct loop with custom tools
 
 Contributions are welcome. For
 anything substantial, please open an issue to discuss the approach first, and keep changes
-consistent with the existing style.
+consistent with the existing style. Before opening a PR, make sure the checks CI runs all pass.
 
 Released under the [MIT License](LICENSE).
