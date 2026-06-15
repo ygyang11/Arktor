@@ -311,7 +311,7 @@ async def web_fetch(url: str, timeout: int = 30) -> str | ToolOutput:
             return f"Error: HTTP {response.status} for {current}"
 
         content_type = response.headers.get("Content-Type", "")
-        
+
         pdf_mime = _pdf_mime(content_type, current)
         img_mime = None if pdf_mime else _image_mime(content_type, current)
 

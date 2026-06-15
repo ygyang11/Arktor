@@ -59,22 +59,22 @@ class TestPlanAndExecuteAgent:
     async def test_simple_plan_execution(self) -> None:
         """Test a simple 1-step plan that succeeds."""
         llm = MockLLM()
-        
+
         # 1. Planner generates plan
         llm.responses.append(_make_json_response({
             "goal": "Test Goal",
             "steps": [{"id": "1", "description": "Step 1"}]
         }))
-        
+
         # 2. Executor executes Step 1
         llm.responses.append(_make_text_response("Step 1 execution result"))
-        
+
         # 3. Replanner evaluates Step 1 -> Goal Achieved
         llm.responses.append(_make_json_response({
             "goal_achieved": True,
             "final_answer": "Task Complete"
         }))
-        
+
         agent = PlanAndExecuteAgent(name="test_agent", llm=llm, max_steps=5)
         result = await agent.run("Do it")
 
@@ -210,7 +210,7 @@ class TestPlanAndExecuteAgent:
     async def test_multi_step_execution(self) -> None:
         """Test a 2-step plan."""
         llm = MockLLM()
-        
+
         # 1. Planner: 2 steps
         llm.responses.append(_make_json_response({
             "goal": "Test Goal",
@@ -219,44 +219,44 @@ class TestPlanAndExecuteAgent:
                 {"id": "2", "description": "Step 2"}
             ]
         }))
-        
+
         # 2. Executor Step 1
         llm.responses.append(_make_text_response("Step 1 done"))
-        
+
         # 3. Replanner Step 1 -> Continue (not replan, not done)
         llm.responses.append(_make_json_response({
             "goal_achieved": False,
             "should_replan": False
         }))
-        
+
         # 4. Executor Step 2
         llm.responses.append(_make_text_response("Step 2 done"))
-        
+
         # 5. Replanner Step 2 -> Done
         llm.responses.append(_make_json_response({
             "goal_achieved": True,
             "final_answer": "All Done"
         }))
-        
+
         agent = PlanAndExecuteAgent(name="test_agent", llm=llm, max_steps=10)
         result = await agent.run("Do it")
-        
+
         assert result.output == "All Done"
 
     @pytest.mark.asyncio
     async def test_replanning(self) -> None:
         """Test replanning flow."""
         llm = MockLLM()
-        
+
         # 1. Planner: 1 step initially
         llm.responses.append(_make_json_response({
             "goal": "Test Goal",
             "steps": [{"id": "1", "description": "Step 1"}]
         }))
-        
+
         # 2. Executor Step 1
         llm.responses.append(_make_text_response("Step 1 result (partial)"))
-        
+
         # 3. Replanner -> Replan! Add Step 2
         llm.responses.append(_make_json_response({
             "goal_achieved": False,
@@ -264,19 +264,19 @@ class TestPlanAndExecuteAgent:
             "reason": "Need more steps",
             "updated_steps": [{"id": "2", "description": "Step 2"}]
         }))
-        
+
         # 4. Executor Step 2 (assuming Step 1 is done and kept)
         llm.responses.append(_make_text_response("Step 2 result"))
-        
+
         # 5. Replanner Step 2 -> Done
         llm.responses.append(_make_json_response({
             "goal_achieved": True,
             "final_answer": "Finally Done"
         }))
-        
+
         agent = PlanAndExecuteAgent(name="test_agent", llm=llm, max_steps=10)
         result = await agent.run("Do it")
-        
+
         assert result.output == "Finally Done"
 
     @pytest.mark.asyncio
@@ -439,7 +439,7 @@ class TestPlanAndExecuteAgent:
     async def test_max_steps_exceeded(self) -> None:
         """Test loop termination."""
         llm = MockLLM()
-        
+
         # 1. Planner: 3 steps
         llm.responses.append(_make_json_response({
             "goal": "Test Goal",
@@ -449,17 +449,17 @@ class TestPlanAndExecuteAgent:
                 {"id": "3", "description": "Step 3"}
             ]
         }))
-        
+
         # Iteration 1: Step 1 executes
         llm.responses.append(_make_text_response("Step 1 done"))
         llm.responses.append(_make_json_response({"goal_achieved": False, "should_replan": False}))
-        
+
         # Iteration 2: Step 2 executes
         llm.responses.append(_make_text_response("Step 2 done"))
         llm.responses.append(_make_json_response({"goal_achieved": False, "should_replan": False}))
-        
+
         agent = PlanAndExecuteAgent(name="test_agent", llm=llm, max_steps=2) # Only allow 2 iterations
-        
+
         result = await agent.run("Do it")
         assert "Max iterations reached" in result.output
 
@@ -468,13 +468,13 @@ class TestPlanAndExecuteAgent:
         """Test Executor using a tool."""
         llm = MockLLM()
         mock_tool = MockTool(response="found it")
-        
+
         # 1. Planner
         llm.responses.append(_make_json_response({
             "goal": "Test",
             "steps": [{"id": "1", "description": "Search"}]
         }))
-        
+
         # 2. Executor: Calls tool
         # Executor.run() -> Executor.step() -> call_llm
         llm.add_tool_call_response("mock_tool", {"query": "foo"})
@@ -482,16 +482,16 @@ class TestPlanAndExecuteAgent:
         # Executor.run() loop continues.
         # Executor.step() called again -> call_llm
         llm.responses.append(_make_text_response("I found 'found it'"))
-        
+
         # 3. Replanner
         llm.responses.append(_make_json_response({
             "goal_achieved": True,
             "final_answer": "Found"
         }))
-        
+
         agent = PlanAndExecuteAgent(name="test_agent", llm=llm, tools=[mock_tool], max_steps=5)
         result = await agent.run("Search foo")
-        
+
         assert "Found" in result.output
 
 

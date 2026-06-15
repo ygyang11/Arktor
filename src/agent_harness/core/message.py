@@ -38,7 +38,7 @@ class Attachment(BaseModel):
 class ToolCall(BaseModel):
     """
     Represents a tool/function call made by the assistant.
-    
+
     Attributes:
         id: Unique identifier for the tool call, auto-generated if not provided
         name: The name of the tool/function to call
@@ -78,11 +78,11 @@ class ToolResult(BaseModel):
 class Message(BaseModel):
     """
     Universal message type - the fundamental communication unit in the framework.
-    
+
     All components (LLM, Agent, Tool) communicate through Message objects.
     A message can represent system instructions, user inputs, assistant responses,
     or tool execution results.
-    
+
     Attributes:
         role: The role/type of message sender
         content: Text content of the message
@@ -156,10 +156,10 @@ class Message(BaseModel):
 class MessageChunk(BaseModel):
     """
     Incremental chunk for streaming responses.
-    
+
     Used when streaming message content from LLMs or other components
     to efficiently handle partial/incremental updates.
-    
+
     Attributes:
         delta_content: Incremental content update
         delta_tool_calls: Incremental tool call updates

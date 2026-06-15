@@ -341,4 +341,3 @@ class TestStripLastToolRunAttachments:
         msgs = [ast, tool]
         assert strip_last_tool_run_attachments(msgs) == 1
         assert strip_last_tool_run_attachments(msgs) == 0
-
