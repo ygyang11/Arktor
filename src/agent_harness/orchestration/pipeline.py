@@ -41,7 +41,7 @@ class Pipeline:
     Example:
         pipeline = Pipeline(steps=[
             PipelineStep(agent=researcher),
-            PipelineStep(agent=writer, transform=lambda x: f"Write article based on: {x}")], 
+            PipelineStep(agent=writer, transform=lambda x: f"Write article based on: {x}")],
             hooks=TracingHooks / MyPipelineHooks())
         result = await pipeline.run("Latest AI news")
     """

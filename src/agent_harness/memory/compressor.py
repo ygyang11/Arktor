@@ -364,7 +364,7 @@ class ContextCompressor:
         `retain_count` is measured in *user-anchored segments*: each
         segment begins with a user message and includes the assistant /
         tool groups that follow before the next user. This guarantees
-        ``recent[0]`` is user-starting 
+        ``recent[0]`` is user-starting
         """
         system: list[_MessageGroup] = []
         non_system: list[_MessageGroup] = []

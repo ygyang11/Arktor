@@ -30,7 +30,7 @@ EventHandler = Callable[[Event], Coroutine[Any, Any, None]]
 
 class EventBus:
     """Central event bus supporting async handlers and wildcard subscriptions.
-    
+
     Wildcard matching:
         - "agent.*" matches "agent.step.start", "agent.run.end", etc.
         - "*" matches everything
@@ -83,7 +83,7 @@ class EventBus:
 
 class EventEmitter:
     """Mixin that gives any component the ability to emit events.
-    
+
     Usage:
         class MyComponent(EventEmitter):
             async def do_work(self):

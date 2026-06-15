@@ -15,7 +15,7 @@ from agent_harness.memory.short_term import ShortTermMemory
 from agent_harness.memory.working_term import WorkingMemory
 
 
-class TestAgentContextCreate: 
+class TestAgentContextCreate:
     def test_create_with_defaults(self) -> None:
         ctx = AgentContext.create()
         assert isinstance(ctx.config, HarnessConfig)

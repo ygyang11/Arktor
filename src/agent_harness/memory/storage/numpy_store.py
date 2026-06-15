@@ -1,7 +1,7 @@
 """Lightweight vector store using numpy for similarity search.
 
 Zero external dependencies beyond numpy. Suitable for small-to-medium
-datasets (up to ~100k documents). 
+datasets (up to ~100k documents).
 """
 from __future__ import annotations
 

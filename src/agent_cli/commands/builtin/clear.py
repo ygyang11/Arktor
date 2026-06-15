@@ -38,7 +38,7 @@ async def handle(ctx: CommandContext, args: str) -> CommandResult:
     if compressor is not None:
         compressor.restore_runtime_state([])
     await ctx.save_session()
-    
+
     if sandbox_err is not None:
         return CommandResult(output=err(
             "Context cleared",

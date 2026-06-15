@@ -88,7 +88,7 @@ def _get_encoding(encoding_name: str) -> _Encoding | None:
 
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
     """Count tokens in a text string for a given model.
-    
+
     Falls back to word-based approximation if tiktoken is unavailable.
     """
     encoding_name = _resolve_encoding_name(model)
@@ -123,7 +123,7 @@ def truncate_text_by_tokens(
     suffix: str = "...",
 ) -> str:
     """Truncate text to a maximum token budget.
-    
+
     Appends ``suffix`` only when truncation happens.
     """
     if max_tokens <= 0:

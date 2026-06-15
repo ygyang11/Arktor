@@ -32,8 +32,8 @@ class Usage(BaseModel):
     OpenAI never emits cache_creation_tokens (no concept); it stays 0.
 
     reasoning_tokens is the ephemeral reasoning portion of completion_tokens
-    that is NOT persisted as message content (OpenAI). Anthropicextended 
-    thinking is returned as a persistent thinking content block, so its tokens 
+    that is NOT persisted as message content (OpenAI). Anthropicextended
+    thinking is returned as a persistent thinking content block, so its tokens
     remain in completion_tokens and reasoning_tokens stays 0.
     """
     prompt_tokens: int = 0

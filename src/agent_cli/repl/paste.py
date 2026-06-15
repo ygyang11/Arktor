@@ -106,7 +106,7 @@ class PastePlaceholderProcessor(Processor):
                 return Transformation(list(transformation_input.fragments))
             except Exception:
                 return Transformation([])
-            
+
 
 def _restyle_fragments(
     fragments: StyleAndTextTuples,
