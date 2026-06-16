@@ -1,9 +1,16 @@
 """CLI startup config discovery + first-run bootstrap."""
 from __future__ import annotations
 
+import asyncio
+import copy
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from prompt_toolkit.application import run_in_terminal
+from prompt_toolkit.application.current import get_app_or_none
+from rich.logging import RichHandler
 
 import agent_cli
 
@@ -59,6 +66,42 @@ def load_config() -> ConfigLoadResult:
     return ConfigLoadResult(path=None, bootstrapped=False)
 
 
+class _PromptAwareRichHandler(RichHandler):
+    """RichHandler that renders records above an active prompt_toolkit prompt
+    instead of writing into the input line. Falls back to plain RichHandler
+    behaviour when no prompt is running."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        app = get_app_or_none()
+        loop = app.loop if app is not None else None
+        if app is None or not app.is_running or loop is None:
+            super().emit(record)
+            return
+
+        record = copy.copy(record)
+
+        async def _emit_above_prompt() -> None:
+            try:
+                await run_in_terminal(lambda: RichHandler.emit(self, record))
+            except Exception:
+                self.handleError(record)
+
+        try:
+            on_app_loop = asyncio.get_running_loop() is loop
+        except RuntimeError:
+            on_app_loop = False
+
+        coro = _emit_above_prompt()
+        try:
+            if on_app_loop:
+                app.create_background_task(coro)
+            else:
+                loop.call_soon_threadsafe(app.create_background_task, coro)
+        except Exception:
+            coro.close()
+            super().emit(record)
+
+
 def attach_rich_logging(console: Console) -> None:
     """Route agent_harness/agent_app logs through the shared rich Console.
 
@@ -75,11 +118,7 @@ def attach_rich_logging(console: Console) -> None:
     corrupting the Live region — render above the Live too. Our two
     namespaces keep propagate=False so they are not double-handled.
     """
-    import logging
-
-    from rich.logging import RichHandler
-
-    handler = RichHandler(
+    handler = _PromptAwareRichHandler(
         console=console,
         show_time=False,
         show_path=False,
