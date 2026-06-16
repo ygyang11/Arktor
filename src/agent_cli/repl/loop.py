@@ -165,6 +165,7 @@ async def run_repl(
     save = make_save_session(agent, session_backend)
 
     state = _LoopState()
+    run_gate = asyncio.Lock()
 
     try:
         while True:
@@ -219,6 +220,7 @@ async def run_repl(
                     cli_hooks,
                     session_backend,
                     save,
+                    run_gate=run_gate,
                 )
                 continue
 
@@ -241,7 +243,7 @@ async def run_repl(
                     if await _handle_line(
                         raw, agent, console, registry, session_id, save, adapter, handler,
                         shell_state, pt_session, cli_hooks, session_backend, theme,
-                        pending_atts,
+                        pending_atts, run_gate=run_gate,
                     ):
                         break
                 continue
@@ -323,6 +325,8 @@ async def _handle_line(
     session_backend: BaseSession,
     theme: CliTheme,
     pending_atts: list[Attachment] | None = None,
+    *,
+    run_gate: asyncio.Lock,
 ) -> bool:
     console.print()
 
@@ -394,14 +398,14 @@ async def _handle_line(
             await _run(
                 agent, result.agent_input, session_backend.session_id,
                 console, adapter, cli_hooks, session_backend, save,
-                pending_atts,
+                pending_atts, run_gate=run_gate,
             )
         return False
 
     await _run(
         agent, line, session_id, console, adapter,
         cli_hooks, session_backend, save,
-        pending_atts,
+        pending_atts, run_gate=run_gate,
     )
     return False
 
@@ -416,67 +420,70 @@ async def _run(
     session_backend: BaseSession,
     save: SaveSession,
     pending_atts: list[Attachment] | None = None,
+    *,
+    run_gate: asyncio.Lock,
 ) -> None:
-    cancelled = False
-    media_rejected = False
-    media_rolled_back = False
-    adapter.begin_run()
+    async with run_gate:
+        cancelled = False
+        media_rejected = False
+        media_rolled_back = False
+        adapter.begin_run()
 
-    async def cb(a: BaseAgent, msg: Message, t: str) -> None:
-        if msg.role != Role.USER:
-            return
-        if isinstance(text, str):
-            await expand_mentions(a, adapter, t)
-            if pending_atts:
-                msg.attachments = list(msg.attachments or []) + pending_atts
-        file_observer.annotate_drift(a, msg)
+        async def cb(a: BaseAgent, msg: Message, t: str) -> None:
+            if msg.role != Role.USER:
+                return
+            if isinstance(text, str):
+                await expand_mentions(a, adapter, t)
+                if pending_atts:
+                    msg.attachments = list(msg.attachments or []) + pending_atts
+            file_observer.annotate_drift(a, msg)
 
-    turn_ctx = take_snapshot(agent)
-    cli_hooks.begin_turn(turn_ctx)
+        turn_ctx = take_snapshot(agent)
+        cli_hooks.begin_turn(turn_ctx)
 
-    task = asyncio.create_task(
-        agent.run(text, session=session_backend, after_input_appended=cb),
-    )
-    try:
-        with bind_work(task):
-            try:
-                await task
-            except asyncio.CancelledError:
-                # CancelledError bypasses base.run()'s `except Exception`; state
-                # may be stuck in non-terminal, next run()'s transition(THINKING)
-                # would raise.
-                agent.context.state.reset()
-                cancelled = True
-                if should_rollback(turn_ctx, get_messages(agent)):
-                    await rollback(agent, turn_ctx, save)
-            except LLMUnsupportedContentError:
-                agent.context.state.reset()
-                media_rejected = True
-                if should_rollback(turn_ctx, get_messages(agent)):
-                    await rollback(agent, turn_ctx, save)
-                    media_rolled_back = True
-            except Exception:
-                # hooks.on_error already rendered; just keep REPL alive.
-                pass
-    finally:
-        cli_hooks.end_turn()
-        # end_step flushes any pending stream / Live buffers; print cancel
-        # banner AFTER so it doesn't get overwritten by late-arriving chunks.
-        await adapter.end_step()
-    if cancelled:
-        console.print("[dim]⎯⎯ Interrupted · what should the agent do differently? ⎯⎯[/dim]")
-        console.print()
-    if media_rejected:
-        if media_rolled_back:
-            console.print(
-                "[dim]⚠ Current model/provider can't read this media type. "
-                "Your message was reverted — resend without it or try another "
-                "model.[/dim]"
-            )
-        else:
-            console.print(
-                "[dim]⚠ Current model/provider can't read media the agent "
-                "fetched, partial recovery only — continue with text or /clear "
-                "to reset.[/dim]"
-            )
-        console.print()
+        task = asyncio.create_task(
+            agent.run(text, session=session_backend, after_input_appended=cb),
+        )
+        try:
+            with bind_work(task):
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    # CancelledError bypasses base.run()'s `except Exception`; state
+                    # may be stuck in non-terminal, next run()'s transition(THINKING)
+                    # would raise.
+                    agent.context.state.reset()
+                    cancelled = True
+                    if should_rollback(turn_ctx, get_messages(agent)):
+                        await rollback(agent, turn_ctx, save)
+                except LLMUnsupportedContentError:
+                    agent.context.state.reset()
+                    media_rejected = True
+                    if should_rollback(turn_ctx, get_messages(agent)):
+                        await rollback(agent, turn_ctx, save)
+                        media_rolled_back = True
+                except Exception:
+                    # hooks.on_error already rendered; just keep REPL alive.
+                    pass
+        finally:
+            cli_hooks.end_turn()
+            # end_step flushes any pending stream / Live buffers; print cancel
+            # banner AFTER so it doesn't get overwritten by late-arriving chunks.
+            await adapter.end_step()
+        if cancelled:
+            console.print("[dim]⎯⎯ Interrupted · what should the agent do differently? ⎯⎯[/dim]")
+            console.print()
+        if media_rejected:
+            if media_rolled_back:
+                console.print(
+                    "[dim]⚠ Current model/provider can't read this media type. "
+                    "Your message was reverted — resend without it or try another "
+                    "model.[/dim]"
+                )
+            else:
+                console.print(
+                    "[dim]⚠ Current model/provider can't read media the agent "
+                    "fetched, partial recovery only — continue with text or /clear "
+                    "to reset.[/dim]"
+                )
+            console.print()

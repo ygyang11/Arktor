@@ -155,3 +155,58 @@ def test_attach_rich_logging_preserves_non_stream_handlers(
     assert not any(type(h) is logging.StreamHandler for h in lg.handlers)
     assert len([h for h in lg.handlers if h.get_name() == "cli-rich"]) == 1
     file_handler.close()
+
+
+async def test_attach_rich_logging_defers_during_active_prompt(
+    restore_logging: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """While a prompt_toolkit prompt is running, a log record must NOT be
+    written synchronously (which corrupts the input line) — it is scheduled
+    onto the app to render above the prompt. With no prompt it stays sync."""
+    import asyncio
+
+    import agent_cli.config as cfg
+
+    attach_rich_logging(Console())
+    lg = logging.getLogger("agent_harness")
+    (handler,) = [h for h in lg.handlers if h.get_name() == "cli-rich"]
+
+    rec = logging.LogRecord("agent_harness", logging.WARNING, __file__, 1, "msg", (), None)
+
+    sync_calls: list[logging.LogRecord] = []
+    monkeypatch.setattr(cfg.RichHandler, "emit", lambda self, r: sync_calls.append(r))
+
+    monkeypatch.setattr(cfg, "get_app_or_none", lambda: None)
+    handler.emit(rec)
+    assert sync_calls == [rec]
+
+    sync_calls.clear()
+    scheduled: list[object] = []
+
+    class _FakeApp:
+        is_running = True
+        loop = asyncio.get_running_loop()
+
+        def create_background_task(self, coro: object) -> None:
+            scheduled.append(coro)
+            coro.close()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(cfg, "get_app_or_none", lambda: _FakeApp())
+    handler.emit(rec)
+    assert sync_calls == []
+    assert len(scheduled) == 1
+
+    # Scheduling failure (e.g. loop closing) must NOT escape emit() — logging
+    # does not catch handler exceptions; it must fall back to a sync render.
+    sync_calls.clear()
+
+    class _BrokenApp:
+        is_running = True
+        loop = asyncio.get_running_loop()
+
+        def create_background_task(self, coro: object) -> None:
+            raise RuntimeError("loop closing")
+
+    monkeypatch.setattr(cfg, "get_app_or_none", lambda: _BrokenApp())
+    handler.emit(rec)
+    assert len(sync_calls) == 1
