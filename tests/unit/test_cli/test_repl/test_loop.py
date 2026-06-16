@@ -148,7 +148,10 @@ async def test_run_cancelled_error_resets_state_and_ends_step() -> None:
     adapter.begin_run = MagicMock()
     console = MagicMock()
 
-    await _run(agent, "text", "session-1", console, adapter, *_run_extras())
+    await _run(
+        agent, "text", "session-1", console, adapter, *_run_extras(),
+        run_gate=asyncio.Lock(),
+    )
 
     agent.context.state.reset.assert_called_once()
     adapter.end_step.assert_awaited_once()
@@ -162,7 +165,10 @@ async def test_run_swallows_generic_exception_to_keep_repl_alive() -> None:
     adapter.begin_run = MagicMock()
     console = MagicMock()
 
-    await _run(agent, "text", "session-1", console, adapter, *_run_extras())
+    await _run(
+        agent, "text", "session-1", console, adapter, *_run_extras(),
+        run_gate=asyncio.Lock(),
+    )
 
     adapter.end_step.assert_awaited_once()
     # hooks.on_error owns error rendering now — _run must not print.
@@ -176,7 +182,10 @@ async def test_run_ends_step_on_success() -> None:
     adapter.end_step = AsyncMock()
     adapter.begin_run = MagicMock()
 
-    await _run(agent, "text", "session-1", MagicMock(), adapter, *_run_extras())
+    await _run(
+        agent, "text", "session-1", MagicMock(), adapter, *_run_extras(),
+        run_gate=asyncio.Lock(),
+    )
 
     agent.run.assert_awaited_once()
     adapter.end_step.assert_awaited_once()
@@ -208,6 +217,7 @@ async def test_handle_line_cancelled_keeps_repl_alive() -> None:
         MagicMock(),
         MagicMock(),
         MagicMock(),
+        run_gate=asyncio.Lock(),
     )
 
     assert should_exit is False
@@ -252,6 +262,7 @@ async def test_handle_line_shell_lane_dispatches_to_exec_shell(
         MagicMock(),
         MagicMock(),
         MagicMock(),
+        run_gate=asyncio.Lock(),
     )
 
     assert should_exit is False
@@ -283,6 +294,7 @@ async def test_handle_line_bare_bang_is_noop() -> None:
         MagicMock(),
         MagicMock(),
         MagicMock(),
+        run_gate=asyncio.Lock(),
     )
 
     assert should_exit is False
@@ -320,6 +332,7 @@ async def test_handle_line_shell_cancellation_renders_message(
         MagicMock(),
         MagicMock(),
         MagicMock(),
+        run_gate=asyncio.Lock(),
     )
 
     assert any(
@@ -384,6 +397,7 @@ async def test_handle_line_shell_cancel_drains_pending_writes_before_banner(
             MagicMock(),
             MagicMock(),
             MagicMock(),
+            run_gate=asyncio.Lock(),
         )
 
     task = asyncio.create_task(runner())
@@ -696,6 +710,7 @@ async def test_run_passes_session_backend_instance_not_string() -> None:
     await _run(
         agent, "go", "sid", MagicMock(), adapter,
         cli_hooks, backend, AsyncMock(),
+        run_gate=asyncio.Lock(),
     )
 
     assert captured["session"] is backend
@@ -719,6 +734,7 @@ async def test_run_pre_commit_cancel_rolls_back_messages_and_calls_save() -> Non
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), save,
+        run_gate=asyncio.Lock(),
     )
 
     msgs = agent.context.short_term_memory._messages
@@ -747,6 +763,7 @@ async def test_run_post_commit_cancel_does_not_rollback() -> None:
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), save,
+        run_gate=asyncio.Lock(),
     )
 
     msgs = agent.context.short_term_memory._messages
@@ -774,6 +791,7 @@ async def test_run_preserves_bg_message_during_rollback() -> None:
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), save,
+        run_gate=asyncio.Lock(),
     )
 
     msgs = agent.context.short_term_memory._messages
@@ -794,6 +812,7 @@ async def test_run_end_turn_called_in_finally_after_normal_completion() -> None:
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), AsyncMock(),
+        run_gate=asyncio.Lock(),
     )
 
     assert cli_hooks.turn is None
@@ -811,6 +830,7 @@ async def test_run_end_turn_called_in_finally_after_cancel() -> None:
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), AsyncMock(),
+        run_gate=asyncio.Lock(),
     )
 
     assert cli_hooks.turn is None
@@ -836,6 +856,7 @@ async def test_run_media_rejection_with_rollback() -> None:
     await _run(
         agent, "text", "sid", console, adapter,
         cli_hooks, MagicMock(), save,
+        run_gate=asyncio.Lock(),
     )
 
     agent.context.state.reset.assert_called_once()
@@ -873,6 +894,7 @@ async def test_run_media_rejection_after_auto_compression_still_rolls_back() -> 
     await _run(
         agent, "text", "sid", console, adapter,
         cli_hooks, MagicMock(), save,
+        run_gate=asyncio.Lock(),
     )
 
     agent.context.state.reset.assert_called_once()
@@ -907,6 +929,7 @@ async def test_run_media_rejection_without_rollback() -> None:
     await _run(
         agent, "text", "sid", console, adapter,
         cli_hooks, MagicMock(), save,
+        run_gate=asyncio.Lock(),
     )
 
     agent.context.state.reset.assert_called_once()
@@ -915,3 +938,40 @@ async def test_run_media_rejection_without_rollback() -> None:
     )
     assert "partial recovery" in printed
     assert "/clear" in printed
+
+
+# ---- run_gate single-flight ----------------------------------------------
+
+
+async def test_run_gate_serializes_concurrent_runs() -> None:
+    """Two concurrent _run on one agent serialize through run_gate: their
+    agent.run executions never overlap, and neither dispatch is dropped."""
+    agent = _real_agent_with_messages([])
+    gate = asyncio.Lock()
+    active = 0
+    max_concurrent = 0
+    completed = 0
+
+    async def fake_run(text: object, session: object = None, **_: object) -> None:
+        nonlocal active, max_concurrent, completed
+        active += 1
+        max_concurrent = max(max_concurrent, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        completed += 1
+
+    agent.run = fake_run
+    adapter = MagicMock()
+    adapter.begin_run = MagicMock()
+    adapter.end_step = AsyncMock()
+    cli_hooks = _make_real_cli_hooks()
+
+    await asyncio.gather(
+        _run(agent, "a", "sid", MagicMock(), adapter,
+             cli_hooks, MagicMock(), AsyncMock(), run_gate=gate),
+        _run(agent, "b", "sid", MagicMock(), adapter,
+             cli_hooks, MagicMock(), AsyncMock(), run_gate=gate),
+    )
+
+    assert completed == 2
+    assert max_concurrent == 1
