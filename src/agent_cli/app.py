@@ -97,7 +97,7 @@ async def _async_main(args: argparse.Namespace) -> int:
     hooks = CliHooks(adapter, approval_handler=approval_handler)
     agent = create_cli_agent(hooks=hooks, approval_handler=approval_handler)
 
-    from agent_cli.runtime.session import resolve_session_id, restore_session
+    from agent_cli.runtime.session import resolve_session_id, restore_session, stop_sandbox
 
     probe = FileSession("_probe")
     session_id = await resolve_session_id(args, probe)
@@ -165,6 +165,10 @@ async def _async_main(args: argparse.Namespace) -> int:
             uninstall()
         with suppress(Exception):
             await adapter.end_step()
+        with suppress(Exception):
+            await stop_sandbox(agent)
+        with suppress(Exception):
+            await agent.aclose()
         await asyncio.sleep(0)
 
     with suppress(Exception):
