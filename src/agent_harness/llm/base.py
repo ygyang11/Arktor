@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -402,6 +403,25 @@ class BaseLLM(ABC, EventEmitter):
 
     def _pdf_block(self, att: Attachment, b64: str) -> dict[str, Any]:
         raise NotImplementedError
+
+    async def aclose(self) -> None:
+        """Release the provider's HTTP client (connection pool)."""
+        client = getattr(self, "_client", None)
+        closer = getattr(client, "close", None) if client is not None else None
+        if closer is None:
+            return
+        try:
+            result = closer()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.debug("LLM client close failed", exc_info=True)
+
+    async def __aenter__(self) -> BaseLLM:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.aclose()
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} model={self.model_name}>"

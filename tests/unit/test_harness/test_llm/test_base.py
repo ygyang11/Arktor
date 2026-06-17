@@ -150,3 +150,58 @@ class TestWithRetryTransientErrors:
 
         with pytest.raises(ValueError, match="not retryable"):
             await llm._with_retry(bad_call)
+
+
+class TestBaseLLMClose:
+    @pytest.mark.asyncio
+    async def test_aclose_closes_sdk_client(self) -> None:
+        """aclose() awaits the provider's SDK client close()."""
+        from types import SimpleNamespace
+
+        from agent_harness.core.config import LLMConfig
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider(LLMConfig(provider="openai", model="gpt-4o"))
+        closed = AsyncMock()
+        provider._client = SimpleNamespace(close=closed)
+
+        await provider.aclose()
+
+        closed.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_aclose_swallows_close_errors(self) -> None:
+        """A failing client close() must not propagate out of aclose()."""
+        from types import SimpleNamespace
+
+        from agent_harness.core.config import LLMConfig
+        from agent_harness.llm.anthropic_provider import AnthropicProvider
+
+        provider = AnthropicProvider(LLMConfig(provider="anthropic", model="claude-3"))
+        provider._client = SimpleNamespace(
+            close=AsyncMock(side_effect=RuntimeError("loop closing")),
+        )
+
+        await provider.aclose()  # no raise
+
+    @pytest.mark.asyncio
+    async def test_aclose_noop_without_client(self) -> None:
+        """aclose() on a provider without a closable client is a no-op."""
+        llm = MockLLM()
+        await llm.aclose()  # MockLLM has no _client; must not raise
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager_closes(self) -> None:
+        """`async with provider` closes the client on exit."""
+        from types import SimpleNamespace
+
+        from agent_harness.core.config import LLMConfig
+        from agent_harness.llm.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider(LLMConfig(provider="openai", model="gpt-4o"))
+        closed = AsyncMock()
+        provider._client = SimpleNamespace(close=closed)
+
+        async with provider as p:
+            assert p is provider
+        closed.assert_awaited_once()
