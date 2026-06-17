@@ -881,5 +881,22 @@ class BaseAgent(ABC, EventEmitter):
 
         return ordered
 
+    async def aclose(self) -> None:
+        """Release this agent's LLM connection pools. Best-effort, idempotent.
+        Closes the main provider plus the compressor's provider when it is a
+        distinct instance (deduped by identity, so a shared provider is closed
+        once).
+        """
+        seen: set[int] = set()
+        compressor = self.context.short_term_memory.compressor
+        for llm in (self.llm, getattr(compressor, "_llm", None)):
+            if llm is None or id(llm) in seen:
+                continue
+            seen.add(id(llm))
+            try:
+                await llm.aclose()
+            except Exception:
+                logger.debug("agent.aclose: llm close failed", exc_info=True)
+
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} name={self.name!r} tools={len(self.tools)}>"

@@ -110,6 +110,7 @@ async def run_headless(args: argparse.Namespace) -> int:
             background.cancel_all(agent)
         await _safe(background.shutdown(agent), "shut down background tasks")
         await _safe(stop_sandbox(agent), "stop sandbox")
+        await _safe(agent.aclose(), "close llm client")
 
     if fmt == "json":
         _emit_json(session_id, result, err)

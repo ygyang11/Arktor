@@ -65,6 +65,9 @@ class _FakeAgent:
 
             self.run = _run  # type: ignore[assignment]
 
+    async def aclose(self) -> None:
+        return None
+
 
 @pytest.fixture
 def patch_runtime(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]

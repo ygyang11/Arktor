@@ -783,3 +783,58 @@ class TestSessionAwareLifecycle:
         # otherwise tools keep using S1's session storage.
         await agent.run("second")
         assert bound_tool.binds[-1] is None
+
+
+class TestAgentClose:
+    """aclose() releases the agent's LLM pools, deduping a compressor that
+    shares the main provider and closing a distinct one."""
+
+    def _agent(self) -> Any:
+        from agent_harness.agent.react import ReActAgent
+        return ReActAgent(name="t", llm=MockLLM(), system_prompt="")
+
+    @pytest.mark.asyncio
+    async def test_closes_main_llm(self) -> None:
+        from unittest.mock import AsyncMock
+
+        agent = self._agent()
+        agent.llm.aclose = AsyncMock()  # type: ignore[method-assign]
+        await agent.aclose()
+        agent.llm.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_shared_compressor_llm_closed_once(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        agent = self._agent()
+        agent.llm.aclose = AsyncMock()  # type: ignore[method-assign]
+        agent.context.short_term_memory.compressor = SimpleNamespace(_llm=agent.llm)
+
+        await agent.aclose()
+
+        agent.llm.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_distinct_compressor_llm_closed_too(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        agent = self._agent()
+        agent.llm.aclose = AsyncMock()  # type: ignore[method-assign]
+        summary_llm = MockLLM()
+        summary_llm.aclose = AsyncMock()  # type: ignore[method-assign]
+        agent.context.short_term_memory.compressor = SimpleNamespace(_llm=summary_llm)
+
+        await agent.aclose()
+
+        agent.llm.aclose.assert_awaited_once()
+        summary_llm.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_close_error_does_not_propagate(self) -> None:
+        from unittest.mock import AsyncMock
+
+        agent = self._agent()
+        agent.llm.aclose = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+        await agent.aclose()  # no raise
