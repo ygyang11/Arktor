@@ -374,3 +374,58 @@ class TestGet:
         statuses = {t.status for t in all_tasks}
         assert "completed" in statuses
         assert "cancelled" in statuses
+
+
+# -- Streaming / disk-first --
+
+
+class TestStreaming:
+    async def test_log_path_derived(self, manager: BackgroundTaskManager) -> None:
+        tid = manager.spawn("terminal", "t", _immediate())
+        task = manager.get_task(tid)
+        assert task is not None
+        assert task.log_path == str(Path(manager._output_dir) / f"{tid}.txt")
+
+    async def test_streaming_not_rewritten(self, manager: BackgroundTaskManager) -> None:
+        async def _write_then_return(log_path: Path) -> tuple[str, str]:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text("streamed content")
+            return "", "summary"
+
+        manager.spawn_streaming("terminal", "t", _write_then_return)
+        await asyncio.sleep(0.05)
+        task = manager.get_all()[0]
+        assert task.result is not None
+        assert task.result.output_path is not None
+        assert Path(task.result.output_path).read_text() == "streamed content"
+
+    async def test_nonstreaming_written_on_completion(
+        self, manager: BackgroundTaskManager,
+    ) -> None:
+        manager.spawn("terminal", "t", _immediate("payload"))
+        await asyncio.sleep(0.05)
+        task = manager.get_all()[0]
+        assert task.result is not None
+        assert Path(task.result.output_path).read_text() == "payload"
+
+    async def test_failed_empty_log_no_output_path(
+        self, manager: BackgroundTaskManager,
+    ) -> None:
+        async def _fail(log_path: Path) -> tuple[str, str]:
+            raise RuntimeError("boom")
+
+        manager.spawn_streaming("terminal", "t", _fail)
+        await asyncio.sleep(0.05)
+        task = manager.get_all()[0]
+        assert task.status == "failed"
+        assert task.result is not None
+        assert task.result.output_path is None
+
+    async def test_completed_empty_output_no_path(
+        self, manager: BackgroundTaskManager,
+    ) -> None:
+        manager.spawn("terminal", "t", _immediate(""))
+        await asyncio.sleep(0.05)
+        task = manager.get_all()[0]
+        assert task.result is not None
+        assert task.result.output_path is None

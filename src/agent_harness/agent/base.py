@@ -232,6 +232,8 @@ class BaseAgent(ABC, EventEmitter):
                     f"[Background Task Failed] {task.task_id} ({task.tool_name}): "
                     f"{task.description}\nError: {task.error}"
                 )
+                if task.result and task.result.output_path:
+                    content += f"\nPartial log: {task.result.output_path}"
             else:
                 continue
             await self.context.short_term_memory.add_message(

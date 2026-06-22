@@ -16,6 +16,7 @@ from typing import Any
 
 from agent_harness.core.errors import ToolExecutionError, ToolValidationError
 from agent_harness.tool.base import BaseTool, ToolSchema
+from agent_harness.utils.log_info import summarize_log
 from agent_harness.utils.token_counter import truncate_text_by_tokens
 
 _MAX_OUTPUT_TOKENS: int = 20_000
@@ -44,6 +45,7 @@ TERMINAL_TOOL_DESCRIPTION = (
     "    terminal_tool(command='cat file.txt')       # use dedicated file reading tool\n"
     "    terminal_tool(command='grep -r pattern .')   # use dedicated search tool\n"
     "    terminal_tool(command='find . -name *.py')   # use dedicated file search tool\n"
+    "    terminal_tool(command='python train.py &')   # use background=true, not &/nohup\n"
     "    terminal_tool(command='python scripts/check_env.py', background=true)  "
     "# need result before proceeding\n\n"
     "Guidelines:\n"
@@ -101,7 +103,8 @@ class TerminalTool(BaseTool):
                         "type": "boolean",
                         "description": (
                             "Run in background. Returns a task ID immediately; "
-                            "results are delivered automatically when complete."
+                            "output stays readable while it runs, and results are "
+                            "delivered automatically when complete."
                         ),
                         "default": False,
                     },
@@ -153,42 +156,21 @@ class TerminalTool(BaseTool):
     def _start_background(self, command: str, timeout: int) -> str:
         sandbox = self._agent._sandbox
 
-        async def work() -> tuple[str, str]:
+        async def work(log_path: Path) -> tuple[str, str]:
             result = await sandbox.execute(
-                command, timeout=timeout, workdir=str(_workspace_root()),
+                command, timeout=timeout, workdir=str(_workspace_root()), stream_to=log_path,
             )
             if result.exit_code is None:
                 raise RuntimeError(result.stdout)
-            output = result.stdout
-            if result.stderr:
-                output = f"{output}\n{result.stderr}".strip() if output else result.stderr
-            summary = _build_terminal_summary(result.exit_code, output)
-            return output, summary
+            return "", summarize_log(log_path, result.exit_code)
 
         desc = truncate_text_by_tokens(command, max_tokens=12, suffix="...")
-        task_id = self._agent._bg_manager.spawn(
+        task_id = self._agent._bg_manager.spawn_streaming(
             tool_name="terminal_tool",
             description=desc,
-            coro=work(),
+            make_coro=work,
         )
         return f"Background command {task_id} started: {command}"
-
-
-def _build_terminal_summary(exit_code: int | None, output: str) -> str:
-    lines = output.splitlines()
-    head = "\n".join(lines[:3]) if len(lines) > 3 else ""
-    tail = "\n".join(lines[-5:]) if len(lines) > 5 else output
-    parts: list[str] = []
-    if exit_code is not None:
-        parts.append(f"Exit code: {exit_code}")
-    else:
-        parts.append("Exit code: N/A (timeout or error)")
-    parts.append(f"Output: {len(lines)} lines")
-    if head and head != tail:
-        parts.append(f"Head:\n{head}")
-    if tail:
-        parts.append(f"Tail:\n{tail}")
-    return "\n".join(parts)
 
 
 terminal_tool = TerminalTool()
