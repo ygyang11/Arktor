@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -101,6 +102,42 @@ class TestStatus:
     async def test_missing_task_id(self, tool: BackgroundTaskTool) -> None:
         with pytest.raises(ToolValidationError, match="task_id is required"):
             await tool.execute(action="status")
+
+    async def test_running_truncated_label(
+        self, tool: BackgroundTaskTool, tmp_path: Path,
+    ) -> None:
+        mgr = tool._agent._bg_manager
+        (tmp_path / "bg_050.txt").write_text("\n".join(str(i) for i in range(40)) + "\n")
+        mgr._tasks["bg_050"] = BackgroundTask(
+            task_id="bg_050", tool_name="terminal", description="t",
+            asyncio_task=None, output_dir=str(tmp_path), streaming=True, status="running",
+        )
+        result = await tool.execute(action="status", task_id="bg_050")
+        assert "Live streaming output (last 30 lines)" in result
+
+    async def test_running_full_label(
+        self, tool: BackgroundTaskTool, tmp_path: Path,
+    ) -> None:
+        mgr = tool._agent._bg_manager
+        (tmp_path / "bg_051.txt").write_text("a\nb\nc\n")
+        mgr._tasks["bg_051"] = BackgroundTask(
+            task_id="bg_051", tool_name="terminal", description="t",
+            asyncio_task=None, output_dir=str(tmp_path), streaming=True, status="running",
+        )
+        result = await tool.execute(action="status", task_id="bg_051")
+        assert "Live streaming output:" in result
+        assert "last 30 lines" not in result
+
+    async def test_running_no_file_hint(
+        self, tool: BackgroundTaskTool, tmp_path: Path,
+    ) -> None:
+        mgr = tool._agent._bg_manager
+        mgr._tasks["bg_052"] = BackgroundTask(
+            task_id="bg_052", tool_name="terminal", description="t",
+            asyncio_task=None, output_dir=str(tmp_path), streaming=True, status="running",
+        )
+        result = await tool.execute(action="status", task_id="bg_052")
+        assert "Still running" in result
 
 
 # -- cancel --

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 import pytest
 
 from agent_app.tools.terminal.terminal_tool import TerminalTool
+from agent_harness.background import BackgroundTaskManager
 from agent_harness.core.config import ToolConfig
 from agent_harness.core.errors import ToolValidationError
 from agent_harness.core.message import ToolCall
@@ -196,3 +200,25 @@ class TestTerminalToolIntegration:
             return x
 
         assert my_tool.executor_timeout is None
+
+
+class TestTerminalBackground:
+    @pytest.mark.asyncio
+    async def test_background_streams_and_completes(self, tmp_path: Path) -> None:
+        t = TerminalTool()
+        mgr = BackgroundTaskManager()
+        mgr._output_dir = str(tmp_path / "bg")
+
+        class _Agent:
+            _sandbox = SandboxManager(LocalBackend())
+            _bg_manager = mgr
+
+        t.bind_agent(_Agent())
+        result = await t.execute(command="echo streamed", background=True)
+        assert "Background command" in result and "started" in result
+        await asyncio.sleep(0.1)
+        task = mgr.get_all()[0]
+        assert task.status == "completed"
+        assert task.result is not None
+        assert task.result.output_path is not None
+        assert "streamed" in Path(task.result.output_path).read_text()

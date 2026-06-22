@@ -340,7 +340,8 @@ class DocumentParserTool(BaseTool):
                         "type": "boolean",
                         "description": (
                             "Run in background. Returns a task ID immediately; "
-                            "results are delivered automatically when complete."
+                            "output is NOT streamed, and the result is delivered "
+                            "automatically when complete."
                         ),
                         "default": False,
                     },

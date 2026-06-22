@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -31,11 +32,16 @@ class BackgroundTask:
     description: str
     asyncio_task: asyncio.Task[BackgroundResult] | None
     output_dir: str = ""
+    streaming: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     status: str = "running"
     result: BackgroundResult | None = None
     error: str | None = None
     _collected: bool = field(default=False, repr=False)
+
+    @property
+    def log_path(self) -> str:
+        return str(Path(self.output_dir) / f"{self.task_id}.txt")
 
 
 class BackgroundTaskManager:
@@ -86,46 +92,67 @@ class BackgroundTaskManager:
             if n > self._task_seq:
                 self._task_seq = n
 
-    def spawn(
-        self,
-        tool_name: str,
-        description: str,
-        coro: Any,
-    ) -> str:
-        """Spawn a coroutine as a background task. Returns task_id.
-
-        The coroutine must return tuple[str, str] = (full_output, summary).
-        """
-        task_id = self._next_task_id()
-        bg_task = BackgroundTask(
-            task_id=task_id,
+    def _new_task(self, tool_name: str, description: str, *, streaming: bool) -> BackgroundTask:
+        task = BackgroundTask(
+            task_id=self._next_task_id(),
             tool_name=tool_name,
             description=description,
             asyncio_task=None,
             output_dir=self._output_dir,
+            streaming=streaming,
         )
-        self._tasks[task_id] = bg_task
-        bg_task.asyncio_task = asyncio.create_task(self._run(task_id, coro))
-        logger.debug("Background task %s started: %s", task_id, description)
-        return task_id
+        self._tasks[task.task_id] = task
+        return task
+
+    def spawn(self, tool_name: str, description: str, coro: Any) -> str:
+        """Spawn a ready coroutine (resolving to (output, summary)). Returns task_id."""
+        task = self._new_task(tool_name, description, streaming=False)
+        at = asyncio.create_task(self._run(task.task_id, coro))
+        at.add_done_callback(lambda _t: coro.close())
+        task.asyncio_task = at
+        logger.debug("Background task %s started: %s", task.task_id, description)
+        return task.task_id
+
+    def spawn_streaming(
+        self,
+        tool_name: str,
+        description: str,
+        make_coro: Callable[[Path], Coroutine[Any, Any, tuple[str, str]]],
+    ) -> str:
+        """Spawn a streaming task. ``make_coro`` receives the task's log path."""
+        task = self._new_task(tool_name, description, streaming=True)
+        coro = make_coro(Path(task.log_path))
+        at = asyncio.create_task(self._run(task.task_id, coro))
+        at.add_done_callback(lambda _t: coro.close())
+        task.asyncio_task = at
+        logger.debug("Background task %s started: %s", task.task_id, description)
+        return task.task_id
 
     async def _run(self, task_id: str, coro: Any) -> BackgroundResult:
         """Internal wrapper. Does NOT re-raise on failure (prevents asyncio warnings)."""
         task = self._tasks[task_id]
+        log = Path(task.log_path)
         try:
             output, summary = await coro
-            output_path = self._write_output(task, output) if output else None
-            task.result = BackgroundResult(summary=summary, output_path=output_path)
+            if not task.streaming and output:
+                log.parent.mkdir(parents=True, exist_ok=True)
+                log.write_text(output, encoding="utf-8")
+            task.result = BackgroundResult(
+                summary=summary,
+                output_path=str(log) if log.exists() and log.stat().st_size > 0 else None,
+            )
             task.status = "completed"
             logger.debug("Background task %s completed", task_id)
             return task.result
         except asyncio.CancelledError:
-            coro.close()
             task.status = "cancelled"
             logger.debug("Background task %s cancelled", task_id)
             raise
         except Exception as e:
-            task.result = BackgroundResult(summary=f"Error: {e}")
+            task.result = BackgroundResult(
+                summary=f"Error: {e}",
+                output_path=str(log) if log.exists() and log.stat().st_size > 0 else None,
+            )
             task.error = str(e)
             task.status = "failed"
             logger.debug("Background task %s failed: %s", task_id, e)
@@ -191,13 +218,3 @@ class BackgroundTaskManager:
                 tasks_to_wait.append(task.asyncio_task)
         if tasks_to_wait:
             await asyncio.gather(*tasks_to_wait, return_exceptions=True)
-
-    def _write_output(self, task: BackgroundTask, output: str) -> str:
-        # Use the output dir captured at spawn time, not the manager's
-        # current one: a task belongs to the session it was spawned under,
-        # even if the agent rebinds to another session before it completes.
-        out_dir = Path(task.output_dir or self._output_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        path = out_dir / f"{task.task_id}.txt"
-        path.write_text(output, encoding="utf-8")
-        return str(path)

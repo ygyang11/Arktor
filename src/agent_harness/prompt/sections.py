@@ -100,8 +100,10 @@ does not persist between calls
 - Most commands should run synchronously — you typically need the result \
 before proceeding. For commands that take a long time where blocking \
 would be wasteful (e.g. model training, large builds, long data processing), \
-set background=true for task tracking and automatic result delivery \
-(not shell & or nohup, which lose output)
+set background=true — the task is tracked, its output stays readable as it \
+streams, and its result is delivered automatically. MUST NEVER background with \
+shell & or nohup: they escape this tracking, timeout, and result delivery, and \
+orphan the process
 
 ### Multiple Commands
 - Use && to chain dependent commands (second runs only if first succeeds)
@@ -164,8 +166,8 @@ as media you cannot read or parse, or when you need precise structured content \
 - Extracts text, tables, formulas, and figures from PDFs and images with \
 complex layouts
 - Returns a structured response pointing to on-disk artifacts for downstream \
-reading. Supports `background=true` for non-blocking parsing; results are \
-delivered automatically when complete.""",
+reading. Supports `background=true` for non-blocking parsing; output is not \
+streamed, and the result is delivered automatically when complete.""",
 
 
     "memory_tool": """\
@@ -350,9 +352,9 @@ tasks started via `background=true` on other tools.
 ### Lifecycle
 1. A background task is started — a task ID is returned immediately.
 2. The task runs concurrently in the background while you keep working.
-3. You can use `background_task` to list all submitted tasks, check status of a specific task, \
-or cancel a running task. But when a task completes, results are automatically \
-delivered — NO NEED to poll or check proactively. Unless:
+3. You can use `background_task` to list all submitted tasks, check status of a specific task \
+(its latest output is readable live if it streams), or cancel a running task. But when a task \
+completes, results are automatically delivered — NO NEED to poll or check proactively. Unless:
    - Task info (IDs or results) has been lost from context
    - The user explicitly asks about task progress or history
    - You want to cancel a task that you don't need anymore

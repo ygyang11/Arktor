@@ -9,6 +9,8 @@ from agent_harness.core.config import SandboxConfig
 from agent_harness.sandbox.backend import LocalBackend, SandboxBackend
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agent_harness.sandbox.backend import ExecuteResult
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,7 @@ class SandboxManager:
         *,
         timeout: float = 30.0,
         workdir: str | None = None,
+        stream_to: Path | None = None,
     ) -> ExecuteResult:
         """Delegate to the current backend. Lazy-starts on first call."""
         if not self._started:
@@ -79,4 +82,8 @@ class SandboxManager:
                             f"Sandbox failed to initialize — terminal tool is unavailable. "
                             f"Cause: {e}"
                         ) from e
-        return await self._backend.execute(command, timeout=timeout, workdir=workdir)
+        if stream_to is None:
+            return await self._backend.execute(command, timeout=timeout, workdir=workdir)
+        return await self._backend.execute(
+            command, timeout=timeout, workdir=workdir, stream_to=stream_to
+        )

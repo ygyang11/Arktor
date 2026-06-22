@@ -77,3 +77,87 @@ class TestLocalBackend:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+class TestLocalBackendStreaming:
+    @pytest.fixture
+    def backend(self) -> LocalBackend:
+        return LocalBackend()
+
+    async def test_unchanged_without_stream_to(self, backend: LocalBackend) -> None:
+        result = await backend.execute("echo out; echo err >&2")
+        assert "out" in result.stdout
+        assert "err" in result.stderr
+
+    async def test_streams_to_file_empty_stdout(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        sink = tmp_path / "log.txt"
+        result = await backend.execute("echo a; echo b", stream_to=sink)
+        assert result.exit_code == 0
+        assert result.stdout == ""
+        assert result.stderr == ""
+        assert sink.read_text() == "a\nb\n"
+
+    async def test_merges_stderr_into_file(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        sink = tmp_path / "log.txt"
+        result = await backend.execute("echo out; echo err >&2", stream_to=sink)
+        assert result.stderr == ""
+        content = sink.read_text()
+        assert "out" in content and "err" in content
+
+    async def test_writes_incrementally(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        sink = tmp_path / "log.txt"
+        task = asyncio.create_task(
+            backend.execute("echo one; sleep 0.4; echo two", timeout=5, stream_to=sink)
+        )
+        await asyncio.sleep(0.2)
+        assert sink.read_text() == "one\n"
+        await task
+        assert sink.read_text() == "one\ntwo\n"
+
+    async def test_timeout_short_stdout_partial_in_file(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        sink = tmp_path / "log.txt"
+        result = await backend.execute("echo seen; sleep 10", timeout=0.3, stream_to=sink)
+        assert result.exit_code is None
+        assert "timed out" in result.stdout
+        assert "seen" not in result.stdout
+        assert "seen" in sink.read_text()
+
+    async def test_timeout_when_output_closed_but_running(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        sink = tmp_path / "log.txt"
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        result = await backend.execute(
+            "exec >/dev/null 2>&1; sleep 10", timeout=0.3, stream_to=sink
+        )
+        assert result.exit_code is None
+        assert loop.time() - start < 3
+
+    async def test_multibyte_split(self, backend: LocalBackend, tmp_path: Path) -> None:
+        sink = tmp_path / "log.txt"
+        result = await backend.execute(
+            "python3 -c \"print('中' * 5000)\"", timeout=10, stream_to=sink
+        )
+        assert result.exit_code == 0
+        text = sink.read_text(encoding="utf-8")
+        assert "�" not in text
+        assert text.count("中") == 5000
+
+    async def test_cancel_kills(self, backend: LocalBackend, tmp_path: Path) -> None:
+        sink = tmp_path / "log.txt"
+        task = asyncio.create_task(
+            backend.execute("sleep 100", timeout=60, stream_to=sink)
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task

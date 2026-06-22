@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import codecs
+import concurrent.futures
 import logging
+import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from agent_harness.core.config import DockerConfig
 from agent_harness.sandbox.backend import ExecuteResult, SandboxBackend
@@ -19,6 +23,8 @@ except ImportError:
 
 _CONTAINER_WORKDIR = "/workspace"
 _STOP_TIMEOUT = 5
+
+_T = TypeVar("_T")
 
 
 class DockerBackend(SandboxBackend):
@@ -111,6 +117,7 @@ class DockerBackend(SandboxBackend):
         *,
         timeout: float = 30.0,
         workdir: str | None = None,
+        stream_to: Path | None = None,
     ) -> ExecuteResult:
         """Execute a command inside the container."""
         if self._container is None:
@@ -148,15 +155,17 @@ class DockerBackend(SandboxBackend):
 
         exec_id: str = await loop.run_in_executor(None, _create_exec)
 
+        if stream_to is not None:
+            return await self._exec_streaming(exec_id, sink=stream_to, timeout=timeout)
+
         def _run_exec() -> tuple[bytes, bytes]:
             stdout, stderr = api_client.exec_start(exec_id, demux=True)
             return stdout or b"", stderr or b""
 
+        af = asyncio.wrap_future(_run_daemon(_run_exec))
+        af.add_done_callback(_consume_asyncio_future_exception)
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                loop.run_in_executor(None, _run_exec),
-                timeout=timeout,
-            )
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(asyncio.shield(af), timeout=timeout)
         except TimeoutError:
             await self._kill_exec(exec_id)
             return ExecuteResult(
@@ -182,6 +191,51 @@ class DockerBackend(SandboxBackend):
         stderr_text = stderr_bytes.decode(errors="replace")
 
         return ExecuteResult(exit_code=exit_code, stdout=stdout_text, stderr=stderr_text)
+
+    async def _exec_streaming(
+        self, exec_id: str, *, sink: Path, timeout: float
+    ) -> ExecuteResult:
+        sink.parent.mkdir(parents=True, exist_ok=True)
+        api_client = self._client.api
+
+        def _consume() -> int:
+            dec_out = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            dec_err = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            with sink.open("w", encoding="utf-8") as f:
+                for stdout_chunk, stderr_chunk in api_client.exec_start(
+                    exec_id, stream=True, demux=True
+                ):
+                    for raw, dec in ((stdout_chunk, dec_out), (stderr_chunk, dec_err)):
+                        if not raw:
+                            continue
+                        text = dec.decode(raw)
+                        if text:
+                            f.write(text)
+                            f.flush()
+                for dec in (dec_out, dec_err):
+                    text = dec.decode(b"", final=True)
+                    if text:
+                        f.write(text)
+                        f.flush()
+            return int(api_client.exec_inspect(exec_id).get("ExitCode", -1))
+
+        af = asyncio.wrap_future(_run_daemon(_consume))
+        af.add_done_callback(_consume_asyncio_future_exception)
+        try:
+            exit_code = await asyncio.wait_for(asyncio.shield(af), timeout=timeout)
+        except TimeoutError:
+            await self._kill_exec(exec_id)
+            return ExecuteResult(
+                exit_code=None, stdout=f"Error: execution timed out after {timeout}s"
+            )
+        except asyncio.CancelledError:
+            await self._kill_exec(exec_id)
+            raise
+        except Exception as exc:  # noqa: BLE001
+            await self._kill_exec(exec_id)
+            return ExecuteResult(exit_code=None, stdout=f"Error: command execution failed: {exc}")
+
+        return ExecuteResult(exit_code=exit_code, stdout="", stderr="")
 
     async def _kill_exec(self, exec_id: str) -> None:
         """Kill the exec process group inside the container."""
@@ -239,3 +293,29 @@ class DockerBackend(SandboxBackend):
             except Exception:  # noqa: BLE001
                 pass
             self._container = None
+
+
+def _run_daemon(fn: Callable[[], _T]) -> concurrent.futures.Future[_T]:
+    cf: concurrent.futures.Future[_T] = concurrent.futures.Future()
+
+    def _runner() -> None:
+        if not cf.set_running_or_notify_cancel():
+            return
+        try:
+            result = fn()
+        except BaseException as exc:  # noqa: BLE001
+            if not cf.done():
+                cf.set_exception(exc)
+        else:
+            if not cf.done():
+                cf.set_result(result)
+
+    threading.Thread(target=_runner, name="arktor-docker-exec", daemon=True).start()
+    return cf
+
+
+def _consume_asyncio_future_exception(f: asyncio.Future[Any]) -> None:
+    try:
+        f.exception()
+    except asyncio.CancelledError:
+        pass

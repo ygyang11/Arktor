@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from agent_harness.core.errors import ToolValidationError
 from agent_harness.tool.base import BaseTool, ToolSchema
+from agent_harness.utils.log_info import tail_lines
 
 BACKGROUND_TASK_TOOL_DESCRIPTION = """\
 View and manage background tasks. Results are automatically delivered \
@@ -16,8 +18,8 @@ when tasks complete — you do not need to poll or check proactively.
 - **list** (action only): Show all previously submitted tasks with task_id, \
 status, tool, description, and elapsed time. Includes all statuses: \
 running, completed, failed, cancelled.
-- **status** (action + task_id): Detailed info for one task. When completed, \
-includes result summary and output file path.
+- **status** (action + task_id): Detailed info for one task. For a running task, \
+its latest output if it streams; when completed, the result summary and output file path.
 - **cancel** (action + task_id): Stop a running task. Only running tasks \
 can be cancelled.\
 """
@@ -106,6 +108,19 @@ class BackgroundTaskTool(BaseTool):
             lines.append(f"Output: {task.result.output_path}")
         if task.result and task.result.summary:
             lines.append(f"Summary:\n{task.result.summary}")
+        if task.status == "running":
+            tail, truncated = tail_lines(Path(task.log_path), 30)
+            if tail:
+                if truncated:
+                    shown = tail.count("\n") + 1
+                    head = f"Live streaming output (last {shown} lines)"
+                else:
+                    head = "Live streaming output"
+                lines.append(f"{head}:\n{tail}")
+            else:
+                lines.append(
+                    "Still running, the result will be delivered automatically on completion"
+                )
         if task.error:
             lines.append(f"Error: {task.error}")
         return "\n".join(lines)
