@@ -2,11 +2,38 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
 
 from agent_harness.sandbox.backend import ExecuteResult, LocalBackend
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+async def _read_pid(pidfile: Path) -> int:
+    for _ in range(200):
+        if pidfile.exists() and pidfile.read_text().strip():
+            return int(pidfile.read_text().strip())
+        await asyncio.sleep(0.02)
+    raise AssertionError("child never reported its pid")
+
+
+async def _await_dead(pid: int) -> bool:
+    for _ in range(200):
+        if not _alive(pid):
+            return True
+        await asyncio.sleep(0.02)
+    return False
 
 
 class TestExecuteResult:
@@ -77,6 +104,31 @@ class TestLocalBackend:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+    async def test_cancel_kills_child_process_group(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        pidfile = tmp_path / "child.pid"
+        task = asyncio.create_task(
+            backend.execute(f"sleep 100 & echo $! > {pidfile}; wait", timeout=60)
+        )
+        child = await _read_pid(pidfile)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await _await_dead(child)
+
+    async def test_timeout_kills_child_process_group(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        pidfile = tmp_path / "child.pid"
+        task = asyncio.create_task(
+            backend.execute(f"sleep 100 & echo $! > {pidfile}; wait", timeout=0.3)
+        )
+        child = await _read_pid(pidfile)
+        result = await task
+        assert result.exit_code is None
+        assert await _await_dead(child)
 
 
 class TestLocalBackendStreaming:
@@ -161,3 +213,19 @@ class TestLocalBackendStreaming:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+    async def test_cancel_kills_child_process_group(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        sink = tmp_path / "log.txt"
+        pidfile = tmp_path / "child.pid"
+        task = asyncio.create_task(
+            backend.execute(
+                f"sleep 100 & echo $! > {pidfile}; wait", timeout=60, stream_to=sink
+            )
+        )
+        child = await _read_pid(pidfile)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await _await_dead(child)

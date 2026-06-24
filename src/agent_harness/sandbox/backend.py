@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import codecs
 import logging
+import os
+import signal
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,25 +76,20 @@ class LocalBackend(SandboxBackend):
                 cwd=workdir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(),
                 timeout=timeout,
             )
         except TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            _terminate(proc)
             await proc.wait()
             return ExecuteResult(
                 exit_code=None, stdout=f"Error: execution timed out after {timeout}s",
             )
         except asyncio.CancelledError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            _terminate(proc)
             await proc.wait()
             raise
         except Exception as exc:  # noqa: BLE001
@@ -124,6 +121,7 @@ class LocalBackend(SandboxBackend):
                 cwd=workdir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
             )
         except Exception as exc:  # noqa: BLE001
             return ExecuteResult(exit_code=None, stdout=f"Error: failed to execute command: {exc}")
@@ -150,27 +148,30 @@ class LocalBackend(SandboxBackend):
         try:
             exit_code = await asyncio.wait_for(_drive(), timeout=timeout)
         except TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            _terminate(proc)
             await proc.wait()
             return ExecuteResult(
                 exit_code=None, stdout=f"Error: execution timed out after {timeout}s"
             )
         except asyncio.CancelledError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            _terminate(proc)
             await proc.wait()
             raise
         except Exception as exc:  # noqa: BLE001
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            _terminate(proc)
             await proc.wait()
             return ExecuteResult(exit_code=None, stdout=f"Error: command execution failed: {exc}")
 
         return ExecuteResult(exit_code=exit_code, stdout="", stderr="")
+
+
+def _terminate(proc: asyncio.subprocess.Process) -> None:
+    """SIGKILL the child's whole process group, falling back to the lone
+    child where process groups are unavailable (non-POSIX) or already gone."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (AttributeError, ProcessLookupError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
