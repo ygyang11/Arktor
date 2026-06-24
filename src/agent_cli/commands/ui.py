@@ -71,7 +71,7 @@ def _format_cache_value(
     if total_input == 0:
         return "—"
     rate = _hit_rate(cache_read, total_input)
-    parts = [f"{cache_read:,} / {total_input:,} hit ({rate:.0f}%)"]
+    parts = [f"{cache_read:,} / {total_input:,} hit ({rate:.1f}%)"]
     if cache_creation > 0:
         parts.append(f"{cache_creation:,} newly created")
     return " · ".join(parts)
