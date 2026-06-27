@@ -45,7 +45,7 @@ TERMINAL_TOOL_DESCRIPTION = (
     "    terminal_tool(command='cat file.txt')       # use dedicated file reading tool\n"
     "    terminal_tool(command='grep -r pattern .')   # use dedicated search tool\n"
     "    terminal_tool(command='find . -name *.py')   # use dedicated file search tool\n"
-    "    terminal_tool(command='python train.py &')   # use background=true, not &/nohup\n"
+    "    terminal_tool(command='python train.py &')   # use background=true, NEVER &/nohup\n"
     "    terminal_tool(command='python scripts/check_env.py', background=true)  "
     "# need result before proceeding\n\n"
     "Guidelines:\n"

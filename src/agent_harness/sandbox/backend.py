@@ -98,6 +98,7 @@ class LocalBackend(SandboxBackend):
         stdout_text = stdout_bytes.decode(errors="replace")
         stderr_text = stderr_bytes.decode(errors="replace")
 
+        _terminate(proc)
         return ExecuteResult(
             exit_code=proc.returncode,
             stdout=stdout_text,
@@ -162,6 +163,7 @@ class LocalBackend(SandboxBackend):
             await proc.wait()
             return ExecuteResult(exit_code=None, stdout=f"Error: command execution failed: {exc}")
 
+        _terminate(proc)
         return ExecuteResult(exit_code=exit_code, stdout="", stderr="")
 
 

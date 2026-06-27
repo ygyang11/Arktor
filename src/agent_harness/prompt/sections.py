@@ -67,7 +67,7 @@ When a dedicated filesystem tool can do the job, use it instead of terminal_tool
 - list_dir instead of ls
 - glob_files instead of find
 - grep_files instead of grep/rg
-- write_file/edit_file instead of echo/sed/awk
+- write_file/edit_file instead of echo/sed/awk — no apply_patch or patch tool here
 These tools provide structured output optimized for your context window.
 Reserve terminal_tool for commands that have no dedicated tool equivalent.""",
 
@@ -93,17 +93,22 @@ for your context window.
 ### Command Execution
 - Each call spawns a fresh bash subprocess — shell state (variables, cwd, aliases) \
 does not persist between calls
-- Commands always start from the workspace root directory
-- To run in a subdirectory, chain with cd: 'cd src && pytest'
+- Commands always start from the workspace root directory; To run in a subdirectory, \
+chain with cd: 'cd tests && pytest'
 - Always quote file paths containing spaces with double quotes
 - If a command creates files or directories, verify the parent directory exists first
 - Most commands should run synchronously — you typically need the result \
 before proceeding. For commands that take a long time where blocking \
 would be wasteful (e.g. model training, large builds, long data processing), \
-set background=true — the task is tracked, its output stays readable as it \
-streams, and its result is delivered automatically. MUST NEVER background with \
-shell & or nohup: they escape this tracking, timeout, and result delivery, and \
-orphan the process
+set background=true — the task is tracked, its result is delivered automatically \
+and the output stays readable as it streams, so rarely need to redirect to a file — \
+but if do ('> log 2>&1'), read it there, not the result.
+- A terminal command and everything it spawns share one lifetime — when the \
+command ends, anything still running under it dies too. So shell &, nohup, and \
+disown can't keep a process alive, foreground or background: background a server \
+that way and the call either hangs until it times out or returns right away with \
+the server already dead. So for something that must keep running — servers, watchers, \
+long jobs — use background=true instead.
 
 ### Multiple Commands
 - Use && to chain dependent commands (second runs only if first succeeds)
