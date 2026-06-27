@@ -130,6 +130,17 @@ class TestLocalBackend:
         assert result.exit_code is None
         assert await _await_dead(child)
 
+    async def test_completion_sweeps_detached_child(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        pidfile = tmp_path / "child.pid"
+        result = await backend.execute(
+            f"sleep 100 >/dev/null 2>&1 & echo $! > {pidfile}; echo done", timeout=60
+        )
+        assert result.exit_code == 0
+        assert "done" in result.stdout
+        assert await _await_dead(int(pidfile.read_text().strip()))
+
 
 class TestLocalBackendStreaming:
     @pytest.fixture
@@ -229,3 +240,17 @@ class TestLocalBackendStreaming:
         with pytest.raises(asyncio.CancelledError):
             await task
         assert await _await_dead(child)
+
+    async def test_completion_sweeps_detached_child(
+        self, backend: LocalBackend, tmp_path: Path
+    ) -> None:
+        sink = tmp_path / "log.txt"
+        pidfile = tmp_path / "child.pid"
+        result = await backend.execute(
+            f"sleep 100 >/dev/null 2>&1 & echo $! > {pidfile}; echo done",
+            timeout=60,
+            stream_to=sink,
+        )
+        assert result.exit_code == 0
+        assert "done" in sink.read_text()
+        assert await _await_dead(int(pidfile.read_text().strip()))

@@ -6,7 +6,9 @@ import atexit
 import codecs
 import concurrent.futures
 import logging
+import shlex
 import threading
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -35,10 +37,10 @@ class DockerBackend(SandboxBackend):
       execute() — exec_create + exec_start (millisecond-level, container stays running)
       stop()    — Stop and remove container
 
-    Timeout/cancel semantics:
-      Uses Docker API low-level exec_create/exec_start to obtain an exec_id.
-      On timeout or cancellation, exec_inspect retrieves the container PID,
-      then kill -9 -PID terminates the entire process group.
+    Process-group teardown:
+      Each exec records its process group to a marker file, and on every exit
+      — completion, timeout, or cancellation — the whole group is killed, so
+      processes detached with ``&``/``nohup`` never outlive the command.
     """
 
     def __init__(self, config: DockerConfig) -> None:
@@ -143,10 +145,14 @@ class DockerBackend(SandboxBackend):
         container = self._container
         api_client = self._client.api
 
+        marker = f"/tmp/.arktor-pg-{uuid.uuid4().hex}"
+        qmarker = shlex.quote(marker)
+        wrapped = f"printf '%s\\n' \"$$\" > {qmarker} || exit $?\n{command}"
+
         def _create_exec() -> str:
             resp = api_client.exec_create(
                 container.id,
-                ["bash", "-c", command],
+                ["bash", "-c", wrapped],
                 workdir=container_workdir,
                 stdout=True,
                 stderr=True,
@@ -156,7 +162,9 @@ class DockerBackend(SandboxBackend):
         exec_id: str = await loop.run_in_executor(None, _create_exec)
 
         if stream_to is not None:
-            return await self._exec_streaming(exec_id, sink=stream_to, timeout=timeout)
+            return await self._exec_streaming(
+                exec_id, marker, sink=stream_to, timeout=timeout
+            )
 
         def _run_exec() -> tuple[bytes, bytes]:
             stdout, stderr = api_client.exec_start(exec_id, demux=True)
@@ -167,15 +175,16 @@ class DockerBackend(SandboxBackend):
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(asyncio.shield(af), timeout=timeout)
         except TimeoutError:
-            await self._kill_exec(exec_id)
+            await self._kill_group(exec_id, marker)
             return ExecuteResult(
                 exit_code=None,
                 stdout=f"Error: execution timed out after {timeout}s",
             )
         except asyncio.CancelledError:
-            await self._kill_exec(exec_id)
+            await self._kill_group(exec_id, marker)
             raise
         except Exception as exc:  # noqa: BLE001
+            await self._kill_group(exec_id, marker)
             return ExecuteResult(
                 exit_code=None,
                 stdout=f"Error: command execution failed: {exc}",
@@ -185,15 +194,17 @@ class DockerBackend(SandboxBackend):
             info = api_client.exec_inspect(exec_id)
             return int(info.get("ExitCode", -1))
 
-        exit_code = await loop.run_in_executor(None, _inspect)
+        try:
+            exit_code = await loop.run_in_executor(None, _inspect)
+        finally:
+            await self._kill_group(exec_id, marker)
 
         stdout_text = stdout_bytes.decode(errors="replace")
         stderr_text = stderr_bytes.decode(errors="replace")
-
         return ExecuteResult(exit_code=exit_code, stdout=stdout_text, stderr=stderr_text)
 
     async def _exec_streaming(
-        self, exec_id: str, *, sink: Path, timeout: float
+        self, exec_id: str, marker: str, *, sink: Path, timeout: float
     ) -> ExecuteResult:
         sink.parent.mkdir(parents=True, exist_ok=True)
         api_client = self._client.api
@@ -224,36 +235,46 @@ class DockerBackend(SandboxBackend):
         try:
             exit_code = await asyncio.wait_for(asyncio.shield(af), timeout=timeout)
         except TimeoutError:
-            await self._kill_exec(exec_id)
+            await self._kill_group(exec_id, marker)
             return ExecuteResult(
                 exit_code=None, stdout=f"Error: execution timed out after {timeout}s"
             )
         except asyncio.CancelledError:
-            await self._kill_exec(exec_id)
+            await self._kill_group(exec_id, marker)
             raise
         except Exception as exc:  # noqa: BLE001
-            await self._kill_exec(exec_id)
+            await self._kill_group(exec_id, marker)
             return ExecuteResult(exit_code=None, stdout=f"Error: command execution failed: {exc}")
 
+        await self._kill_group(exec_id, marker)
         return ExecuteResult(exit_code=exit_code, stdout="", stderr="")
 
-    async def _kill_exec(self, exec_id: str) -> None:
-        """Kill the exec process group inside the container."""
+    async def _kill_group(self, exec_id: str, marker: str) -> None:
+        """Kill the exec's whole process group inside the container.
+
+        Prefers the pgid the command recorded to ``marker`` (still valid after
+        the exec exits); falls back to the live exec Pid for the brief window
+        before the marker is written. Always removes the marker."""
         loop = asyncio.get_running_loop()
         container = self._container
         api_client = self._client.api
+        qmarker = shlex.quote(marker)
 
         def _do_kill() -> None:
             try:
-                info = api_client.exec_inspect(exec_id)
-                pid = info.get("Pid", 0)
-                if pid > 0:
-                    container.exec_run(
-                        ["bash", "-c", f"kill -9 -{pid} 2>/dev/null; kill -9 {pid} 2>/dev/null"]
-                    )
-                    logger.debug(
-                        "Killed process group: pid=%d, exec_id=%s", pid, exec_id[:12]
-                    )
+                pid = api_client.exec_inspect(exec_id).get("Pid", 0)
+                fallback = pid if isinstance(pid, int) and pid > 0 else 0
+                container.exec_run(
+                    [
+                        "bash",
+                        "-c",
+                        f"pgid=$(cat {qmarker} 2>/dev/null); "
+                        f'case "$pgid" in ""|*[!0-9]*) pgid={fallback};; esac; '
+                        f'if [ "$pgid" -gt 0 ] 2>/dev/null; then '
+                        f'kill -9 -- "-$pgid" 2>/dev/null; kill -9 "$pgid" 2>/dev/null; fi; '
+                        f"rm -f {qmarker}",
+                    ]
+                )
             except Exception:  # noqa: BLE001
                 logger.warning("Failed to kill exec process: exec_id=%s", exec_id[:12])
 

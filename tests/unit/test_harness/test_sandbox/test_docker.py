@@ -152,6 +152,30 @@ class TestDockerBackend:
             await task
         b._container.exec_run.assert_called()
 
+    async def test_command_wrapped_with_pgid_marker(self) -> None:
+        b = self._make_started_backend()
+        b._client.api.exec_create.return_value = {"Id": "exec_w"}
+        b._client.api.exec_start.return_value = (b"", b"")
+        b._client.api.exec_inspect.return_value = {"ExitCode": 0, "Pid": 0}
+
+        await b.execute("echo hi  # trailing comment")
+        wrapped = b._client.api.exec_create.call_args[0][1][2]
+        assert "printf" in wrapped and '"$$"' in wrapped
+        assert "/tmp/.arktor-pg-" in wrapped
+        assert wrapped.endswith("echo hi  # trailing comment")
+
+    async def test_completion_sweeps_process_group(self) -> None:
+        b = self._make_started_backend()
+        b._client.api.exec_create.return_value = {"Id": "exec_done"}
+        b._client.api.exec_start.return_value = (b"done\n", b"")
+        b._client.api.exec_inspect.return_value = {"ExitCode": 0, "Pid": 0}
+
+        result = await b.execute("echo done")
+        assert result.exit_code == 0
+        b._container.exec_run.assert_called()
+        kill = str(b._container.exec_run.call_args)
+        assert 'kill -9 -- "-$pgid"' in kill and "/tmp/.arktor-pg-" in kill
+
     async def test_workdir_mapping(self, tmp_path: Path) -> None:
         b = self._make_started_backend(tmp_path=str(tmp_path))
         b._client.api.exec_create.return_value = {"Id": "exec_wd"}
