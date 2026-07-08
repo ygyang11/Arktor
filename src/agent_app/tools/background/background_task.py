@@ -11,7 +11,7 @@ from agent_harness.utils.log_info import tail_lines
 
 BACKGROUND_TASK_TOOL_DESCRIPTION = """\
 View and manage background tasks. Results are automatically delivered \
-when tasks complete — you do not need to poll or check proactively.
+when tasks complete — DO NOT NEED TO POLL OR CHECK PROACTIVELY.
 
 ## Actions
 

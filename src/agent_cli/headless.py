@@ -13,6 +13,7 @@ from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from agent_cli.runtime.status import WindowView
     from agent_harness import AgentResult
 
 
@@ -23,10 +24,13 @@ async def _safe(coro: Awaitable[object], what: str) -> None:
         print(f"arktor: failed to {what}: {e}", file=sys.stderr)
 
 
-def _emit_json(session_id: str, result: AgentResult | None, err: str) -> None:
+def _emit_json(
+    session_id: str, result: AgentResult | None, err: str, window: WindowView,
+) -> None:
     """Emit the run as NDJSON on stdout: one object per step, then a final
-    result line carrying session_id, output and usage. On failure a single
-    is_error result line stands in for the whole run."""
+    result line carrying session_id, output, usage and the final context-window
+    occupancy. On failure a single is_error result line stands in for the whole
+    run."""
     lines: list[dict[str, Any]] = []
     if result is None:
         lines.append({
@@ -40,6 +44,10 @@ def _emit_json(session_id: str, result: AgentResult | None, err: str) -> None:
             "type": "result", "is_error": False, "session_id": session_id,
             "output": result.output, "num_steps": len(result.steps),
             "usage": result.usage.model_dump(mode="json"),
+            "context": {
+                "input_tokens": window.displayed_input_tokens,
+                "max_tokens": window.max_tokens,
+            },
         })
     for line in lines:
         sys.stdout.write(json.dumps(line, ensure_ascii=False, default=str) + "\n")
@@ -66,6 +74,7 @@ async def run_headless(args: argparse.Namespace) -> int:
         restore_session,
         stop_sandbox,
     )
+    from agent_cli.runtime.status import collect_window
     from agent_harness import AutoApproveHandler, setup_logging
     from agent_harness.hooks.base import DefaultHooks
     from agent_harness.session.file_session import FileSession
@@ -113,7 +122,7 @@ async def run_headless(args: argparse.Namespace) -> int:
         await _safe(agent.aclose(), "close llm client")
 
     if fmt == "json":
-        _emit_json(session_id, result, err)
+        _emit_json(session_id, result, err, collect_window(agent))
     elif result is not None:
         print(result.output)
     else:

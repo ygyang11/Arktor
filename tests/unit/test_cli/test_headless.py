@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -54,6 +55,11 @@ class _FakeAgent:
         self._approval = _FakeApproval(mode)
         self._session_metadata_extras: dict[str, Any] = {}
         self.run_mode_seen: str | None = None
+        self.context = SimpleNamespace(
+            short_term_memory=SimpleNamespace(
+                last_call=None, max_tokens=200_000, displayed_input_tokens=1234,
+            ),
+        )
         if error is not None:
             self.run = AsyncMock(side_effect=error)
         else:
@@ -180,6 +186,7 @@ async def test_json_output_emits_ndjson_steps_and_result(
     assert res["output"] == "done"
     assert res["num_steps"] == 2
     assert "usage" in res
+    assert res["context"] == {"input_tokens": 1234, "max_tokens": 200_000}
 
 
 async def test_json_output_error_is_single_result_line(

@@ -380,7 +380,7 @@ tasks started via `background=true` on other tools.
 2. The task runs concurrently in the background while you keep working.
 3. You can use `background_task` to list all submitted tasks, check status of a specific task \
 (its latest output is readable live if it streams), or cancel a running task. But when a task \
-completes, results are automatically delivered — NO NEED to poll or check proactively. Unless:
+completes, results are automatically delivered — NO NEED TO POLL OR CHECK PROACTIVELY. Unless:
    - Task info (IDs or results) has been lost from context
    - The user explicitly asks about task progress or history
    - You want to cancel a task that you don't need anymore
