@@ -177,6 +177,34 @@ def test_export_assistant_block_unchanged() -> None:
     assert out == "## Assistant\n\nplain answer\n"
 
 
+def test_export_goal_start_and_continuation_are_canonical() -> None:
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    start = _format_message(Message.user(goal_mode.make_start_input("ship it")))
+    continuation = _format_message(goal_mode.make_continuation_message(
+        _goal_agent("ship it"),
+        "gap",
+        "run tests",
+    ))
+
+    assert "/goal ship it" in start
+    assert "initial worker turn" not in start
+    assert "◎ goal · continuing" in continuation
+    assert "ship it" not in continuation
+    assert "run tests" not in continuation
+
+
+def _goal_agent(objective: str) -> MagicMock:
+    from agent_cli.runtime.goal import mode as goal_mode
+    from agent_harness.context.context import AgentContext
+
+    agent = MagicMock()
+    agent.context = AgentContext()
+    agent._session_metadata_extras = {}
+    goal_mode.begin(agent, objective)
+    return agent
+
+
 def test_export_user_attachments_section() -> None:
     att = Attachment(digest="a" * 64, mime="image/png", filename="shot.png", size=1024)
     out = _format_message(Message.user("see this", attachments=[att]))

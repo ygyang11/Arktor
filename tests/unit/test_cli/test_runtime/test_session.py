@@ -14,9 +14,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent_cli.runtime import plan_mode
+from agent_cli.runtime.goal import mode as goal_mode
 from agent_cli.runtime.session import (
     _TurnContext,
+    cycle_next_mode,
     make_save_session,
+    restore_session,
     rollback,
     should_rollback,
     switch_session,
@@ -385,6 +388,7 @@ def _agent_with_active_plan(active: bool) -> MagicMock:
 
 def teardown_function() -> None:
     plan_mode._active.clear()
+    goal_mode._goals.clear()
 
 
 async def test_save_session_records_plan_mode_true() -> None:
@@ -484,3 +488,115 @@ async def test_switch_session_fresh_session_resets_plan_mode() -> None:
 
     assert plan_mode.is_active(agent) is False
     agent.reset_session_state.assert_awaited_once_with("new-id")
+
+
+async def test_restore_session_restores_live_goal_as_paused() -> None:
+    agent = MagicMock()
+    agent._session_metadata_extras = {"stale": True}
+    agent.apply_session_state = AsyncMock()
+    state = MagicMock()
+    state.metadata = {
+        "_goal": {
+            "objective": "finish release",
+            "status": "active",
+            "turns": 2,
+            "accumulated_s": 5,
+            "accumulated_tokens": 10,
+        }
+    }
+    backend = MagicMock()
+    backend.load_state = AsyncMock(return_value=state)
+
+    assert await restore_session(agent, backend) is state
+    goal = goal_mode.get_state(agent)
+    assert goal is not None
+    assert goal.objective == "finish release"
+    assert goal.status == "paused"
+    assert agent._session_metadata_extras["_goal"]["status"] == "paused"
+
+
+async def test_restore_missing_or_terminal_goal_clears_stale_runtime() -> None:
+    agent = MagicMock()
+    agent._session_metadata_extras = {}
+    agent.context.usage_meter.total.total_tokens = 0
+    agent.apply_session_state = AsyncMock()
+    goal_mode.begin(agent, "stale")
+
+    state = MagicMock()
+    state.metadata = {"_goal": {"objective": "done", "status": "complete"}}
+    backend = MagicMock()
+    backend.load_state = AsyncMock(return_value=state)
+    await restore_session(agent, backend)
+    assert goal_mode.get_state(agent) is None
+
+    goal_mode.begin(agent, "stale again")
+    backend.load_state = AsyncMock(return_value=None)
+    assert await restore_session(agent, backend) is None
+    assert goal_mode.get_state(agent) is None
+
+
+async def test_switch_session_cleanup_order_and_goal_pause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    collected = iter([True, False])
+
+    async def collect(agent) -> bool:
+        events.append("collect")
+        return next(collected)
+
+    async def cancel(agent) -> list[str]:
+        events.append("cancel")
+        return ["bg-1"]
+
+    async def shutdown(agent) -> None:
+        events.append("shutdown")
+
+    monkeypatch.setattr("agent_cli.runtime.session.background.collect_results", collect)
+    monkeypatch.setattr("agent_cli.runtime.session.background.cancel_all_with_note", cancel)
+    monkeypatch.setattr("agent_cli.runtime.session.background.shutdown", shutdown)
+    monkeypatch.setattr(
+        "agent_cli.runtime.session.background.clear_tasks",
+        lambda agent: events.append("clear_tasks"),
+    )
+
+    async def stop(agent) -> None:
+        events.append("stop")
+
+    monkeypatch.setattr("agent_cli.runtime.session.stop_sandbox", stop)
+
+    agent = MagicMock()
+    agent._session_metadata_extras = {}
+    agent.context.usage_meter.total.total_tokens = 0
+    agent.reset_session_state = AsyncMock(side_effect=lambda sid: events.append("reset"))
+    goal = goal_mode.begin(agent, "x")
+    handler = MagicMock()
+    handler.cancel_pending = MagicMock(side_effect=lambda: events.append("handler"))
+    save = AsyncMock(side_effect=lambda: events.append("save"))
+    backend = MagicMock()
+    backend.set_session_id = MagicMock(side_effect=lambda sid: events.append("set"))
+    backend.load_state = AsyncMock(return_value=None)
+
+    await switch_session(agent, backend, handler, save, "new")
+
+    assert events == [
+        "handler",
+        "collect",
+        "cancel",
+        "shutdown",
+        "collect",
+        "save",
+        "clear_tasks",
+        "stop",
+        "set",
+        "reset",
+    ]
+    assert goal.status == "paused"
+    assert goal.reason == "session switched"
+    save.assert_awaited_once()
+
+
+def test_cycle_next_mode_can_skip_plan() -> None:
+    assert cycle_next_mode("never", skip_plan=True) == "auto"
+    assert cycle_next_mode("plan", skip_plan=True) == "auto"
+    assert cycle_next_mode("never") == "plan"

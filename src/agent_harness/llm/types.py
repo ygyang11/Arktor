@@ -18,7 +18,7 @@ class FinishReason(str, Enum):
     CONTENT_FILTER = "content_filter"
 
 
-UsageSource = Literal["main", "compressor", "subagent", "background"]
+UsageSource = Literal["main", "compressor", "subagent", "background", "goal_eval"]
 
 
 class Usage(BaseModel):

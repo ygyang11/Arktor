@@ -19,6 +19,7 @@ from agent_cli.repl.paste import (
 )
 from agent_cli.runtime import plan_mode
 from agent_cli.runtime import session as sess_rt
+from agent_cli.runtime.goal import mode as goal_mode
 from agent_harness.agent.base import BaseAgent
 from agent_harness.utils.blob import make_attachment
 
@@ -120,7 +121,10 @@ def build_keybindings(
     @kb.add("s-tab")
     def _cycle_mode(event: KeyPressEvent) -> None:
         cur = sess_rt.current_mode_key(agent)
-        next_mode = sess_rt.cycle_next_mode(cur)
+        next_mode = sess_rt.cycle_next_mode(
+            cur,
+            skip_plan=goal_mode.is_active(agent),
+        )
         if cur == "plan" and next_mode != "plan":
             plan_mode.exit(agent)
         sess_rt.apply_mode(agent, next_mode)

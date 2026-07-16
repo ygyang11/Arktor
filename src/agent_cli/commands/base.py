@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from agent_cli.approval_handler import CliApprovalHandler
     from agent_cli.commands.registry import CommandRegistry
     from agent_harness.agent.base import BaseAgent
+    from agent_harness.core.message import Message
     from agent_harness.session.base import BaseSession
 
 
@@ -32,7 +33,7 @@ class CommandContext:
 @dataclass
 class CommandResult:
     output: RenderableType | None = None
-    agent_input: str | None = None
+    agent_input: str | Message | None = None
     should_exit: bool = False
     new_session_id: str | None = None
 

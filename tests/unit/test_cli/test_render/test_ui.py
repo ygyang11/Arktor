@@ -56,6 +56,8 @@ def _stub_agent(model: str, input_tokens: int | None, max_tokens: int) -> MagicM
     stm.displayed_input_tokens = input_tokens
     stm.max_tokens = max_tokens
     agent.context.short_term_memory = stm
+    agent.context.usage_meter.total.total_tokens = 0
+    agent._session_metadata_extras = {}
     agent.tools = []
     agent.tool_registry.has = MagicMock(return_value=False)
     agent._bg_manager.get_all = MagicMock(return_value=[])
@@ -146,3 +148,53 @@ def test_status_bar_text_dash_when_no_call_yet() -> None:
     with patch("agent_cli.render.ui.get_app", return_value=fake_app):
         out = renderer()
     assert "—/100k" in out.value
+
+
+def test_status_bar_renders_live_goal_and_hides_terminal() -> None:
+    from unittest.mock import patch
+
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    agent = _stub_agent("gpt-5", 100, 100_000)
+    goal = goal_mode.begin(agent, "x")
+    renderer = make_status_bar_text(agent)
+    fake_app = MagicMock()
+    fake_app.output.get_size.return_value = MagicMock(columns=120)
+
+    with patch("agent_cli.render.ui.get_app", return_value=fake_app):
+        active = _plain_toolbar(renderer())
+        goal_mode.pause(agent)
+        paused = _plain_toolbar(renderer())
+        goal_mode.resume(agent)
+        goal_mode.finish(agent, "complete", "done")
+        terminal = _plain_toolbar(renderer())
+
+    assert "Auto mode (shift+tab to cycle)    ◎ goal active ·" in active
+    assert "◎ goal paused ·" in paused
+    assert "◎ goal" not in terminal
+    assert goal.status == "complete"
+    goal_mode.clear(agent)
+
+
+def test_status_bar_goal_width_fallback_order() -> None:
+    from unittest.mock import patch
+
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    agent = _stub_agent("model", 100, 100_000)
+    goal_mode.begin(agent, "x")
+    renderer = make_status_bar_text(agent)
+    fake_app = MagicMock()
+
+    fake_app.output.get_size.return_value = MagicMock(columns=55)
+    with patch("agent_cli.render.ui.get_app", return_value=fake_app):
+        medium = _plain_toolbar(renderer())
+    assert "shift+tab" not in medium
+    assert "◎ goal active" in medium
+
+    fake_app.output.get_size.return_value = MagicMock(columns=35)
+    with patch("agent_cli.render.ui.get_app", return_value=fake_app):
+        narrow = _plain_toolbar(renderer())
+    assert "◎ goal" not in narrow
+    assert "Auto mode" in narrow
+    goal_mode.clear(agent)

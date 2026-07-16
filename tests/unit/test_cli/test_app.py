@@ -368,6 +368,18 @@ def test_output_format_text_value_still_requires_prompt(
     assert "requires -p" in capsys.readouterr().err
 
 
+def test_max_turns_parses_and_defaults_to_none() -> None:
+    assert _build_parser().parse_args([]).max_turns is None
+    args = _build_parser().parse_args(["-p", "/goal x", "--max-turns", "4"])
+    assert args.max_turns == 4
+
+
+def test_max_turns_requires_prompt(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = main(["--max-turns", "2"])
+    assert rc == 2
+    assert "requires -p" in capsys.readouterr().err
+
+
 # ── --version ────────────────────────────────────────────────────────
 
 

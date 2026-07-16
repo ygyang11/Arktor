@@ -306,3 +306,43 @@ def test_backspace_at_buffer_start_no_crash() -> None:
     handler(SimpleNamespace(current_buffer=buf))
 
     assert buf.text == ""
+
+
+def test_shift_tab_skips_plan_for_active_goal() -> None:
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    agent = _stub_agent()
+    agent._approval.mode = "never"
+    agent._session_metadata_extras = {}
+    agent.context.usage_meter.total.total_tokens = 0
+    goal_mode.begin(agent, "x")
+    handler = _find_handler(
+        build_keybindings(paste_store=PasteStore(), agent=agent),
+        "s-tab",
+    )
+
+    event = SimpleNamespace(app=MagicMock())
+    handler(event)
+    assert agent._approval.set_mode.call_args.args[0] == "auto"
+    goal_mode.clear(agent)
+
+
+def test_shift_tab_allows_plan_for_paused_goal() -> None:
+    from agent_cli.runtime import plan_mode
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    agent = _stub_agent()
+    agent._approval.mode = "never"
+    agent._session_metadata_extras = {}
+    agent.context.usage_meter.total.total_tokens = 0
+    goal_mode.begin(agent, "x")
+    goal_mode.pause(agent)
+    handler = _find_handler(
+        build_keybindings(paste_store=PasteStore(), agent=agent),
+        "s-tab",
+    )
+
+    handler(SimpleNamespace(app=MagicMock()))
+    assert plan_mode.is_active(agent)
+    plan_mode.exit(agent)
+    goal_mode.clear(agent)

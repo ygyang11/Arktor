@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from agent_app.observability import file_freshness
 from agent_cli.runtime import background, plan_mode
+from agent_cli.runtime.goal import mode as goal_mode
 from agent_harness.agent.base import BaseAgent
 from agent_harness.approval.policy import ApprovalPolicy
 from agent_harness.core.message import Message, Role
@@ -42,10 +43,11 @@ def apply_mode(agent: BaseAgent, target: str) -> None:
     agent._approval.set_mode(target)
 
 
-def cycle_next_mode(current: str) -> str:
-    if current not in _MODE_CYCLE:
-        return _MODE_CYCLE[0]
-    return _MODE_CYCLE[(_MODE_CYCLE.index(current) + 1) % len(_MODE_CYCLE)]
+def cycle_next_mode(current: str, *, skip_plan: bool = False) -> str:
+    modes = tuple(m for m in _MODE_CYCLE if not (skip_plan and m == "plan"))
+    if current not in modes:
+        return modes[0]
+    return modes[(modes.index(current) + 1) % len(modes)]
 
 
 def get_policy(agent: BaseAgent) -> ApprovalPolicy:
@@ -135,10 +137,12 @@ async def restore_session(
     state = await backend.load_state()
     plan_mode.exit(agent)
     if state is None:
+        goal_mode.clear(agent)
         return None
     await agent.apply_session_state(state)
     if state.metadata.get("_plan_mode"):
         plan_mode.enter(agent)
+    goal_mode.restore(agent, state.metadata.get("_goal"))
     return state
 
 
@@ -172,13 +176,13 @@ async def switch_session(
     new_id: str,
 ) -> None:
     handler.cancel_pending()
-    # Drain freshly-completed bg results into current-session transcript and
-    # persist before tear-down, so results that landed between turns are
-    # not silently dropped when the user switches.
-    collected = await agent._collect_background_results()
-    if collected:
-        await save()
+    collected = await background.collect_results(agent)
+    cancelled = await background.cancel_all_with_note(agent)
     await background.shutdown(agent)
+    collected = await background.collect_results(agent) or collected
+    paused = goal_mode.pause(agent, reason="session switched")
+    if cancelled or collected or paused is not None:
+        await save()
     background.clear_tasks(agent)
     await stop_sandbox(agent)
 

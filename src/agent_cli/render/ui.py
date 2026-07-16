@@ -10,6 +10,8 @@ from rich.console import Console
 from rich.text import Text
 
 from agent_cli.commands.ui import MODE_INFO
+from agent_cli.render.status_lines import fmt_duration
+from agent_cli.runtime.goal import mode as goal_mode
 from agent_cli.runtime.session import current_mode_key
 from agent_cli.theme import SEP_DOT
 from agent_harness.agent.base import BaseAgent
@@ -121,21 +123,38 @@ def make_status_bar_text(agent: BaseAgent) -> Callable[[], HTML]:
 
         hint = "(shift+tab to cycle)"
         right = f"{snap.model} · {cur}/{_fmt(snap.max_tokens)}"
-        left_html_full = (
-            f' <{info.style}>{info.label}</{info.style}> mode <muted>{hint}</muted>'
-        )
-        left_html_short = f' <{info.style}>{info.label}</{info.style}> mode'
-        left_full_w = len(f" {info.label} mode {hint}")
-        left_short_w = len(f" {info.label} mode")
+        g = goal_mode.get_state(agent)
+        goal_html = ""
+        goal_plain = ""
+        if g is not None and g.status in ("active", "paused"):
+            dur = fmt_duration(g.elapsed_s())
+            goal_html = (
+                f"<accent>◎ goal {g.status}</accent>"
+                f" <muted>· {dur}</muted>"
+            )
+            goal_plain = f"◎ goal {g.status} · {dur}"
+
+        mode_html = f" <{info.style}>{info.label}</{info.style}> mode"
+        goal_suffix_html = f"    {goal_html}" if goal_html else ""
+        goal_suffix_plain = f"    {goal_plain}" if goal_plain else ""
+
+        left_html_full = f"{mode_html} <muted>{hint}</muted>{goal_suffix_html}"
+        left_html_short = f"{mode_html}{goal_suffix_html}"
+        left_html_min = mode_html
+        left_full_w = len(f" {info.label} mode {hint}{goal_suffix_plain}")
+        left_short_w = len(f" {info.label} mode{goal_suffix_plain}")
+        left_min_w = len(f" {info.label} mode")
         right_w = len(right) + 1
 
-        if left_full_w + right_w <= width:
-            pad = width - left_full_w - right_w
-            return HTML(f'{left_html_full}{" " * pad}{right} ')
-        if left_short_w + right_w <= width:
-            pad = width - left_short_w - right_w
-            return HTML(f'{left_html_short}{" " * pad}{right} ')
-        return HTML(left_html_short)
+        for left_html, left_w in (
+            (left_html_full, left_full_w),
+            (left_html_short, left_short_w),
+            (left_html_min, left_min_w),
+        ):
+            if left_w + right_w <= width:
+                pad = width - left_w - right_w
+                return HTML(f'{left_html}{" " * pad}{right} ')
+        return HTML(left_html_min)
 
     return _render
 

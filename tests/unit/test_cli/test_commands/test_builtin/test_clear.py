@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from agent_cli.commands.builtin.clear import CMD
+from agent_cli.runtime.goal import mode as goal_mode
 
 from ..conftest import render_output
 
@@ -109,3 +110,31 @@ async def test_clear_phase_a_cancel_leaves_state_untouched() -> None:
     save.assert_not_awaited()
     # clear_tasks() never ran — bg_manager dict still populated.
     assert agent._bg_manager._tasks
+
+
+async def test_clear_removes_goal_before_save() -> None:
+    agent = MagicMock()
+    agent._session_metadata_extras = {}
+    agent.context.usage_meter.total.total_tokens = 0
+    agent._bg_manager.shutdown = AsyncMock()
+    agent._bg_manager._tasks = {}
+    agent.context.short_term_memory.clear = AsyncMock()
+    agent.context.short_term_memory.compressor = None
+    agent.context.working_memory.clear = AsyncMock()
+    agent.tool_registry.list_tools = MagicMock(return_value=[])
+    agent._reset_stateful_tools = MagicMock()
+    agent._approval = MagicMock()
+    agent._sandbox.stop = AsyncMock()
+    agent.context.state = MagicMock()
+    goal_mode.begin(agent, "x")
+
+    async def save() -> None:
+        assert goal_mode.get_state(agent) is None
+        assert "_goal" not in agent._session_metadata_extras
+
+    ctx = MagicMock(
+        agent=agent,
+        save_session=AsyncMock(side_effect=save),
+        approval_handler=MagicMock(),
+    )
+    await CMD.handler(ctx, "")

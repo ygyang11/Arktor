@@ -13,6 +13,7 @@ from agent_cli.repl.loop import (
     _cancel_loser,
     _handle_line,
     _InputOutcome,
+    _LoopState,
     _run,
     run_repl,
 )
@@ -123,12 +124,12 @@ async def test_cancel_loser_cancels_pending_task_and_awaits() -> None:
 # ---- race (via _run) ------------------------------------------------------
 
 
-def _run_extras() -> tuple[MagicMock, MagicMock, AsyncMock]:
-    """Build the (cli_hooks, session_backend, save) trio for _run tests."""
+def _run_extras() -> tuple[MagicMock, MagicMock, AsyncMock, _LoopState]:
+    """Build shared dependencies for _run tests."""
     cli_hooks = MagicMock()
     cli_hooks.begin_turn = MagicMock()
     cli_hooks.end_turn = MagicMock()
-    return cli_hooks, MagicMock(), AsyncMock()
+    return cli_hooks, MagicMock(), AsyncMock(), _LoopState()
 
 
 def _agent_with_stm(messages: list | None = None) -> MagicMock:
@@ -217,6 +218,7 @@ async def test_handle_line_cancelled_keeps_repl_alive() -> None:
         MagicMock(),
         MagicMock(),
         MagicMock(),
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -262,6 +264,7 @@ async def test_handle_line_shell_lane_dispatches_to_exec_shell(
         MagicMock(),
         MagicMock(),
         MagicMock(),
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -294,6 +297,7 @@ async def test_handle_line_bare_bang_is_noop() -> None:
         MagicMock(),
         MagicMock(),
         MagicMock(),
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -332,6 +336,7 @@ async def test_handle_line_shell_cancellation_renders_message(
         MagicMock(),
         MagicMock(),
         MagicMock(),
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -397,6 +402,7 @@ async def test_handle_line_shell_cancel_drains_pending_writes_before_banner(
             MagicMock(),
             MagicMock(),
             MagicMock(),
+            _LoopState(),
             run_gate=asyncio.Lock(),
         )
 
@@ -710,6 +716,7 @@ async def test_run_passes_session_backend_instance_not_string() -> None:
     await _run(
         agent, "go", "sid", MagicMock(), adapter,
         cli_hooks, backend, AsyncMock(),
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -734,6 +741,7 @@ async def test_run_pre_commit_cancel_rolls_back_messages_and_calls_save() -> Non
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), save,
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -763,6 +771,7 @@ async def test_run_post_commit_cancel_does_not_rollback() -> None:
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), save,
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -791,6 +800,7 @@ async def test_run_preserves_bg_message_during_rollback() -> None:
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), save,
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -812,6 +822,7 @@ async def test_run_end_turn_called_in_finally_after_normal_completion() -> None:
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), AsyncMock(),
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -830,6 +841,7 @@ async def test_run_end_turn_called_in_finally_after_cancel() -> None:
     await _run(
         agent, "text", "sid", MagicMock(), adapter,
         cli_hooks, MagicMock(), AsyncMock(),
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -856,6 +868,7 @@ async def test_run_media_rejection_with_rollback() -> None:
     await _run(
         agent, "text", "sid", console, adapter,
         cli_hooks, MagicMock(), save,
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -894,6 +907,7 @@ async def test_run_media_rejection_after_auto_compression_still_rolls_back() -> 
     await _run(
         agent, "text", "sid", console, adapter,
         cli_hooks, MagicMock(), save,
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -929,6 +943,7 @@ async def test_run_media_rejection_without_rollback() -> None:
     await _run(
         agent, "text", "sid", console, adapter,
         cli_hooks, MagicMock(), save,
+        _LoopState(),
         run_gate=asyncio.Lock(),
     )
 
@@ -968,10 +983,374 @@ async def test_run_gate_serializes_concurrent_runs() -> None:
 
     await asyncio.gather(
         _run(agent, "a", "sid", MagicMock(), adapter,
-             cli_hooks, MagicMock(), AsyncMock(), run_gate=gate),
+             cli_hooks, MagicMock(), AsyncMock(), _LoopState(), run_gate=gate),
         _run(agent, "b", "sid", MagicMock(), adapter,
-             cli_hooks, MagicMock(), AsyncMock(), run_gate=gate),
+             cli_hooks, MagicMock(), AsyncMock(), _LoopState(), run_gate=gate),
     )
 
     assert completed == 2
     assert max_concurrent == 1
+
+
+# ---- persistent goal integration -----------------------------------------
+
+
+def _goal_agent() -> MagicMock:
+    from agent_cli.runtime.goal import mode as goal_mode
+    from agent_harness.llm.types import ProcessUsageMeter
+
+    agent = _real_agent_with_messages([])
+    agent.context.usage_meter = ProcessUsageMeter()
+    agent._session_metadata_extras = {}
+    goal_mode.begin(agent, "finish the work")
+    return agent
+
+
+async def test_run_completed_goal_turn_records_and_schedules_evaluation() -> None:
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    agent = _goal_agent()
+    agent.run = AsyncMock(return_value=None)
+    adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
+    save = AsyncMock()
+    state = _LoopState()
+
+    await _run(
+        agent,
+        "work",
+        "sid",
+        MagicMock(),
+        adapter,
+        _make_real_cli_hooks(),
+        MagicMock(),
+        save,
+        state,
+        run_gate=asyncio.Lock(),
+    )
+
+    goal = goal_mode.get_state(agent)
+    assert goal is not None and goal.turns == 1
+    assert state.goal_eval_pending is True
+    save.assert_awaited_once()
+    goal_mode.clear(agent)
+
+
+async def test_run_goal_save_failure_pauses_and_clears_pending() -> None:
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    agent = _goal_agent()
+    agent.run = AsyncMock(return_value=None)
+    adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
+    console = MagicMock()
+    state = _LoopState()
+
+    await _run(
+        agent,
+        "work",
+        "sid",
+        console,
+        adapter,
+        _make_real_cli_hooks(),
+        MagicMock(),
+        AsyncMock(side_effect=OSError("disk full\nextra detail")),
+        state,
+        run_gate=asyncio.Lock(),
+    )
+
+    goal = goal_mode.get_state(agent)
+    assert goal is not None and goal.status == "paused"
+    assert goal.reason == "session save failed (OSError): disk full"
+    assert goal.turns == 1
+    assert state.goal_eval_pending is False
+    rendered = "".join(
+        str(call.args[0])
+        for call in console.print.call_args_list
+        if call.args
+    )
+    assert "◎ goal paused" in rendered
+    assert "extra detail" not in rendered
+    goal_mode.clear(agent)
+
+
+async def test_run_failed_goal_turn_pauses_and_clears_pending() -> None:
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    agent = _goal_agent()
+    agent.run = AsyncMock(side_effect=RuntimeError("boom"))
+    adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
+    state = _LoopState(goal_eval_pending=True)
+    save = AsyncMock()
+
+    await _run(
+        agent,
+        "work",
+        "sid",
+        MagicMock(),
+        adapter,
+        _make_real_cli_hooks(),
+        MagicMock(),
+        save,
+        state,
+        run_gate=asyncio.Lock(),
+    )
+
+    goal = goal_mode.get_state(agent)
+    assert goal is not None and goal.status == "paused"
+    assert goal.reason == "turn did not complete"
+    assert goal.turns == 0
+    assert state.goal_eval_pending is False
+    save.assert_awaited_once()
+    goal_mode.clear(agent)
+
+
+async def test_run_non_goal_clears_stale_evaluation_flag() -> None:
+    agent = _real_agent_with_messages([])
+    agent.run = AsyncMock(return_value=None)
+    adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
+    state = _LoopState(goal_eval_pending=True)
+    save = AsyncMock()
+
+    await _run(
+        agent,
+        "work",
+        "sid",
+        MagicMock(),
+        adapter,
+        _make_real_cli_hooks(),
+        MagicMock(),
+        save,
+        state,
+        run_gate=asyncio.Lock(),
+    )
+    assert state.goal_eval_pending is False
+    save.assert_not_awaited()
+
+
+async def test_run_expands_mentions_only_for_string_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expand = AsyncMock()
+    monkeypatch.setattr("agent_cli.repl.loop.expand_mentions", expand)
+    agent = _real_agent_with_messages([])
+
+    async def run(inp, *, after_input_appended, **kwargs):
+        message = inp if isinstance(inp, Message) else Message.user(inp)
+        await after_input_appended(agent, message, message.content or "")
+
+    agent.run = run
+    adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
+    extras = (_make_real_cli_hooks(), MagicMock(), AsyncMock())
+
+    await _run(
+        agent,
+        "@SPEC.md",
+        "sid",
+        MagicMock(),
+        adapter,
+        *extras,
+        _LoopState(),
+        run_gate=asyncio.Lock(),
+    )
+    await _run(
+        agent,
+        Message.user("@SPEC.md", metadata={"is_goal_continuation": True}),
+        "sid",
+        MagicMock(),
+        adapter,
+        *extras,
+        _LoopState(),
+        run_gate=asyncio.Lock(),
+    )
+    expand.assert_awaited_once()
+
+
+async def test_repl_goal_continues_then_completes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_cli.commands.base import CommandResult
+    from agent_cli.runtime.goal import mode as goal_mode
+    from agent_cli.runtime.goal.driver import GoalDecision
+    from agent_harness.llm.types import ProcessUsageMeter
+
+    mocks = _make_run_repl_mocks(["/goal x", EOFError])
+    agent = mocks["agent"]
+    agent._session_metadata_extras = {}
+    agent.context.usage_meter = ProcessUsageMeter()
+    goal = goal_mode.begin(agent, "x")
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.make_save_session",
+        lambda *args, **kwargs: AsyncMock(),
+    )
+    mocks["registry"].dispatch = AsyncMock(return_value=CommandResult(
+        agent_input=goal_mode.make_start_input("x")
+    ))
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.collect_results",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.has_running",
+        lambda agent: False,
+    )
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.cancel_all_with_note",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.shutdown",
+        AsyncMock(),
+    )
+    status = MagicMock(start=AsyncMock(), stop=AsyncMock())
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.make_command_status_line",
+        lambda *args, **kwargs: status,
+    )
+    decisions = 0
+
+    async def decide(current) -> GoalDecision:
+        nonlocal decisions
+        decisions += 1
+        if decisions == 1:
+            continuation = goal_mode.make_continuation_message(
+                current, "gap", "finish verification"
+            )
+            assert continuation is not None
+            return GoalDecision("continue", "gap", continuation)
+        goal_mode.finish(current, "complete", "verified")
+        return GoalDecision("complete", "verified")
+
+    monkeypatch.setattr("agent_cli.repl.loop.goal_driver.decide", decide)
+    await _drive_run_repl(mocks)
+
+    assert agent.run.await_count == 2
+    assert decisions == 2
+    assert goal.status == "complete"
+    assert goal.turns == 2
+    assert status.start.await_count == 2
+    assert status.stop.await_count == 2
+    goal_mode.clear(agent)
+
+
+async def test_repl_goal_evaluator_failure_pauses_and_keeps_loop_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_cli.commands.base import CommandResult
+    from agent_cli.runtime.goal import evaluator, mode as goal_mode
+    from agent_harness.llm.types import ProcessUsageMeter
+
+    mocks = _make_run_repl_mocks(["/goal x", EOFError])
+    agent = mocks["agent"]
+    agent._session_metadata_extras = {}
+    agent.context.usage_meter = ProcessUsageMeter()
+    goal = goal_mode.begin(agent, "x")
+    save = AsyncMock(side_effect=[None, OSError("disk full")])
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.make_save_session",
+        lambda *args, **kwargs: save,
+    )
+    mocks["registry"].dispatch = AsyncMock(return_value=CommandResult(
+        agent_input=goal_mode.make_start_input("x")
+    ))
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.collect_results",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.has_running",
+        lambda agent: False,
+    )
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.cancel_all_with_note",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr("agent_cli.repl.loop.background.shutdown", AsyncMock())
+    status = MagicMock(start=AsyncMock(), stop=AsyncMock())
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.make_command_status_line",
+        lambda *args, **kwargs: status,
+    )
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.goal_driver.decide",
+        AsyncMock(side_effect=evaluator.GoalEvaluationError(
+            "input exceeds context limit; run /compact before resuming"
+        )),
+    )
+
+    await _drive_run_repl(mocks)
+    assert goal.status == "paused"
+    assert "/compact" in goal.reason
+    assert save.await_count == 2
+    assert status.stop.await_count == 1
+    rendered = "".join(
+        str(call.args[0])
+        for call in mocks["console"].print.call_args_list
+        if call.args
+    )
+    assert "/compact" in rendered
+    assert "session save failed (OSError): disk full" in rendered
+    goal_mode.clear(agent)
+
+
+async def test_repl_goal_save_failure_stops_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_cli.commands.base import CommandResult
+    from agent_cli.runtime.goal import mode as goal_mode
+    from agent_cli.runtime.goal.driver import GoalDecision
+    from agent_harness.llm.types import ProcessUsageMeter
+
+    mocks = _make_run_repl_mocks(["/goal x", EOFError])
+    agent = mocks["agent"]
+    agent._session_metadata_extras = {}
+    agent.context.usage_meter = ProcessUsageMeter()
+    goal = goal_mode.begin(agent, "x")
+    save = AsyncMock(side_effect=[None, OSError("disk full")])
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.make_save_session",
+        lambda *args, **kwargs: save,
+    )
+    mocks["registry"].dispatch = AsyncMock(return_value=CommandResult(
+        agent_input=goal_mode.make_start_input("x")
+    ))
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.collect_results",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.has_running",
+        lambda agent: False,
+    )
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.background.cancel_all_with_note",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr("agent_cli.repl.loop.background.shutdown", AsyncMock())
+    status = MagicMock(start=AsyncMock(), stop=AsyncMock())
+    monkeypatch.setattr(
+        "agent_cli.repl.loop.make_command_status_line",
+        lambda *args, **kwargs: status,
+    )
+
+    async def decide(current) -> GoalDecision:
+        continuation = goal_mode.make_continuation_message(
+            current, "work remains", "finish verification"
+        )
+        assert continuation is not None
+        return GoalDecision("continue", "work remains", continuation)
+
+    monkeypatch.setattr("agent_cli.repl.loop.goal_driver.decide", decide)
+
+    await _drive_run_repl(mocks)
+
+    assert agent.run.await_count == 1
+    assert save.await_count == 2
+    assert goal.status == "paused"
+    assert goal.reason == "session save failed (OSError): disk full"
+    rendered = "".join(
+        str(call.args[0])
+        for call in mocks["console"].print.call_args_list
+        if call.args
+    )
+    assert "◎ goal · continue · work remains" not in rendered
+    assert "◎ goal paused · session save failed" in rendered
+    goal_mode.clear(agent)
