@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from agent_cli.commands.builtin.plan import CMD
 from agent_cli.runtime import plan_mode
+from agent_cli.runtime.goal import mode as goal_mode
 from agent_harness.context.context import AgentContext
 
 from ..conftest import render_output
@@ -16,6 +17,7 @@ def _ctx(approval_mode: str = "auto") -> MagicMock:
 
 def teardown_function() -> None:
     plan_mode._active.clear()
+    goal_mode._goals.clear()
 
 
 async def test_plan_enter_without_args_returns_entered_text() -> None:
@@ -48,3 +50,17 @@ async def test_plan_entered_output_carries_mode_label() -> None:
     ctx = _ctx("ask")
     out = render_output((await CMD.handler(ctx, "")).output)
     assert "Ask Approval" in out
+
+
+async def test_plan_rejects_active_goal_but_allows_paused_goal() -> None:
+    ctx = _ctx()
+    ctx.agent._session_metadata_extras = {}
+    goal_mode.begin(ctx.agent, "x")
+    result = await CMD.handler(ctx, "")
+    assert "goal is active" in render_output(result.output)
+    assert not plan_mode.is_active(ctx.agent)
+
+    goal_mode.pause(ctx.agent)
+    result = await CMD.handler(ctx, "")
+    assert "Plan mode entered" in render_output(result.output)
+    assert plan_mode.is_active(ctx.agent)

@@ -13,6 +13,8 @@ from rich.syntax import Syntax
 from rich.text import Text
 
 from agent_cli.commands.base import Command
+from agent_cli.render.status_lines import fmt_duration
+from agent_cli.runtime.goal.mode import GoalState
 from agent_cli.runtime.prefs import PREFS_PATH
 from agent_cli.runtime.status import (
     BucketView,
@@ -421,6 +423,41 @@ def render_status_panel(
     return Panel(
         Group(*items),
         title="Status",
+        title_align="left",
+        border_style="muted",
+        padding=(0, 1),
+        expand=False,
+    )
+
+
+# ── /goal panel ─────────────────────────────────────────────────────
+
+def render_goal_panel(
+    g: GoalState | None,
+    *,
+    tokens: int | None = None,
+) -> Panel:
+    if g is None:
+        body: RenderableType = Text("No goal set", style="muted")
+    else:
+        rows: list[RenderableType] = [
+            _row("Objective", g.objective),
+            _row("Status", g.status),
+            _row("Elapsed", fmt_duration(g.elapsed_s())),
+            _row("Turns", str(g.turns)),
+            _row(
+                "Tokens",
+                _fmt_tokens(
+                    tokens if tokens is not None else g.accumulated_tokens
+                ),
+            ),
+        ]
+        if g.reason:
+            rows.append(_row("Latest", g.reason))
+        body = Group(*rows)
+    return Panel(
+        body,
+        title="Goal",
         title_align="left",
         border_style="muted",
         padding=(0, 1),

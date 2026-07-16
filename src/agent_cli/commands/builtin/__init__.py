@@ -16,6 +16,7 @@ from agent_cli.commands.builtin import (
     exit,
     export,
     feedback,
+    goal,
     help,
     init,
     model,
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 def register_builtin(registry: CommandRegistry) -> None:
     for module in (
-        help, exit, clear, compact, context, copy, debug, diff, effort, export, feedback,
+        help, exit, clear, compact, context, copy, debug, diff, effort, export, feedback, goal,
         init, model, permissions, plan, provider, reload_skill, rename, resume, review,
         new, skills, status, tasks, theme, usage,
     ):

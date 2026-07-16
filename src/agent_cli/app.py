@@ -20,6 +20,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="run a single task non-interactively, print the result, and exit",
     )
     parser.add_argument(
+        "--max-turns", type=int, dest="max_turns", metavar="N",
+        default=None,
+        help=(
+            "Maximum completed agent turns for headless /goal runs; "
+            "default unlimited."
+        ),
+    )
+    parser.add_argument(
         "--output-format", dest="output_format", choices=("text", "json"),
         default=None,
         help="-p output format: text (default) or json "
@@ -184,6 +192,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.output_format is not None and args.prompt is None:
         print("arktor: --output-format requires -p/--prompt", file=sys.stderr)
+        return 2
+    if args.max_turns is not None and args.prompt is None:
+        print("arktor: --max-turns requires -p/--prompt", file=sys.stderr)
         return 2
     try:
         if args.prompt is not None:

@@ -663,6 +663,33 @@ def test_skill_envelope_with_preceding_attachment_still_detected() -> None:
 # ── compaction marker via render_post_switch ─────────────────────────
 
 
+def test_goal_start_match_preview_and_render() -> None:
+    from agent_cli.render.replay import _match_goal_start, peel_user_command
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    prompt = goal_mode.make_start_input("line one\nline two")
+    assert _match_goal_start(prompt) == "line one\nline two"
+    assert peel_user_command(prompt) == "/goal line one\nline two"
+    assert _match_goal_start(prompt + "x") is None
+
+    output = _render(Message.user(prompt))
+    assert "/goal line one" in output
+    assert "initial worker turn" not in output
+
+
+def test_goal_continuation_metadata_takes_render_priority() -> None:
+    from agent_cli.runtime.goal import mode as goal_mode
+
+    message = goal_mode.make_resume_message("secret objective")
+    output = _render(message)
+    assert "◎ goal · continuing" in output
+    assert "secret objective" not in output
+    assert "[Goal continuation]" not in output
+
+
+# ── compaction marker via render_post_switch ─────────────────────────
+
+
 def test_render_post_switch_emits_marker_when_summary_present() -> None:
     from io import StringIO
     from unittest.mock import MagicMock

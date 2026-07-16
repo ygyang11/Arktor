@@ -13,6 +13,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.layout.processors import Processor
 from rich.console import Console
+from rich.text import Text
 
 from agent_cli.adapter import CliAdapter
 from agent_cli.approval_handler import CliApprovalHandler, _PendingApproval
@@ -21,6 +22,7 @@ from agent_cli.commands.registry import CommandRegistry
 from agent_cli.hooks import CliHooks
 from agent_cli.render.notices import format_expired_notice
 from agent_cli.render.replay import render_post_switch
+from agent_cli.render.status_lines import make_command_status_line
 from agent_cli.render.ui import make_status_bar_text
 from agent_cli.repl.completer import build_input_completer, refresh_input_completer
 from agent_cli.repl.fill_block import (
@@ -38,6 +40,9 @@ from agent_cli.runtime.conversation import (
     reset_pending_tracker,
     use_pending_tracker,
 )
+from agent_cli.runtime.goal import driver as goal_driver
+from agent_cli.runtime.goal import evaluator as goal_eval
+from agent_cli.runtime.goal import mode as goal_mode
 from agent_cli.runtime.session import (
     SaveSession,
     get_messages,
@@ -72,6 +77,7 @@ class _LoopState:
     pending_input: str | Document = ""
     pending_from_race: _PendingApproval | None = None
     deferred_line: str | None = None
+    goal_eval_pending: bool = False
     # True when the last idle prompt was cancelled by a race win (bg /
     # approval), leaving an orphan `❯` line with no trailing blank. The
     # inter-turn notices add a leading blank only in that case; after a
@@ -108,6 +114,113 @@ async def _cancel_loser(task: asyncio.Task[Any] | None) -> None:
         await task
     except asyncio.CancelledError:
         pass
+
+
+async def _save_goal_progress(
+    agent: BaseAgent,
+    save: SaveSession,
+    state: _LoopState,
+) -> str | None:
+    try:
+        await save()
+        return None
+    except Exception as e:
+        detail = next(
+            (line.strip() for line in str(e).splitlines() if line.strip()),
+            "",
+        )
+        suffix = f": {detail}" if detail else ""
+        reason = f"session save failed ({type(e).__name__}){suffix}"
+        state.goal_eval_pending = False
+        goal_mode.pause(agent, reason=reason)
+        return reason
+
+
+async def _evaluate_pending_goal(
+    agent: BaseAgent,
+    console: Console,
+    adapter: CliAdapter,
+    theme: CliTheme,
+    save: SaveSession,
+    state: _LoopState,
+) -> Message | None:
+    state.goal_eval_pending = False
+    status = make_command_status_line(
+        console,
+        adapter.lock(),
+        theme,
+        label="Evaluating whether goal is achieved",
+        color="info",
+    )
+    decision: goal_driver.GoalDecision | None = None
+    reason: str | None = None
+    hint: str | None = None
+    label = "◎ goal paused"
+    style = "error"
+
+    try:
+        await status.start()
+        try:
+            eval_task = asyncio.create_task(goal_driver.decide(agent))
+            with bind_work(eval_task):
+                decision = await eval_task
+        finally:
+            await status.stop()
+    except asyncio.CancelledError:
+        reason = "user interrupted"
+        style = "dim"
+    except goal_eval.GoalEvaluationError as e:
+        reason = f"goal evaluator failed: {e}"
+        label += f" · {reason}"
+        hint = "Run /goal resume after addressing the error."
+    except Exception as e:
+        detail = next(
+            (line.strip() for line in str(e).splitlines() if line.strip()),
+            "",
+        )
+        suffix = f": {detail}" if detail else ""
+        reason = (
+            "unexpected goal evaluation error "
+            f"({type(e).__name__}){suffix}"
+        )
+        label += f" · {reason}"
+
+    if reason is not None:
+        goal_mode.pause(agent, reason=reason)
+        save_error = await _save_goal_progress(agent, save, state)
+        async with adapter.lock():
+            console.print(Text(label, style=style))
+            if save_error is not None:
+                console.print(Text(save_error, style="error"))
+            if hint is not None:
+                console.print(Text(hint, style="muted"))
+            console.print()
+        return None
+
+    if decision is None:
+        return None
+
+    save_error = await _save_goal_progress(agent, save, state)
+    lead = "\n" if state.prompt_orphaned else ""
+    state.prompt_orphaned = False
+    verdict = Text(
+        f"{lead}◎ goal · {decision.status} · {decision.reason}",
+        style="dim",
+    )
+    async with adapter.lock():
+        if save_error is None:
+            console.print(verdict)
+        elif decision.continuation is not None:
+            console.print(Text(
+                f"{lead}◎ goal paused · {save_error}",
+                style="error",
+            ))
+        else:
+            console.print(verdict)
+            console.print(Text(save_error, style="error"))
+        console.print()
+
+    return decision.continuation if save_error is None else None
 
 
 async def _prompt_with_lock(
@@ -169,7 +282,7 @@ async def run_repl(
 
     try:
         while True:
-            # Priority ladder (1→4). Step 4's race doesn't dispatch inline — winners
+            # Priority ladder (1→5). Step 5's race doesn't dispatch inline — winners
             # snapshot into _LoopState and are drained by N+1's 1-3 in fixed order,
             # so race-arrival order never leaks into handling order.
 
@@ -220,6 +333,7 @@ async def run_repl(
                     cli_hooks,
                     session_backend,
                     save,
+                    state,
                     run_gate=run_gate,
                 )
                 continue
@@ -243,12 +357,41 @@ async def run_repl(
                     if await _handle_line(
                         raw, agent, console, registry, session_id, save, adapter, handler,
                         shell_state, pt_session, cli_hooks, session_backend, theme,
-                        pending_atts, run_gate=run_gate,
+                        state, pending_atts, run_gate=run_gate,
                     ):
                         break
                 continue
 
-            # 4 prompt + race against bg events
+            # 4 goal evaluation — only after higher-priority runtime/user work
+            if (
+                goal_mode.is_active(agent)
+                and state.goal_eval_pending
+                and not background.has_running(agent)
+            ):
+                continuation = await _evaluate_pending_goal(
+                    agent,
+                    console,
+                    adapter,
+                    theme,
+                    save,
+                    state,
+                )
+                if continuation is not None:
+                    await _run(
+                        agent,
+                        continuation,
+                        session_backend.session_id,
+                        console,
+                        adapter,
+                        cli_hooks,
+                        session_backend,
+                        save,
+                        state,
+                        run_gate=run_gate,
+                    )
+                continue
+
+            # 5 prompt + race against bg events
             input_task: asyncio.Task[str] = asyncio.create_task(
                 _prompt_with_lock(
                     pt_session,
@@ -297,13 +440,28 @@ async def run_repl(
                 state.pending_input = outcome.buffered
 
     finally:
+        cancelled: list[str] = []
+        collected = False
         with suppress(Exception):
-            if background.has_running(agent):
-                count = background.cancel_all(agent)
-                if count:
-                    console.print(f"[dim]Cancelled {count} background task(s).[/dim]")
+            collected = await background.collect_results(agent)
+        with suppress(Exception):
+            cancelled = await background.cancel_all_with_note(agent)
+            if cancelled:
+                console.print(
+                    f"[dim]Cancelled {len(cancelled)} background task(s).[/dim]"
+                )
         with suppress(Exception):
             await background.shutdown(agent)
+        with suppress(Exception):
+            collected = await background.collect_results(agent) or collected
+
+        paused = None
+        with suppress(Exception):
+            paused = goal_mode.pause(agent, reason="session ended")
+
+        if cancelled or collected or paused is not None:
+            with suppress(Exception):
+                await save()
         with suppress(Exception):
             handler.cancel_pending()
         with suppress(Exception):
@@ -324,6 +482,7 @@ async def _handle_line(
     cli_hooks: CliHooks,
     session_backend: BaseSession,
     theme: CliTheme,
+    state: _LoopState,
     pending_atts: list[Attachment] | None = None,
     *,
     run_gate: asyncio.Lock,
@@ -386,6 +545,7 @@ async def _handle_line(
             console.print(result.output)
             console.print()
         if result.new_session_id is not None:
+            state.goal_eval_pending = False
             await switch_session(
                 agent, session_backend, handler, save, result.new_session_id,
             )
@@ -398,14 +558,14 @@ async def _handle_line(
             await _run(
                 agent, result.agent_input, session_backend.session_id,
                 console, adapter, cli_hooks, session_backend, save,
-                pending_atts, run_gate=run_gate,
+                state, pending_atts, run_gate=run_gate,
             )
         return False
 
     await _run(
         agent, line, session_id, console, adapter,
         cli_hooks, session_backend, save,
-        pending_atts, run_gate=run_gate,
+        state, pending_atts, run_gate=run_gate,
     )
     return False
 
@@ -419,6 +579,7 @@ async def _run(
     cli_hooks: CliHooks,
     session_backend: BaseSession,
     save: SaveSession,
+    state: _LoopState,
     pending_atts: list[Attachment] | None = None,
     *,
     run_gate: asyncio.Lock,
@@ -427,6 +588,7 @@ async def _run(
         cancelled = False
         media_rejected = False
         media_rolled_back = False
+        completed = False
         adapter.begin_run()
 
         async def cb(a: BaseAgent, msg: Message, t: str) -> None:
@@ -448,6 +610,7 @@ async def _run(
             with bind_work(task):
                 try:
                     await task
+                    completed = True
                 except asyncio.CancelledError:
                     # CancelledError bypasses base.run()'s `except Exception`; state
                     # may be stuck in non-terminal, next run()'s transition(THINKING)
@@ -473,6 +636,7 @@ async def _run(
         if cancelled:
             console.print("[dim]⎯⎯ Interrupted · what should the agent do differently? ⎯⎯[/dim]")
             console.print()
+
         if media_rejected:
             if media_rolled_back:
                 console.print(
@@ -486,4 +650,17 @@ async def _run(
                     "fetched, partial recovery only — continue with text or /clear "
                     "to reset.[/dim]"
                 )
+            console.print()
+
+        state.goal_eval_pending = False
+        if not goal_mode.is_active(agent):
+            return
+        if completed:
+            goal_mode.record_completed_turn(agent)
+            state.goal_eval_pending = True
+        else:
+            goal_mode.pause(agent, reason="turn did not complete")
+        save_error = await _save_goal_progress(agent, save, state)
+        if save_error is not None:
+            console.print(Text(f"◎ goal paused · {save_error}", style="error"))
             console.print()

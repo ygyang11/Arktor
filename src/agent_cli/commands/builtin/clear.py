@@ -5,6 +5,7 @@ from agent_cli.commands.base import Command, CommandContext, CommandResult
 from agent_cli.commands.ui import err, ok
 from agent_cli.runtime import background
 from agent_cli.runtime import session as sess
+from agent_cli.runtime.goal import mode as goal_mode
 
 
 async def handle(ctx: CommandContext, args: str) -> CommandResult:
@@ -37,6 +38,7 @@ async def handle(ctx: CommandContext, args: str) -> CommandResult:
     compressor = agent.context.short_term_memory.compressor
     if compressor is not None:
         compressor.restore_runtime_state([])
+    goal_mode.clear(agent)
     await ctx.save_session()
 
     if sandbox_err is not None:

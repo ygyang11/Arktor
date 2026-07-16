@@ -118,3 +118,58 @@ def test_home_relative_path_absolute_when_outside_home() -> None:
     from agent_cli.commands.ui import home_relative_path
 
     assert home_relative_path("/tmp/x.md") == "/tmp/x.md"
+
+
+def test_goal_panel_renders_runtime_fields() -> None:
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.panel import Panel
+
+    from agent_cli.commands.ui import render_goal_panel
+    from agent_cli.runtime.goal.mode import GoalState
+    from agent_cli.theme import DEFAULT_THEME
+
+    goal = GoalState(
+        objective="ship release",
+        status="paused",
+        reason="waiting for approval",
+        turns=3,
+        accumulated_s=65,
+        accumulated_tokens=1200,
+    )
+    panel = render_goal_panel(goal, tokens=1234)
+    assert isinstance(panel, Panel)
+    assert panel.expand is False
+    assert panel.border_style == "muted"
+
+    buf = StringIO()
+    Console(
+        file=buf,
+        color_system=None,
+        width=120,
+        theme=DEFAULT_THEME.rich,
+    ).print(panel)
+    output = buf.getvalue()
+    assert "ship release" in output
+    assert "paused" in output
+    assert "1m 5s" in output
+    assert "3" in output
+    assert "1,234" in output
+    assert "waiting for approval" in output
+
+
+def test_goal_panel_empty_state_uses_same_panel() -> None:
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.panel import Panel
+
+    from agent_cli.commands.ui import render_goal_panel
+    from agent_cli.theme import DEFAULT_THEME
+
+    panel = render_goal_panel(None)
+    assert isinstance(panel, Panel)
+    buf = StringIO()
+    Console(file=buf, color_system=None, theme=DEFAULT_THEME.rich).print(panel)
+    assert "No goal set" in buf.getvalue()

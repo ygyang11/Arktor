@@ -7,6 +7,7 @@ from pathlib import Path
 from agent_cli.commands.base import Command, CommandContext, CommandResult
 from agent_cli.commands.ui import home_relative_path, ok
 from agent_cli.render.tool_display import args_repr
+from agent_cli.runtime.goal.mode import is_goal_continuation_message
 from agent_harness.core.message import Message, Role
 from agent_harness.utils.media import describe_attachment_full
 
@@ -24,8 +25,11 @@ def _format_message(m: Message) -> str:
         from agent_cli.render.notices import peel_reminders  # noqa: PLC0415
         from agent_cli.render.replay import peel_user_command  # noqa: PLC0415
 
-        peeled = peel_reminders(m.content or "")
-        body_content = peel_user_command(peeled) or peeled
+        if is_goal_continuation_message(m):
+            body_content = "◎ goal · continuing"
+        else:
+            peeled = peel_reminders(m.content or "")
+            body_content = peel_user_command(peeled) or peeled
     else:
         body_content = m.content or ""
     if body_content:

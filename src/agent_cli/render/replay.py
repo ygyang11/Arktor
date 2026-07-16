@@ -27,6 +27,12 @@ from agent_cli.render.tool_display import (
     print_completed_call,
     print_todos_panel,
 )
+from agent_cli.runtime.goal.mode import (
+    _GOAL_BEHAVIOR,
+    _GOAL_OBJECTIVE,
+    _GOAL_START,
+    is_goal_continuation_message,
+)
 from agent_cli.runtime.session import get_messages
 from agent_cli.runtime.shell import parse_shell_run_envelope
 from agent_cli.theme import COMPRESSION, PROMPT, SUBAGENT, SUBAGENT_DONE, CliTheme
@@ -39,6 +45,10 @@ _FOCUS_PREFIX = "\n\nFocus: "
 _INIT_NEW_BASE = _INIT_NEW.format(focus="")
 _INIT_UPDATE_BASE = _INIT_UPDATE.format(target="AGENTS.md", focus="")
 _REVIEW_HEAD = _REVIEW_PROMPT.split("{target}", 1)[0]
+_GOAL_START_HEAD, _GOAL_START_TAIL = (
+    f"{_GOAL_START}\n\n{_GOAL_OBJECTIVE}".split("{objective}", 1)
+)
+_GOAL_START_SUFFIX = f"{_GOAL_START_TAIL}\n\n{_GOAL_BEHAVIOR}"
 
 _SKILL_REMINDER_RE = re.compile(
     r"\A(?P<args>.*?)"
@@ -77,6 +87,14 @@ def _match_skill(content: str) -> tuple[str, str] | None:
     return m.group("name"), m.group("args").strip()
 
 
+def _match_goal_start(content: str) -> str | None:
+    if not content.startswith(_GOAL_START_HEAD):
+        return None
+    if not content.endswith(_GOAL_START_SUFFIX):
+        return None
+    return content[len(_GOAL_START_HEAD):-len(_GOAL_START_SUFFIX)]
+
+
 def _split_exit_code(body: str) -> tuple[int, str]:
     m = _EXIT_CODE_RE.match(body)
     if m is None:
@@ -91,6 +109,8 @@ def peel_user_command(content: str) -> str | None:
     if (parsed := parse_shell_run_envelope(content)) is not None:
         cmd, _ = parsed
         return "! " + " ".join(cmd.split())
+    if (objective := _match_goal_start(content)) is not None:
+        return f"/goal {objective}".rstrip()
     if (focus := _match_init(content)) is not None:
         return f"/init {focus}".rstrip()
     if (target := _match_review(content)) is not None:
@@ -141,6 +161,8 @@ def _render_attachment_indicator(
 
 
 def _render_command_invocation(console: Console, content: str) -> bool:
+    if (objective := _match_goal_start(content)) is not None:
+        return _emit_slash_command(console, "goal", objective)
     if (focus := _match_init(content)) is not None:
         return _emit_slash_command(console, "init", focus)
     if (target := _match_review(content)) is not None:
@@ -214,6 +236,13 @@ def _index_results(messages: list[Message]) -> dict[str, ToolResult]:
         if m.role == Role.TOOL and m.tool_result is not None:
             out[m.tool_result.tool_call_id] = m.tool_result
     return out
+
+
+# ── goal continuation ───────────────────────────
+
+def _render_goal_continuation(console: Console) -> None:
+    console.print(Text("◎ goal · continuing", style="dim"))
+    console.print()
 
 
 # ── context compression ─────────────────────────
@@ -358,10 +387,13 @@ def replay(console: Console, theme: CliTheme, messages: list[Message]) -> None:
         m = messages[i]
         if m.role == Role.USER and (m.content or (m.metadata or {}).get("attachments")):
             in_bg_block = False
-            _render_user(console, peel_reminders(m.content or ""))
-            attachments = (m.metadata or {}).get("attachments")
-            if attachments:
-                _render_attachment_indicator(console, attachments)
+            if is_goal_continuation_message(m):
+                _render_goal_continuation(console)
+            else:
+                _render_user(console, peel_reminders(m.content or ""))
+                attachments = (m.metadata or {}).get("attachments")
+                if attachments:
+                    _render_attachment_indicator(console, attachments)
         elif m.role == Role.ASSISTANT:
             in_bg_block = False
             _render_assistant(console, theme, m, results)
