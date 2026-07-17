@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -489,19 +489,25 @@ async def _drive_run_repl(mocks: dict[str, object]) -> None:
     cli_hooks = MagicMock()
     cli_hooks.begin_turn = MagicMock()
     cli_hooks.end_turn = MagicMock()
-    await run_repl(
-        mocks["agent"],
-        mocks["console"],
-        "sid",
-        mocks["registry"],
-        mocks["backend"],
-        mocks["adapter"],
-        mocks["handler"],
-        mocks["pt_session"],
-        ShellState(),
-        cli_hooks,
-        MagicMock(),
-    )
+    input_window = MagicMock()
+    input_window.style = ""
+    with patch(
+        "agent_cli.repl.loop.configure_input_window_layout",
+        return_value=input_window,
+    ):
+        await run_repl(
+            mocks["agent"],
+            mocks["console"],
+            "sid",
+            mocks["registry"],
+            mocks["backend"],
+            mocks["adapter"],
+            mocks["handler"],
+            mocks["pt_session"],
+            ShellState(),
+            cli_hooks,
+            MagicMock(),
+        )
 
 
 async def test_run_repl_expired_placeholder_prints_notice_and_dispatches(
@@ -628,20 +634,30 @@ async def test_run_repl_passes_paste_processor_to_prompt(
     assert any(isinstance(p, PastePlaceholderProcessor) for p in procs)
 
 
-async def test_prompt_with_lock_restores_input_processors() -> None:
-    """Regression: prompt_toolkit persists input_processors back onto the
-    shared session. _prompt_with_lock must snapshot/restore so subsequent
-    consumers (notably approval prompts) don't inherit the REPL highlighter.
-    """
+async def test_prompt_with_lock_restores_shared_prompt_state() -> None:
+    """Approval prompts must not inherit main-REPL rendering state."""
     from contextlib import asynccontextmanager
 
     from agent_cli.repl.loop import _prompt_with_lock
     from agent_cli.repl.paste import PastePlaceholderProcessor
 
-    sentinel = object()
+    processors = object()
+    continuation = object()
+    style = object()
     pt_session = MagicMock()
-    pt_session.input_processors = sentinel
-    pt_session.prompt_async = AsyncMock(return_value="x")
+    pt_session.input_processors = processors
+    pt_session.prompt_continuation = continuation
+    pt_session.default_buffer.text = "hello"
+    input_window = MagicMock()
+    input_window.style = style
+
+    async def _prompt_async(*args, **kwargs):
+        assert input_window.style() == "class:input-block"
+        pt_session.default_buffer.text = "!pwd"
+        assert input_window.style() == "class:shell-line"
+        return "x"
+
+    pt_session.prompt_async = AsyncMock(side_effect=_prompt_async)
 
     @asynccontextmanager
     async def _lock():
@@ -653,12 +669,15 @@ async def test_prompt_with_lock_restores_input_processors() -> None:
     await _prompt_with_lock(
         pt_session,
         adapter,
+        input_window,
         default="",
         bottom_toolbar=lambda: None,
         input_processors=[PastePlaceholderProcessor()],
     )
 
-    assert pt_session.input_processors is sentinel
+    assert input_window.style is style
+    assert pt_session.input_processors is processors
+    assert pt_session.prompt_continuation is continuation
 
 
 # ---- _run cancel-rollback (Phase 4) ---------------------------------------
