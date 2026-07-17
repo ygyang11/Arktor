@@ -4,10 +4,15 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.application import create_app_session
 from prompt_toolkit.buffer import Buffer, CompletionState
 from prompt_toolkit.completion import Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.output import DummyOutput
 
 from agent_cli.repl.keybindings import build_keybindings
 from agent_cli.repl.paste import CHAR_THRESHOLD, PasteStore
@@ -38,6 +43,26 @@ def _find_handler(kb: object, key: str | Keys):
     raise AssertionError(f"binding for {key!r} not found")
 
 
+async def _prompt_with_input(
+    data: bytes,
+    *,
+    history: InMemoryHistory | None = None,
+) -> str:
+    with create_pipe_input() as pipe_input:
+        output = DummyOutput()
+        with create_app_session(input=pipe_input, output=output):
+            session: PromptSession[str] = PromptSession(
+                input=pipe_input,
+                output=output,
+                key_bindings=_kb(),
+                history=history,
+            )
+            task = asyncio.create_task(session.prompt_async(handle_sigint=False))
+            await asyncio.sleep(0)
+            pipe_input.send_bytes(data)
+            return await asyncio.wait_for(task, timeout=1)
+
+
 def test_bindings_registered() -> None:
     kb = _kb()
     # Tab + Ctrl+C + Ctrl+D + Alt+Enter + BracketedPaste at minimum
@@ -53,6 +78,21 @@ def test_keys_cover_expected_set() -> None:
     assert (Keys.BracketedPaste.value,) in values
     # Alt+Enter registers as (Escape, ControlM) after prompt_toolkit normalization.
     assert any("escape" in t and "c-m" in t for t in values)
+
+
+async def test_enter_ignores_empty_and_whitespace_input() -> None:
+    result = await _prompt_with_input(b"\r  \rx\r")
+
+    assert result == "x"
+
+
+async def test_enter_preserves_reverse_search_behavior() -> None:
+    history = InMemoryHistory()
+    history.append_string("hello world")
+
+    result = await _prompt_with_input(b"\x12hel\r\r", history=history)
+
+    assert result == "hello world"
 
 
 def test_tab_applies_current_completion() -> None:

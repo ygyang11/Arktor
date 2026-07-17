@@ -11,6 +11,7 @@ from typing import Any
 from prompt_toolkit import PromptSession
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.layout import Window
 from prompt_toolkit.layout.processors import Processor
 from rich.console import Console
 from rich.text import Text
@@ -26,10 +27,10 @@ from agent_cli.render.status_lines import make_command_status_line
 from agent_cli.render.ui import make_status_bar_text
 from agent_cli.repl.completer import build_input_completer, refresh_input_completer
 from agent_cli.repl.fill_block import (
-    PROMPT_WIDTH,
-    FillBlockProcessor,
+    configure_input_window_layout,
     make_continuation_prompt,
     make_input_prompt,
+    pick_block_class,
 )
 from agent_cli.repl.keybindings import build_keybindings, reset_ctrl_c_state
 from agent_cli.repl.mentions import expand_mentions
@@ -226,12 +227,18 @@ async def _evaluate_pending_goal(
 async def _prompt_with_lock(
     pt_session: PromptSession[str],
     adapter: CliAdapter,
+    input_window: Window,
     default: str | Document,
     bottom_toolbar: _ToolbarText,
     input_processors: list[Processor] | None = None,
 ) -> str:
     async with adapter.lock():
         prev_processors = pt_session.input_processors
+        prev_continuation = pt_session.prompt_continuation
+        prev_style = input_window.style
+        input_window.style = lambda: pick_block_class(
+            pt_session.default_buffer.text
+        )
         try:
             return await pt_session.prompt_async(
                 make_input_prompt(pt_session),
@@ -244,13 +251,15 @@ async def _prompt_with_lock(
                 # on exit without restoring ours.
                 handle_sigint=False,
                 complete_while_typing=True,
-                # prompt_async persists input_processors back onto the shared
-                # PromptSession; snapshot/restore so approval prompts (which never
-                # pass the kwarg) don't inherit the REPL placeholder highlighter.
+                # prompt_async persists per-call processors and continuation
+                # onto the shared session; restore them with the input-window
+                # style so approval prompts stay independent.
                 input_processors=input_processors,
             )
         finally:
+            input_window.style = prev_style
             pt_session.input_processors = prev_processors
+            pt_session.prompt_continuation = prev_continuation
             reset_ctrl_c_state()
 
 
@@ -268,13 +277,11 @@ async def run_repl(
     theme: CliTheme,
 ) -> None:
     paste_store = PasteStore()
-    input_processors: list[Processor] = [
-        PastePlaceholderProcessor(),
-        FillBlockProcessor(offset=PROMPT_WIDTH),
-    ]
+    input_processors: list[Processor] = [PastePlaceholderProcessor()]
 
     pt_session.completer = build_input_completer(registry)
     pt_session.key_bindings = build_keybindings(paste_store=paste_store, agent=agent)
+    input_window = configure_input_window_layout(pt_session)
     save = make_save_session(agent, session_backend)
 
     state = _LoopState()
@@ -396,6 +403,7 @@ async def run_repl(
                 _prompt_with_lock(
                     pt_session,
                     adapter,
+                    input_window,
                     state.pending_input,
                     make_status_bar_text(agent),
                     input_processors=input_processors,

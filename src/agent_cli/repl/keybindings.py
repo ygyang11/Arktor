@@ -6,7 +6,8 @@ import asyncio
 import time
 
 from prompt_toolkit.application import run_in_terminal
-from prompt_toolkit.filters import has_selection
+from prompt_toolkit.enums import DEFAULT_BUFFER
+from prompt_toolkit.filters import has_focus, has_selection
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.keys import Keys
@@ -113,6 +114,14 @@ def build_keybindings(
     def _(event: KeyPressEvent) -> None:
         if not event.current_buffer.text:
             event.app.exit(exception=EOFError)
+
+    @kb.add("enter", filter=has_focus(DEFAULT_BUFFER))
+    def _(event: KeyPressEvent) -> None:
+        buf = event.current_buffer
+        if not buf.text.strip():
+            buf.reset()
+            return
+        buf.validate_and_handle()
 
     @kb.add("escape", "enter")
     def _(event: KeyPressEvent) -> None:

@@ -1,21 +1,24 @@
-"""Processor that styles each visual input line as a full-width block"""
+"""Full-width input block layout and dynamic prompt styling."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.formatted_text import FormattedText, StyleAndTextTuples
-from prompt_toolkit.layout.processors import (
-    Processor,
-    Transformation,
-    TransformationInput,
+from prompt_toolkit.filters import to_filter
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.layout import (
+    BufferControl,
+    Container,
+    Dimension,
+    FloatContainer,
+    HSplit,
+    VSplit,
+    Window,
 )
-from prompt_toolkit.utils import get_cwidth
 
 from agent_cli.theme import PROMPT
 
 PROMPT_TEXT = f"{PROMPT} "
-PROMPT_WIDTH = sum(get_cwidth(c) for c in PROMPT_TEXT)
 
 
 def pick_block_class(text: str) -> str:
@@ -38,47 +41,49 @@ def make_continuation_prompt(
     return _render
 
 
-class FillBlockProcessor(Processor):
-    def __init__(self, offset: int = 0) -> None:
-        self._offset = offset
+def configure_input_window_layout(
+    pt_session: PromptSession[str],
+) -> Window:
+    """Keep the styled input at content height without shrinking completions."""
+    input_window = next(
+        window
+        for window in pt_session.layout.find_all_windows()
+        if isinstance(window.content, BufferControl)
+        and window.content.buffer is pt_session.default_buffer
+    )
+    completion_host = next(
+        container
+        for container in _walk_containers(pt_session.layout.container)
+        if isinstance(container, FloatContainer)
+        and any(
+            child is input_window
+            for child in _walk_containers(container.content)
+        )
+    )
 
-    def apply_transformation(
-        self, transformation_input: TransformationInput,
-    ) -> Transformation:
-        try:
-            base = pick_block_class(transformation_input.document.text)
-            effective_width = max(1, transformation_input.width - self._offset)
-            out: StyleAndTextTuples = []
-            cells = 0
-            for fragment in transformation_input.fragments:
-                style, text = fragment[0], fragment[1]
-                new_style = f"{base} {style}".strip() if style else base
-                rest = fragment[2:]
-                chunk: list[str] = []
-                for ch in text:
-                    w = get_cwidth(ch)
-                    if cells + w > effective_width:
-                        if chunk:
-                            out.append((new_style, "".join(chunk), *rest))
-                            chunk = []
-                        gap = effective_width - cells
-                        if gap > 0:
-                            out.append((base, " " * gap))
-                        cells = 0
-                    chunk.append(ch)
-                    cells += w
-                if chunk:
-                    out.append((new_style, "".join(chunk), *rest))
-            if cells == 0 or cells == effective_width:
-                pad = effective_width - 1
-            else:
-                pad = effective_width - cells - 1
-            pad = max(0, pad)
-            if pad:
-                out.append((base, " " * pad))
-            return Transformation(out)
-        except Exception:
-            try:
-                return Transformation(list(transformation_input.fragments))
-            except Exception:
-                return Transformation([])
+    reserve_height = input_window.height
+    natural_content = completion_host.content
+    input_window.height = None
+    input_window.dont_extend_height = to_filter(True)
+    minimum_host = VSplit([
+        natural_content,
+        Window(width=0, height=reserve_height),
+    ])
+    completion_host.content = HSplit([
+        minimum_host,
+        Window(height=Dimension(preferred=0)),
+    ])
+    return input_window
+
+
+def _walk_containers(root: Container) -> Iterator[Container]:
+    pending = [root]
+    seen: set[int] = set()
+    while pending:
+        container = pending.pop()
+        identity = id(container)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        yield container
+        pending.extend(reversed(container.get_children()))
