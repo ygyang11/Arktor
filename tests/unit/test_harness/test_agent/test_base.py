@@ -838,3 +838,200 @@ class TestAgentClose:
         agent = self._agent()
         agent.llm.aclose = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
         await agent.aclose()  # no raise
+
+    @pytest.mark.asyncio
+    async def test_closes_current_sub_compressor_and_retired_once(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        main = MockLLM()
+        sub = MockLLM()
+        retired = MockLLM()
+        for runtime_llm in (main, sub, retired):
+            runtime_llm.aclose = AsyncMock()  # type: ignore[method-assign]
+
+        agent = ConversationalAgent(
+            name="test",
+            llm=main,
+            sub_llm=sub,
+            system_prompt="",
+        )
+        agent._retired_llms[id(retired)] = retired
+        agent.context.short_term_memory.compressor = SimpleNamespace(_llm=sub)
+
+        await agent.aclose()
+
+        main.aclose.assert_awaited_once()
+        sub.aclose.assert_awaited_once()
+        retired.aclose.assert_awaited_once()
+
+
+class TestSubLLMLifecycle:
+    def test_sub_llm_is_keyword_only_and_positional_tools_remain_valid(self) -> None:
+        llm = MockLLM()
+        tool = MockTool()
+
+        agent = ConversationalAgent("test", llm, [tool], system_prompt="")
+
+        assert agent.llm is llm
+        assert agent.sub_llm is llm
+        assert agent.tool_registry.has("mock_tool")
+
+    def test_auto_creates_configured_sub_llm(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        main = MockLLM(config=LLMConfig(model="main"))
+        sub = MockLLM(config=LLMConfig(model="sub"))
+        config = HarnessConfig(
+            llm=LLMConfig(model="main", sub_model={"model": "sub"}),
+        )
+        monkeypatch.setattr("agent_harness.agent.base.create_llm", lambda _cfg: main)
+        monkeypatch.setattr("agent_harness.agent.base.create_sub_llm", lambda _cfg: sub)
+
+        agent = ConversationalAgent(name="test", config=config, system_prompt="")
+
+        assert agent.llm is main
+        assert agent.sub_llm is sub
+
+    def test_unconfigured_sub_aliases_created_main(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        main = MockLLM(config=LLMConfig(model="main"))
+        monkeypatch.setattr("agent_harness.agent.base.create_llm", lambda _cfg: main)
+        monkeypatch.setattr("agent_harness.agent.base.create_sub_llm", lambda _cfg: None)
+
+        agent = ConversationalAgent(
+            name="test",
+            config=HarnessConfig(llm=LLMConfig(model="main")),
+            system_prompt="",
+        )
+
+        assert agent.sub_llm is main
+
+    def test_explicit_main_skips_both_factories(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        create_main = MagicMock()
+        create_sub = MagicMock()
+        monkeypatch.setattr("agent_harness.agent.base.create_llm", create_main)
+        monkeypatch.setattr("agent_harness.agent.base.create_sub_llm", create_sub)
+        main = MockLLM(config=LLMConfig(model="main"))
+
+        agent = ConversationalAgent(name="test", llm=main, system_prompt="")
+
+        assert agent.sub_llm is main
+        create_main.assert_not_called()
+        create_sub.assert_not_called()
+
+    def test_explicit_main_and_sub_are_preserved(self) -> None:
+        main = MockLLM(config=LLMConfig(model="main"))
+        sub = MockLLM(config=LLMConfig(model="sub"))
+
+        agent = ConversationalAgent(
+            name="test",
+            llm=main,
+            sub_llm=sub,
+            system_prompt="",
+        )
+
+        assert agent.llm is main
+        assert agent.sub_llm is sub
+        assert main._event_bus is agent.context.event_bus
+        assert sub._event_bus is agent.context.event_bus
+
+    def test_explicit_main_syncs_memory_and_compressor(self) -> None:
+        from agent_harness.memory.compressor import ContextCompressor
+
+        old = MockLLM(config=LLMConfig(model="old"))
+        main = MockLLM(config=LLMConfig(model="main"))
+        sub = MockLLM(config=LLMConfig(model="sub"))
+        compressor = ContextCompressor(llm=old, model="old")
+        context = AgentContext(compressor=compressor)
+        context.short_term_memory.last_call = object()  # type: ignore[assignment]
+
+        agent = ConversationalAgent(
+            name="test",
+            llm=main,
+            sub_llm=sub,
+            context=context,
+            system_prompt="",
+        )
+
+        assert agent.context.short_term_memory.model == "main"
+        assert agent.context.short_term_memory.last_call is None
+        assert compressor._llm is sub
+        assert compressor._model == "main"
+
+    @pytest.mark.parametrize(
+        ("old_distinct", "new_distinct", "retired_count"),
+        [
+            (False, False, 1),
+            (False, True, 1),
+            (True, False, 2),
+            (True, True, 2),
+        ],
+    )
+    def test_replace_llms_handles_alias_combinations(
+        self,
+        old_distinct: bool,
+        new_distinct: bool,
+        retired_count: int,
+    ) -> None:
+        old_main = MockLLM(config=LLMConfig(model="old-main"))
+        old_sub = (
+            MockLLM(config=LLMConfig(model="old-sub"))
+            if old_distinct
+            else old_main
+        )
+        agent = ConversationalAgent(
+            name="test",
+            llm=old_main,
+            sub_llm=old_sub,
+            system_prompt="",
+        )
+        new_main = MockLLM(config=LLMConfig(model="new-main"))
+        new_sub = (
+            MockLLM(config=LLMConfig(model="new-sub"))
+            if new_distinct
+            else new_main
+        )
+
+        agent.replace_llms(new_main, new_sub)
+
+        assert agent.llm is new_main
+        assert agent.sub_llm is new_sub
+        assert len(agent._retired_llms) == retired_count
+        assert new_main._event_bus is agent.context.event_bus
+        assert new_sub._event_bus is agent.context.event_bus
+
+    def test_replace_same_model_name_still_clears_snapshot(self) -> None:
+        old = MockLLM(config=LLMConfig(model="same"))
+        agent = ConversationalAgent(name="test", llm=old, system_prompt="")
+        agent.context.short_term_memory.last_call = object()  # type: ignore[assignment]
+        new = MockLLM(config=LLMConfig(model="same"))
+
+        agent.replace_llms(new, new)
+
+        assert agent.context.short_term_memory.last_call is None
+
+    def test_unchanged_sub_is_not_retired_and_compressor_is_rebound(self) -> None:
+        main = MockLLM(config=LLMConfig(model="main"))
+        sub = MockLLM(config=LLMConfig(model="sub"))
+        agent = ConversationalAgent(
+            name="test",
+            llm=main,
+            sub_llm=sub,
+            system_prompt="",
+        )
+        new_main = MockLLM(config=LLMConfig(model="new-main"))
+
+        agent.replace_llms(new_main, sub)
+
+        assert id(main) in agent._retired_llms
+        assert id(sub) not in agent._retired_llms
+        compressor = agent.context.short_term_memory.compressor
+        assert compressor is not None
+        assert compressor._llm is sub
+        assert compressor._model == "new-main"

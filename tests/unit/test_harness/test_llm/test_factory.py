@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from agent_harness.core.config import HarnessConfig, LLMConfig
-from agent_harness.llm import LLM, create_llm
+from agent_harness.llm import LLM, create_llm, create_sub_llm
 from agent_harness.llm.anthropic_provider import AnthropicProvider
 from agent_harness.llm.openai_provider import OpenAIProvider
 
@@ -33,6 +33,32 @@ class TestCreateLLM:
 
         with pytest.raises(ValueError, match="Unsupported llm.provider"):
             create_llm(cfg)
+
+    def test_create_sub_llm_returns_none_when_unconfigured(self) -> None:
+        cfg = HarnessConfig(llm=LLMConfig(model="gpt-main", api_key="sk-test"))
+        assert create_sub_llm(cfg) is None
+
+    def test_create_sub_llm_uses_effective_sub_config(self) -> None:
+        cfg = HarnessConfig(
+            llm=LLMConfig(
+                provider="openai",
+                model="gpt-main",
+                temperature=0.3,
+                max_tokens=8192,
+                api_key="sk-test",
+                reasoning_effort="high",
+                sub_model={"model": "gpt-sub", "reasoning_effort": "low"},
+            )
+        )
+
+        llm = create_sub_llm(cfg)
+
+        assert isinstance(llm, OpenAIProvider)
+        assert llm.config.model == "gpt-sub"
+        assert llm.config.reasoning_effort == "low"
+        assert llm.config.temperature == 0.3
+        assert llm.config.max_tokens == 8192
+        assert llm.config.sub_model is None
 
 
 class TestLLMFacade:

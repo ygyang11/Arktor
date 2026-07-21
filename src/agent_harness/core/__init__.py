@@ -4,6 +4,7 @@ from agent_harness.core.config import (
     LLMConfig,
     MemoryConfig,
     SearchConfig,
+    SubModelConfig,
     ToolConfig,
     TracingConfig,
 )
@@ -15,7 +16,8 @@ from agent_harness.core.registry import Registry
 __all__ = [
     "Message", "Role", "ToolCall", "ToolResult", "MessageChunk",
     "Event", "EventBus", "EventEmitter",
-    "HarnessConfig", "LLMConfig", "ToolConfig", "MemoryConfig", "TracingConfig", "SearchConfig",
+    "HarnessConfig", "LLMConfig", "SubModelConfig", "ToolConfig", "MemoryConfig",
+    "TracingConfig", "SearchConfig",
     "Registry",
     "HarnessError",
 ]

@@ -247,6 +247,7 @@ class AgentTeam:
         self._judge = ConversationalAgent(
             name="team_judge",
             llm=primary_worker.llm,
+            sub_llm=primary_worker.sub_llm,
             system_prompt=TEAM_PROMPTS["judge.system"],
             context=judge_context,
             hooks=self.hooks,
@@ -256,6 +257,21 @@ class AgentTeam:
     def _fork_worker_contexts(self, judge: BaseAgent) -> None:
         for worker in self.agents:
             worker.context = judge.context.fork(name=worker.name)
+            stm = worker.context.short_term_memory
+            stm.set_model(worker.llm.model_name)
+            compressor = stm.compressor
+            if compressor is not None:
+                compressor.rebind(
+                    llm=worker.sub_llm,
+                    model=worker.llm.model_name,
+                )
+            worker.set_event_bus(worker.context.event_bus)
+            for runtime_llm in {
+                id(worker.llm): worker.llm,
+                id(worker.sub_llm): worker.sub_llm,
+            }.values():
+                runtime_llm.set_event_bus(worker.context.event_bus)
+            worker.tool_executor.set_event_bus(worker.context.event_bus)
 
     async def _run_named_inputs_parallel(
         self,

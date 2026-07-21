@@ -1,81 +1,83 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent_cli.commands.builtin.model import CMD
+from agent_harness.core.config import LLMConfig, SubModelConfig
 
 from ..conftest import render_output
 
 
-async def test_switch_model_updates_all_sites_no_persistence() -> None:
+def _agent(*, distinct_sub: bool = False) -> MagicMock:
     agent = MagicMock()
-    agent.llm.model_name = "gpt-4o"
-    compressor = MagicMock()
-    agent.context.short_term_memory.compressor = compressor
-    agent.context.config.memory.compression.summary_model = None
-    save = AsyncMock()
-    ctx = MagicMock(agent=agent, save_session=save)
-
-    with patch("agent_cli.commands.builtin.model.create_llm") as create:
-        new_llm = MagicMock()
-        create.return_value = new_llm
-        result = await CMD.handler(ctx, "gpt-5")
-
-    assert agent.llm is new_llm
-    assert agent.context.short_term_memory.model == "gpt-5"
-    assert compressor._model == "gpt-5"
-    assert compressor._llm is new_llm
-    assert agent.context.config.llm.model == "gpt-5"
-    save.assert_not_called()
-    rendered = render_output(result.output)
-    assert "Model switched to gpt-5" in rendered
-
-
-async def test_switch_model_respects_separate_summary_model() -> None:
-    agent = MagicMock()
-    agent.llm.model_name = "gpt-4o"
-    compressor = MagicMock()
-    compressor._model = "gpt-4o-mini"
-    compressor._llm = "separate_llm"
-    agent.context.short_term_memory.compressor = compressor
-    agent.context.config.memory.compression.summary_model = "gpt-4o-mini"
-
-    with patch("agent_cli.commands.builtin.model.create_llm") as create:
-        create.return_value = MagicMock()
-        await CMD.handler(MagicMock(agent=agent, save_session=AsyncMock()), "gpt-5")
-
-    assert compressor._model == "gpt-4o-mini"
-    assert compressor._llm == "separate_llm"
-
-
-async def test_no_arg_shows_current_model() -> None:
-    agent = MagicMock()
-    agent.llm.model_name = "claude-4"
-    ctx = MagicMock(agent=agent)
-    result = await CMD.handler(ctx, "")
-    assert "claude-4" in render_output(result.output)
-
-
-async def test_switch_model_preserves_inference_params() -> None:
-    from agent_harness.core.config import LLMConfig
-
-    agent = MagicMock()
-    agent.llm.model_name = "gpt-4o"
+    agent.llm = MagicMock(model_name="gpt-4o")
+    agent.sub_llm = MagicMock(model_name="gpt-4o-mini") if distinct_sub else agent.llm
     agent.context.config.llm = LLMConfig(
         provider="openai",
         model="gpt-4o",
         temperature=0.3,
         max_tokens=8000,
         reasoning_effort="high",
+        sub_model=(
+            SubModelConfig(model="gpt-4o-mini", reasoning_effort="low")
+            if distinct_sub
+            else None
+        ),
     )
-    agent.context.short_term_memory.compressor = None
-    agent.context.config.memory.compression.summary_model = None
+    return agent
 
-    with patch("agent_cli.commands.builtin.model.create_llm") as create:
-        create.return_value = MagicMock()
-        await CMD.handler(MagicMock(agent=agent, save_session=AsyncMock()), "gpt-5")
 
-    create.assert_called_once()
-    (cfg_arg,), _ = create.call_args
-    assert cfg_arg.model == "gpt-5"
-    assert cfg_arg.temperature == 0.3
-    assert cfg_arg.max_tokens == 8000
-    assert cfg_arg.reasoning_effort == "high"
+async def test_switch_model_updates_config_and_aliases_sub() -> None:
+    agent = _agent()
+    old_config = agent.context.config.llm
+    save = AsyncMock()
+    new_llm = MagicMock(model_name="gpt-5")
+
+    with patch("agent_cli.commands.builtin.model.create_llm", return_value=new_llm) as create:
+        result = await CMD.handler(MagicMock(agent=agent, save_session=save), "gpt-5")
+
+    (cfg,), _ = create.call_args
+    assert cfg.model == "gpt-5"
+    assert cfg.temperature == 0.3
+    assert cfg.max_tokens == 8000
+    assert cfg.reasoning_effort == "high"
+    assert agent.context.config.llm is cfg
+    assert agent.context.config.llm is not old_config
+    agent.replace_llms.assert_called_once_with(new_llm, new_llm)
+    save.assert_not_called()
+    assert "Model switched to gpt-5" in render_output(result.output)
+
+
+async def test_switch_model_preserves_distinct_sub() -> None:
+    agent = _agent(distinct_sub=True)
+    old_sub = agent.sub_llm
+    new_llm = MagicMock(model_name="gpt-5")
+
+    with patch("agent_cli.commands.builtin.model.create_llm", return_value=new_llm):
+        await CMD.handler(MagicMock(agent=agent), "gpt-5")
+
+    agent.replace_llms.assert_called_once_with(new_llm, old_sub)
+    assert agent.context.config.llm.sub_model == SubModelConfig(
+        model="gpt-4o-mini",
+        reasoning_effort="low",
+    )
+
+
+async def test_switch_model_failure_keeps_current_state() -> None:
+    agent = _agent(distinct_sub=True)
+    old_config = agent.context.config.llm
+
+    with patch(
+        "agent_cli.commands.builtin.model.create_llm",
+        side_effect=ValueError("no client"),
+    ):
+        result = await CMD.handler(MagicMock(agent=agent), "gpt-5")
+
+    assert agent.context.config.llm is old_config
+    agent.replace_llms.assert_not_called()
+    assert "Failed to switch model" in render_output(result.output)
+
+
+async def test_no_arg_shows_current_model() -> None:
+    agent = _agent()
+    agent.llm.model_name = "claude-4"
+    result = await CMD.handler(MagicMock(agent=agent), "")
+    assert "claude-4" in render_output(result.output)

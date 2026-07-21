@@ -169,7 +169,8 @@ async def evaluate(
 ) -> GoalVerdict:
     stm = agent.context.short_term_memory
     stm_messages = await stm.get_context_messages()
-    model = agent.llm.model_name
+    llm = agent.sub_llm
+    model = llm.model_name
     nonce = secrets.token_hex(16)
 
     local_input_limit = stm.max_tokens * (1.0 - _CONTEXT_HEADROOM)
@@ -236,7 +237,7 @@ async def evaluate(
                 "input exceeds context limit; run /compact before resuming"
             )
         try:
-            response = await agent.llm.generate_with_events(messages)
+            response = await llm.generate_with_events(messages)
         except Exception as exc:
             raise GoalEvaluationError(
                 f"request failed: {type(exc).__name__}"
@@ -244,7 +245,7 @@ async def evaluate(
 
         agent.context.usage_meter.record(
             response.usage,
-            model=agent.llm.model_name,
+            model=llm.model_name,
             source="goal_eval",
         )
         content = response.message.content or ""

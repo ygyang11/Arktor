@@ -99,6 +99,12 @@ class ShortTermMemory(BaseMemory):
     def clear_call_snapshot(self) -> None:
         self.last_call = None
 
+    def set_model(self, model: str) -> None:
+        if self.model == model:
+            return
+        self.model = model
+        self.clear_call_snapshot()
+
     def replace_messages(self, new_messages: list[Message]) -> None:
         """Atomic replace + invalidate snapshot."""
         self._messages = list(new_messages)

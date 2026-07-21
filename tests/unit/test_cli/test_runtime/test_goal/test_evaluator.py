@@ -32,8 +32,12 @@ def _agent(
     llm = MagicMock()
     llm.model_name = "test-model"
     llm.generate_with_events = AsyncMock(side_effect=responses or [])
+    main_llm = MagicMock()
+    main_llm.model_name = "main-model"
+    main_llm.generate_with_events = AsyncMock()
     agent = MagicMock()
-    agent.llm = llm
+    agent.llm = main_llm
+    agent.sub_llm = llm
     agent.context = SimpleNamespace(
         short_term_memory=stm,
         usage_meter=ProcessUsageMeter(),
@@ -104,14 +108,17 @@ async def test_evaluate_corrects_twice_and_records_all_usage() -> None:
         agent, "objective", turns=1, elapsed_s=2, tokens=3
     )
     assert verdict.status == "continue"
-    assert agent.llm.generate_with_events.await_count == 3
-    third_messages = agent.llm.generate_with_events.await_args_list[2].args[0]
+    assert agent.sub_llm.generate_with_events.await_count == 3
+    assert agent.llm.generate_with_events.await_count == 0
+    third_messages = agent.sub_llm.generate_with_events.await_args_list[2].args[0]
     assert third_messages[2].role.value == "assistant"
     assert third_messages[2].content == "bad one"
     assert third_messages[4].content == "bad two"
     bucket = agent.context.usage_meter.by_source["goal_eval"]
     assert bucket.calls == 3
     assert bucket.usage.total_tokens == 60
+    assert agent.context.usage_meter.by_model["test-model"].calls == 3
+    assert agent.sub_llm.generate_with_events.await_args.kwargs == {}
 
 
 async def test_evaluate_rejects_three_invalid_responses() -> None:
@@ -240,6 +247,61 @@ async def test_same_model_snapshot_only_corrects_local_undercount(monkeypatch) -
     await evaluator.evaluate(agent, "objective", turns=1, elapsed_s=2, tokens=3)
     assert seen
     assert seen[0] < int(10_000 * (1 - evaluator._CONTEXT_HEADROOM))
+
+
+async def test_main_model_snapshot_does_not_calibrate_sub_budget(monkeypatch) -> None:
+    monkeypatch.setattr(evaluator.secrets, "token_hex", lambda _size: "a" * 32)
+    valid = _response(
+        "<status>complete</status>\n<reason>done</reason>\n<directive></directive>"
+    )
+    without_snapshot = _agent(responses=[valid], max_tokens=10_000)
+    with_main_snapshot = _agent(responses=[valid], max_tokens=10_000)
+    with_main_snapshot.context.short_term_memory.last_call = CallSnapshot(
+        input_tokens=200,
+        completion_tokens=0,
+        total_tokens=200,
+        cache_read=0,
+        cache_creation=0,
+        model="main-model",
+        section_weights=SectionWeights(
+            system_prompt=10,
+            tools_schema=10,
+            dynamic_system=10,
+            history=10,
+        ),
+    )
+    seen: list[int] = []
+    real_render = evaluator._render_transcript
+
+    def capture(messages, *, budget, model):
+        seen.append(budget)
+        return real_render(messages, budget=budget, model=model)
+
+    monkeypatch.setattr(evaluator, "_render_transcript", capture)
+    await evaluator.evaluate(
+        without_snapshot, "objective", turns=1, elapsed_s=2, tokens=3
+    )
+    await evaluator.evaluate(
+        with_main_snapshot, "objective", turns=1, elapsed_s=2, tokens=3
+    )
+
+    assert len(seen) == 2
+    assert seen[0] == seen[1]
+
+
+async def test_alias_mode_uses_shared_llm() -> None:
+    valid = _response(
+        "<status>complete</status>\n<reason>done</reason>\n<directive></directive>"
+    )
+    agent = _agent(responses=[valid])
+    agent.llm = agent.sub_llm
+
+    verdict = await evaluator.evaluate(
+        agent, "objective", turns=1, elapsed_s=2, tokens=3
+    )
+
+    assert verdict.status == "complete"
+    agent.llm.generate_with_events.assert_awaited_once()
 
 
 def test_untrimmable_transcript_raises_compact_error() -> None:

@@ -11,9 +11,11 @@ from agent_harness.core.config import (
     PaperConfig,
     SandboxConfig,
     SearchConfig,
+    SubModelConfig,
     ToolConfig,
     TracingConfig,
     resolve_llm_config,
+    resolve_sub_llm_config,
     resolve_paper_config,
     resolve_search_config,
     resolve_tool_config,
@@ -53,6 +55,67 @@ class TestLLMConfig:
         cfg = LLMConfig(api_key="", base_url="")
         assert cfg.api_key == "sk-test"
         assert cfg.base_url == "https://example.com/v1"
+
+    @pytest.mark.parametrize(
+        "sub_model",
+        [None, {}, {"model": "", "reasoning_effort": ""}],
+    )
+    def test_empty_sub_model_is_not_enabled(self, sub_model: object) -> None:
+        cfg = LLMConfig(sub_model=sub_model)  # type: ignore[arg-type]
+        assert resolve_sub_llm_config(cfg) is None
+
+    def test_sub_model_without_effort_uses_provider_default(self) -> None:
+        cfg = LLMConfig(sub_model={"model": "gpt-mini", "reasoning_effort": ""})
+        assert cfg.sub_model is not None
+        assert cfg.sub_model.model == "gpt-mini"
+        assert cfg.sub_model.reasoning_effort is None
+
+    def test_sub_model_preserves_effort(self) -> None:
+        cfg = LLMConfig(
+            sub_model={"model": "gpt-mini", "reasoning_effort": "low"},
+        )
+        assert cfg.sub_model == SubModelConfig(
+            model="gpt-mini",
+            reasoning_effort="low",
+        )
+
+    def test_sub_model_requires_model_for_effort(self) -> None:
+        with pytest.raises(ValueError, match="model is required"):
+            LLMConfig(sub_model={"model": "", "reasoning_effort": "low"})
+
+    def test_sub_model_forbids_unknown_fields(self) -> None:
+        with pytest.raises(ValueError, match="extra_forbidden"):
+            LLMConfig(sub_model={"model": "gpt-mini", "temperature": 0.2})
+
+    def test_resolve_sub_llm_config_inherits_main_fields(self) -> None:
+        cfg = LLMConfig(
+            provider="anthropic",
+            model="claude-main",
+            temperature=0.3,
+            max_tokens=8192,
+            api_key="key",
+            base_url="https://example.com",
+            timeout=200.0,
+            max_retries=7,
+            retry_delay=2.0,
+            reasoning_effort="high",
+            sub_model={"model": "claude-sub", "reasoning_effort": "low"},
+        )
+
+        sub = resolve_sub_llm_config(cfg)
+
+        assert sub is not None
+        assert sub.provider == "anthropic"
+        assert sub.model == "claude-sub"
+        assert sub.temperature == 0.3
+        assert sub.max_tokens == 8192
+        assert sub.api_key == "key"
+        assert sub.base_url == "https://example.com"
+        assert sub.timeout == 200.0
+        assert sub.max_retries == 7
+        assert sub.retry_delay == 2.0
+        assert sub.reasoning_effort == "low"
+        assert sub.sub_model is None
 
 
 class TestToolConfig:
@@ -207,6 +270,27 @@ class TestHarnessConfig:
         assert cfg.tracing.enabled is False
         assert HarnessConfig.get() is cfg
 
+    def test_load_env_merge_preserves_yaml_sub_model(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "arktor.yaml"
+        path.write_text(
+            "llm:\n"
+            "  model: yaml-main\n"
+            "  sub_model:\n"
+            "    model: yaml-sub\n"
+            "    reasoning_effort: low\n"
+        )
+        monkeypatch.setenv("ARKTOR_LLM_MODEL", "env-main")
+
+        cfg = HarnessConfig.load(path, env_override=True)
+
+        assert cfg.llm.model == "env-main"
+        assert cfg.llm.sub_model == SubModelConfig(
+            model="yaml-sub",
+            reasoning_effort="low",
+        )
+
     def test_load_without_env_override_keeps_yaml(self, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
         path = tmp_path / "arktor.yaml"
         path.write_text(
@@ -247,6 +331,14 @@ class TestResolveConfigHelpers:
         cfg = HarnessConfig(llm=LLMConfig(model="m1"))
         assert resolve_llm_config(cfg) is cfg.llm
         assert resolve_llm_config(cfg.llm) is cfg.llm
+
+    def test_resolve_sub_llm_config(self) -> None:
+        cfg = HarnessConfig(
+            llm=LLMConfig(model="main", sub_model={"model": "sub"}),
+        )
+        sub = resolve_sub_llm_config(cfg)
+        assert sub is not None
+        assert sub.model == "sub"
 
     def test_resolve_tool_config(self) -> None:
         cfg = HarnessConfig(tool=ToolConfig(max_concurrency=9))

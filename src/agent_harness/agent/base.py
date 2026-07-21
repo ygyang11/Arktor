@@ -34,7 +34,7 @@ from agent_harness.core.errors import LLMUnsupportedContentError, MaxStepsExceed
 from agent_harness.core.event import EventEmitter
 from agent_harness.core.message import Message, Role, ToolCall, ToolResult
 from agent_harness.hooks import DefaultHooks, resolve_hooks
-from agent_harness.llm import create_llm
+from agent_harness.llm import create_llm, create_sub_llm
 from agent_harness.llm.base import BaseLLM
 from agent_harness.llm.types import LLMResponse, LLMRetryInfo, StreamDelta, Usage, UsageSource
 from agent_harness.memory.short_term import CallSnapshot, SectionWeights
@@ -78,6 +78,7 @@ class BaseAgent(ABC, EventEmitter):
     Args:
         name: Unique agent name.
         llm: LLM provider for generation.
+        sub_llm: Auxiliary LLM used by supporting model calls.
         tools: List of available tools.
         context: Agent runtime context.
         hooks: Lifecycle hooks (inherits DefaultHooks). When tracing.enabled=True
@@ -100,6 +101,7 @@ class BaseAgent(ABC, EventEmitter):
         use_long_term_memory: bool = False,
         stream: bool = True,
         *,
+        sub_llm: BaseLLM | None = None,
         config: HarnessConfig | None = None,
         approval: ApprovalPolicy | None = None,
         approval_handler: ApprovalHandler | None = None,
@@ -114,7 +116,14 @@ class BaseAgent(ABC, EventEmitter):
             self.context = context
         else:
             self.context = AgentContext.create(config=config)
-        self.llm = llm or create_llm(self.context.config)
+        if llm is None:
+            self.llm = create_llm(self.context.config)
+            self.sub_llm = sub_llm or create_sub_llm(self.context.config) or self.llm
+        else:
+            self.llm = llm
+            self.sub_llm = sub_llm or llm
+        self._retired_llms: dict[int, BaseLLM] = {}
+        self.context.short_term_memory.set_model(self.llm.model_name)
         self.hooks = resolve_hooks(hooks, self.context.config)
         self.max_steps = max_steps
         self.use_long_term_memory = use_long_term_memory
@@ -157,7 +166,11 @@ class BaseAgent(ABC, EventEmitter):
         # Wire event bus
         self.set_event_bus(self.context.event_bus)
         self.tool_executor.set_event_bus(self.context.event_bus)
-        self.llm.set_event_bus(self.context.event_bus)
+        for runtime_llm in {
+            id(self.llm): self.llm,
+            id(self.sub_llm): self.sub_llm,
+        }.values():
+            runtime_llm.set_event_bus(self.context.event_bus)
 
         # Loop detection
         from agent_harness.utils.loop_detector import LoopDetector
@@ -176,26 +189,20 @@ class BaseAgent(ABC, EventEmitter):
         self._sandbox: SandboxManager = resolve_sandbox(sandbox, self.context.config)
 
         # Context compression setup
-        if (
-            self.context.config.memory.strategy == "summarize"
-            and self.context.short_term_memory.compressor is None
-        ):
+        compressor = self.context.short_term_memory.compressor
+        if compressor is not None:
+            compressor.rebind(llm=self.sub_llm, model=self.llm.model_name)
+            self.context._compressor = compressor
+        elif self.context.config.memory.strategy == "summarize":
             self._init_compressor()
 
     def _init_compressor(self) -> None:
         from agent_harness.memory.compressor import create_compressor
 
-        comp_cfg = self.context.config.memory.compression
-        summary_llm = self.llm
-        if comp_cfg.summary_model:
-            summary_llm = create_llm(
-                self.context.config,
-                model_override=comp_cfg.summary_model,
-            )
         compressor = create_compressor(
-            llm=summary_llm,
+            llm=self.sub_llm,
             memory_config=self.context.config.memory,
-            model=self.context.config.llm.model,
+            model=self.llm.model_name,
         )
         self.context.short_term_memory.compressor = compressor
         self.context._compressor = compressor
@@ -317,6 +324,33 @@ class BaseAgent(ABC, EventEmitter):
             dynamic_system=count_tokens("\n".join(dyn_parts), model),
             history=count_tokens("\n".join(hist_parts), model),
         )
+
+    def replace_llms(self, llm: BaseLLM, sub_llm: BaseLLM) -> None:
+        main_replaced = llm is not self.llm
+        old: dict[int, BaseLLM] = {
+            id(self.llm): self.llm,
+            id(self.sub_llm): self.sub_llm,
+        }
+        compressor = self.context.short_term_memory.compressor
+        if compressor is not None:
+            old[id(compressor._llm)] = compressor._llm
+
+        current_ids = {id(llm), id(sub_llm)}
+        for llm_id, old_llm in old.items():
+            if llm_id not in current_ids:
+                self._retired_llms.setdefault(llm_id, old_llm)
+
+        self.llm = llm
+        self.sub_llm = sub_llm
+        for runtime_llm in {id(llm): llm, id(sub_llm): sub_llm}.values():
+            runtime_llm.set_event_bus(self.context.event_bus)
+
+        stm = self.context.short_term_memory
+        stm.set_model(llm.model_name)
+        if main_replaced:
+            stm.clear_call_snapshot()
+        if compressor is not None:
+            compressor.rebind(llm=sub_llm, model=llm.model_name)
 
     @property
     def tools(self) -> list[BaseTool]:
@@ -884,19 +918,19 @@ class BaseAgent(ABC, EventEmitter):
         return ordered
 
     async def aclose(self) -> None:
-        """Release this agent's LLM connection pools. Best-effort, idempotent.
-        Closes the main provider plus the compressor's provider when it is a
-        distinct instance (deduped by identity, so a shared provider is closed
-        once).
-        """
-        seen: set[int] = set()
+        """Release every LLM client managed by this agent."""
+        llms: dict[int, BaseLLM] = {
+            id(self.llm): self.llm,
+            id(self.sub_llm): self.sub_llm,
+            **self._retired_llms,
+        }
         compressor = self.context.short_term_memory.compressor
-        for llm in (self.llm, getattr(compressor, "_llm", None)):
-            if llm is None or id(llm) in seen:
-                continue
-            seen.add(id(llm))
+        if compressor is not None:
+            llms.setdefault(id(compressor._llm), compressor._llm)
+
+        for runtime_llm in llms.values():
             try:
-                await llm.aclose()
+                await runtime_llm.aclose()
             except Exception:
                 logger.debug("agent.aclose: llm close failed", exc_info=True)
 

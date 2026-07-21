@@ -1,14 +1,14 @@
 """/provider — list or switch LLM provider profiles from cli-prefs.json."""
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 from agent_cli.commands.base import Command, CommandContext, CommandResult
 from agent_cli.commands.ui import err, ok, render_provider_list
-from agent_cli.runtime import session as sess
 from agent_cli.runtime.prefs import read_prefs
-from agent_harness.core.config import LLMConfig
-from agent_harness.llm import create_llm
+from agent_harness.core.config import LLMConfig, SubModelConfig
+from agent_harness.llm import BaseLLM, create_llm, create_sub_llm
 
 
 def _active_profile(profiles: dict[str, Any], current: LLMConfig) -> str | None:
@@ -49,20 +49,41 @@ async def handle(ctx: CommandContext, args: str) -> CommandResult:
 
     keep = {
         k: v for k, v in agent.context.config.llm.model_dump().items()
-        if k not in {"provider", "model", "base_url", "api_key"}
+        if k not in {"provider", "model", "base_url", "api_key", "sub_model"}
     }
+    profile = dict(prof)
+    raw_sub_model = profile.pop("sub_model", None)
+    new_llm: BaseLLM | None = None
+    new_sub_llm: BaseLLM | None = None
     try:
-        new_cfg = LLMConfig(**{**keep, **prof})
+        profile_sub = SubModelConfig(model=raw_sub_model)
+        if profile_sub.model is not None:
+            current_sub = agent.context.config.llm.sub_model
+            profile["sub_model"] = {
+                "model": profile_sub.model,
+                "reasoning_effort": (
+                    current_sub.reasoning_effort
+                    if current_sub is not None
+                    else None
+                ),
+            }
+
+        new_cfg = LLMConfig(**{**keep, **profile})
         new_llm = create_llm(new_cfg)
+        new_sub_llm = create_sub_llm(new_cfg) or new_llm
     except Exception as e:
+        created = {
+            id(llm): llm
+            for llm in (new_llm, new_sub_llm)
+            if llm is not None
+        }
+        for llm in created.values():
+            with suppress(Exception):
+                await llm.aclose()
         return CommandResult(output=err(f"Failed to switch provider: {e}"))
 
-    new_llm.set_event_bus(agent.context.event_bus)
-    agent.llm = new_llm
-    agent.context.short_term_memory.model = new_cfg.model
-    agent.context.short_term_memory.clear_call_snapshot()
-    sess.update_compressor_model(agent, new_cfg.model, new_llm)
     agent.context.config.llm = new_cfg
+    agent.replace_llms(new_llm, new_sub_llm)
 
     return CommandResult(output=ok(
         "Provider Switched to ",

@@ -16,6 +16,7 @@ from agent_harness.core.config import HarnessConfig, SubAgentConfig, SubAgentTyp
 from agent_harness.core.errors import ToolExecutionError, ToolValidationError
 from agent_harness.core.message import ToolCall
 from agent_harness.hooks.base import DefaultHooks
+from agent_harness.prompt.sections import _TOOL_SUPPLEMENTS
 
 
 # ── Helpers ──
@@ -47,6 +48,8 @@ def _make_bound_tool(
     )
     agent.context.config = config or HarnessConfig()
     agent.name = "test-agent"
+    agent.llm = MagicMock(name="main_llm")
+    agent.sub_llm = MagicMock(name="sub_llm")
     agent._prompt_builder = MagicMock()
     agent._prompt_builder.fork.return_value = MagicMock()
     tool.bind_agent(agent)
@@ -66,8 +69,15 @@ class TestSchema:
         tool = SubAgentTool()
         schema = tool.get_schema()
         assert set(schema.parameters["required"]) == {
-            "description", "prompt", "agent_type",
+            "description", "prompt", "agent_type", "model",
         }
+
+    def test_schema_model_contract(self) -> None:
+        schema = SubAgentTool().get_schema()
+        model = schema.parameters["properties"]["model"]
+        assert model["enum"] == ["main", "sub"]
+        assert model["default"] == "main"
+        assert "including when unsure" in model["description"]
 
     def test_schema_agent_type_enum_builtin(self) -> None:
         tool = SubAgentTool()
@@ -115,6 +125,17 @@ class TestSchema:
         assert "security" in schema.description
         assert "security auditor" in schema.description
 
+    def test_description_and_system_section_define_model_selection(self) -> None:
+        description = SubAgentTool().get_schema().description
+        supplement = _TOOL_SUPPLEMENTS["sub_agent"]
+
+        assert "Choose model independently" in description
+        assert 'model="sub"' in description
+        assert 'model="main"' in description
+        assert "### Model Selection" in supplement
+        assert 'Use model="sub"' in supplement
+        assert "Use main when unsure" in supplement
+
 
 # ── Validation ──
 
@@ -125,6 +146,7 @@ class TestValidation:
         with pytest.raises(ToolExecutionError, match="not bound"):
             await tool.execute(
                 description="test", prompt="do something", agent_type="research",
+                model="main",
             )
 
     async def test_empty_description_raises(self) -> None:
@@ -132,27 +154,39 @@ class TestValidation:
         with pytest.raises(ToolValidationError, match="description"):
             await tool.execute(
                 description="", prompt="do something", agent_type="research",
+                model="main",
             )
 
     async def test_empty_prompt_raises(self) -> None:
         tool = _make_bound_tool()
         with pytest.raises(ToolValidationError, match="prompt"):
             await tool.execute(
-                description="test", prompt="", agent_type="research",
+                description="test", prompt="", agent_type="research", model="main",
             )
 
     async def test_empty_agent_type_raises(self) -> None:
         tool = _make_bound_tool()
         with pytest.raises(ToolValidationError, match="agent_type"):
             await tool.execute(
-                description="test", prompt="do something", agent_type="",
+                description="test", prompt="do something", agent_type="", model="main",
             )
 
     async def test_invalid_type_raises(self) -> None:
         tool = _make_bound_tool()
         with pytest.raises(ToolValidationError, match="Unknown agent_type"):
             await tool.execute(
-                description="test", prompt="do something", agent_type="invalid",
+                description="test", prompt="do something", agent_type="invalid", model="main",
+            )
+
+    @pytest.mark.parametrize("model", [None, "", "other"])
+    async def test_invalid_model_raises(self, model: object) -> None:
+        tool = _make_bound_tool()
+        with pytest.raises(ToolValidationError, match="model"):
+            await tool.execute(
+                description="test",
+                prompt="do something",
+                agent_type="research",
+                model=model,
             )
 
 
@@ -393,7 +427,7 @@ class TestBindSession:
             MockAgent.return_value = mock_instance
 
             await tool.execute(
-                description="x", prompt="y", agent_type="research",
+                description="x", prompt="y", agent_type="research", model="main",
             )
 
         passed = mock_instance.run.call_args.kwargs.get("session")
@@ -415,7 +449,7 @@ class TestBindSession:
             MockAgent.return_value = mock_instance
 
             await tool.execute(
-                description="x", prompt="y", agent_type="research",
+                description="x", prompt="y", agent_type="research", model="main",
             )
 
         assert mock_instance.run.call_args.kwargs.get("session") is None
@@ -447,6 +481,53 @@ class TestExecutorTimeout:
 
 
 class TestExecution:
+    @pytest.mark.parametrize(
+        ("selection", "expected_attr"),
+        [("main", "llm"), ("sub", "sub_llm")],
+    )
+    async def test_model_selection_routes_child_llm(
+        self, selection: str, expected_attr: str,
+    ) -> None:
+        tool = _make_bound_tool()
+        tool._agent.hooks = DefaultHooks()
+        mock_result = AgentResult(output="done", steps=[])
+
+        with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
+            mock_instance = AsyncMock()
+            mock_instance.run = AsyncMock(return_value=mock_result)
+            MockAgent.return_value = mock_instance
+
+            await tool.execute(
+                description="test",
+                prompt="do something",
+                agent_type="research",
+                model=selection,
+            )
+
+        kwargs = MockAgent.call_args.kwargs
+        assert kwargs["llm"] is getattr(tool._agent, expected_attr)
+        assert kwargs["sub_llm"] is tool._agent.sub_llm
+
+    async def test_sub_selection_aliases_main_when_no_separate_sub(self) -> None:
+        tool = _make_bound_tool()
+        tool._agent.sub_llm = tool._agent.llm
+        tool._agent.hooks = DefaultHooks()
+        mock_result = AgentResult(output="done", steps=[])
+
+        with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
+            mock_instance = AsyncMock()
+            mock_instance.run = AsyncMock(return_value=mock_result)
+            MockAgent.return_value = mock_instance
+
+            await tool.execute(
+                description="test",
+                prompt="do something",
+                agent_type="research",
+                model="sub",
+            )
+
+        assert MockAgent.call_args.kwargs["llm"] is tool._agent.llm
+
     async def test_execute_returns_result_with_summary(self) -> None:
         tool = _make_bound_tool()
         mock_result = AgentResult(
@@ -472,6 +553,7 @@ class TestExecution:
                 description="Find auth handler",
                 prompt="Search for authentication handler",
                 agent_type="research",
+                model="main",
             )
 
         assert "Found auth handler" in result
@@ -492,6 +574,7 @@ class TestExecution:
             with pytest.raises(ToolExecutionError, match="failed"):
                 await tool.execute(
                     description="test", prompt="do something", agent_type="research",
+                    model="main",
                 )
 
     async def test_hooks_called_on_success(self) -> None:
@@ -508,6 +591,7 @@ class TestExecution:
 
             await tool.execute(
                 description="test task", prompt="do something", agent_type="research",
+                model="main",
             )
 
         hooks.on_subagent_start.assert_called_once()
@@ -533,6 +617,7 @@ class TestExecution:
             with pytest.raises(ToolExecutionError):
                 await tool.execute(
                     description="test", prompt="do something", agent_type="research",
+                    model="main",
                 )
 
         hooks.on_subagent_start.assert_called_once()
@@ -554,10 +639,10 @@ class TestExecution:
             MockAgent.return_value = mock_instance
 
             await tool.execute(
-                description="first", prompt="task 1", agent_type="research",
+                description="first", prompt="task 1", agent_type="research", model="main",
             )
             await tool.execute(
-                description="second", prompt="task 2", agent_type="research",
+                description="second", prompt="task 2", agent_type="research", model="main",
             )
 
         calls = hooks.on_subagent_start.call_args_list

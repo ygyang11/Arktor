@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 
 from agent_harness.agent.planner import Plan, PlanAndExecuteAgent, PlanStep
+from agent_harness.agent.planner.executor_agent import ExecutorAgent
+from agent_harness.agent.planner.planner_agent import PlannerAgent
+from agent_harness.agent.planner.replanner_agent import ReplannerAgent
 from agent_harness.context.context import AgentContext
 from agent_harness.core.message import Message
 from agent_harness.llm.types import FinishReason, LLMResponse, Usage
@@ -55,6 +59,62 @@ class TestPlanProgressSummary:
 
 
 class TestPlanAndExecuteAgent:
+    @pytest.mark.asyncio
+    async def test_internal_agents_receive_parent_sub_llm(self) -> None:
+        llm = MockLLM()
+        sub_llm = MockLLM()
+        llm.responses.append(_make_json_response({
+            "goal": "Test Goal",
+            "steps": [{"id": "1", "description": "Step 1"}],
+        }))
+        llm.responses.append(_make_text_response("Step 1 result"))
+        llm.responses.append(_make_json_response({
+            "goal_achieved": True,
+            "final_answer": "Done",
+        }))
+        captured: list[tuple[str, object]] = []
+
+        def planner_factory(**kwargs: object) -> PlannerAgent:
+            captured.append(("planner", kwargs.get("sub_llm")))
+            return PlannerAgent(**kwargs)
+
+        def executor_factory(**kwargs: object) -> ExecutorAgent:
+            captured.append(("executor", kwargs.get("sub_llm")))
+            return ExecutorAgent(**kwargs)
+
+        def replanner_factory(**kwargs: object) -> ReplannerAgent:
+            captured.append(("replanner", kwargs.get("sub_llm")))
+            return ReplannerAgent(**kwargs)
+
+        agent = PlanAndExecuteAgent(
+            name="test_agent",
+            llm=llm,
+            sub_llm=sub_llm,
+            max_steps=5,
+        )
+        with (
+            patch(
+                "agent_harness.agent.planner.plan_and_execute.PlannerAgent",
+                side_effect=planner_factory,
+            ),
+            patch(
+                "agent_harness.agent.planner.plan_and_execute.ExecutorAgent",
+                side_effect=executor_factory,
+            ),
+            patch(
+                "agent_harness.agent.planner.plan_and_execute.ReplannerAgent",
+                side_effect=replanner_factory,
+            ),
+        ):
+            result = await agent.run("Do it")
+
+        assert result.output == "Done"
+        assert captured == [
+            ("planner", sub_llm),
+            ("executor", sub_llm),
+            ("replanner", sub_llm),
+        ]
+
     @pytest.mark.asyncio
     async def test_simple_plan_execution(self) -> None:
         """Test a simple 1-step plan that succeeds."""
