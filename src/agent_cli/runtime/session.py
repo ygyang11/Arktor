@@ -16,7 +16,6 @@ from agent_cli.runtime.goal import mode as goal_mode
 from agent_harness.agent.base import BaseAgent
 from agent_harness.approval.policy import ApprovalPolicy
 from agent_harness.core.message import Message, Role
-from agent_harness.llm import BaseLLM
 from agent_harness.session.base import BaseSession, SessionState
 from agent_harness.session.file_session import FileSession
 
@@ -79,16 +78,6 @@ def get_messages(agent: BaseAgent) -> list[Message]:
 
 def set_messages(agent: BaseAgent, messages: list[Message]) -> None:
     agent.context.short_term_memory.replace_messages(messages)
-
-
-def update_compressor_model(
-    agent: BaseAgent, new_model: str, new_llm: BaseLLM,
-) -> None:
-    compressor = agent.context.short_term_memory.compressor
-    cfg = agent.context.config
-    if compressor is not None and cfg.memory.compression.summary_model is None:
-        compressor._model = new_model
-        compressor._llm = new_llm
 
 
 async def resolve_session_id(

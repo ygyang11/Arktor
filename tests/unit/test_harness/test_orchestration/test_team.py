@@ -7,7 +7,7 @@ from agent_harness.agent.conversational import ConversationalAgent
 from agent_harness.hooks import DefaultHooks, TracingHooks
 from agent_harness.core.config import HarnessConfig, TracingConfig
 from agent_harness.orchestration.team import AgentTeam, TeamMode, TEAM_PROMPTS
-from tests.conftest import MockLLM
+from tests.conftest import MockLLM, MockTool
 
 
 class _TeamSpyHooks(DefaultHooks):
@@ -64,6 +64,35 @@ class TestInternalJudge:
         assert judge_one.name == "team_judge"
         assert judge_one.system_prompt == TEAM_PROMPTS["judge.system"]
         assert judge_one.llm is worker.llm
+
+    def test_judge_and_rebuilt_worker_keep_dual_llm_wiring(self) -> None:
+        main = MockLLM()
+        main.config.model = "worker-main"
+        sub = MockLLM()
+        sub.config.model = "worker-sub"
+        worker = ConversationalAgent(
+            name="worker",
+            llm=main,
+            sub_llm=sub,
+            tools=[MockTool()],
+            system_prompt="",
+        )
+        team = AgentTeam(agents=[worker], mode=TeamMode.SUPERVISOR)
+
+        judge = team._get_judge()
+        team._fork_worker_contexts(judge)
+
+        assert judge.llm is main
+        assert judge.sub_llm is sub
+        assert worker.context.short_term_memory.model == "worker-main"
+        compressor = worker.context.short_term_memory.compressor
+        assert compressor is not None
+        assert compressor._llm is sub
+        assert compressor._model == "worker-main"
+        assert worker._event_bus is worker.context.event_bus
+        assert main._event_bus is worker.context.event_bus
+        assert sub._event_bus is worker.context.event_bus
+        assert worker.tool_executor._event_bus is worker.context.event_bus
 
 
 class TestHooks:

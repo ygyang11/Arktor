@@ -16,6 +16,9 @@ llm:
   max_retries: 5                # Max retry attempts for rate-limit errors
   retry_delay: 1.0              # Initial retry delay in seconds (exponential backoff)
   reasoning_effort: ""          # "low" | "medium" | "high" | "xhigh/max.."  (leave empty to use model default)
+  sub_model:                    # Context window must be >= memory.max_tokens
+    model: ""                   # Empty = use main model
+    reasoning_effort: ""        # Empty = use the sub model's default
 
 # --- Tool Execution ---
 tool:
@@ -43,7 +46,6 @@ memory:
   compression:                  # Only effective when strategy = "summarize"
     threshold: 0.9              # Compress when token usage > threshold of max_tokens
     retain_count: 3             # Keep last N message groups intact (never compressed)
-    summary_model: ""           # Model for summaries (empty = use main model)
     summary_max_tokens: null    # Max output tokens for summary (null = use LLM config default)
 
 # --- Search ---

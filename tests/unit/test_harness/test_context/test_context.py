@@ -1,7 +1,7 @@
 """Tests for agent_harness.context.context — AgentContext create, fork, isolation."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -10,6 +10,7 @@ from agent_harness.context.state import AgentState
 from agent_harness.context.variables import ContextVariables, Scope
 from agent_harness.core.config import HarnessConfig, LLMConfig, MemoryConfig
 from agent_harness.core.event import EventBus
+from agent_harness.core.message import Message
 from agent_harness.memory.compressor import ContextCompressor
 from agent_harness.memory.short_term import ShortTermMemory
 from agent_harness.memory.working_term import WorkingMemory
@@ -73,6 +74,16 @@ class TestAgentContextFork:
         parent = AgentContext.create(config=cfg)
         child = parent.fork()
         assert child.short_term_memory.model == "claude-4-sonnet"
+
+    def test_fork_inherits_runtime_model_instead_of_shared_config(self) -> None:
+        cfg = HarnessConfig(llm=LLMConfig(model="config-model"))
+        parent = AgentContext.create(config=cfg)
+        parent.short_term_memory.set_model("runtime-model")
+        cfg.llm.model = "later-config-model"
+
+        child = parent.fork()
+
+        assert child.short_term_memory.model == "runtime-model"
 
     def test_fork_shares_long_term_memory(self) -> None:
         parent = AgentContext.create()
@@ -229,6 +240,26 @@ class TestBuildLLMMessages:
         msgs = await ctx.build_llm_messages(base_messages=custom, include_working=False)
         assert len(msgs) == 2
         assert msgs[0].content == "Custom"
+
+    @pytest.mark.asyncio
+    async def test_final_trim_uses_short_term_memory_model(self) -> None:
+        cfg = HarnessConfig(
+            llm=LLMConfig(model="config-model"),
+            memory=MemoryConfig(max_tokens=1234),
+        )
+        context = AgentContext.create(config=cfg)
+        context.short_term_memory.set_model("runtime-model")
+        messages = [Message.user("hello")]
+
+        with patch.object(
+            ShortTermMemory,
+            "_trim_by_tokens",
+            return_value=messages,
+        ) as trim:
+            result = await context.build_llm_messages(base_messages=messages)
+
+        assert result == messages
+        trim.assert_called_once_with(messages, 1234, "runtime-model")
 
 
 class TestStateManager:

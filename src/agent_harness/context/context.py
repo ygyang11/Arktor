@@ -90,6 +90,7 @@ class AgentContext:
         - state (independent state machine)
         """
         child_vars = self.variables.fork()
+        child_model = self.short_term_memory.model
         child_compressor = None
         if self._compressor is not None:
             child_scope = self._next_fork_scope(name)
@@ -99,7 +100,7 @@ class AgentContext:
             config=self.config,
             short_term_memory=ShortTermMemory(
                 max_tokens=self.config.memory.max_tokens,
-                model=self.config.llm.model,
+                model=child_model,
                 compressor=child_compressor,
             ),
             long_term_memory=self.long_term_memory,
@@ -310,7 +311,9 @@ class AgentContext:
         from agent_harness.memory.short_term import ShortTermMemory
 
         messages = ShortTermMemory._trim_by_tokens(
-            messages, self.config.memory.max_tokens, self.config.llm.model
+            messages,
+            self.short_term_memory.max_tokens,
+            self.short_term_memory.model,
         )
 
         return messages

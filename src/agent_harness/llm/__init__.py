@@ -1,5 +1,10 @@
 """LLM module: model provider abstractions."""
-from agent_harness.core.config import HarnessConfig, LLMConfig, resolve_llm_config
+from agent_harness.core.config import (
+    HarnessConfig,
+    LLMConfig,
+    resolve_llm_config,
+    resolve_sub_llm_config,
+)
 from agent_harness.llm.anthropic_provider import AnthropicProvider
 from agent_harness.llm.base import BaseLLM, FallbackChain, RateLimiter
 from agent_harness.llm.openai_provider import OpenAIProvider
@@ -13,20 +18,8 @@ _PROVIDER_MAP: dict[str, type[BaseLLM]] = {
 
 def create_llm(
     config: HarnessConfig | LLMConfig | None = None,
-    *,
-    model_override: str | None = None,
 ) -> BaseLLM:
     llm_cfg = resolve_llm_config(config)
-    if model_override:
-        llm_cfg = LLMConfig(
-            provider=llm_cfg.provider,
-            model=model_override,
-            api_key=llm_cfg.api_key,
-            base_url=llm_cfg.base_url,
-            timeout=llm_cfg.timeout,
-            max_retries=llm_cfg.max_retries,
-            retry_delay=llm_cfg.retry_delay,
-        )
     provider = _PROVIDER_MAP.get(llm_cfg.provider.lower())
     if provider is None:
         supported = ", ".join(sorted(_PROVIDER_MAP))
@@ -34,6 +27,13 @@ def create_llm(
             f"Unsupported llm.provider: {llm_cfg.provider!r}. Supported: {supported}"
         )
     return provider(llm_cfg)
+
+
+def create_sub_llm(
+    config: HarnessConfig | LLMConfig | None = None,
+) -> BaseLLM | None:
+    sub_cfg = resolve_sub_llm_config(config)
+    return create_llm(sub_cfg) if sub_cfg is not None else None
 
 
 def LLM(config: HarnessConfig | LLMConfig | None = None) -> BaseLLM:
@@ -45,5 +45,5 @@ __all__ = [
     "LLMResponse", "Usage", "FinishReason", "StreamDelta",
     "OpenAIProvider", "AnthropicProvider",
     "FallbackChain", "RateLimiter",
-    "create_llm", "LLM",
+    "create_llm", "create_sub_llm", "LLM",
 ]

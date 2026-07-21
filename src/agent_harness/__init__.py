@@ -31,6 +31,7 @@ from agent_harness.core.config import (
     SkillConfig,
     SubAgentConfig,
     SubAgentTypeSpec,
+    SubModelConfig,
     ToolConfig,
     TracingConfig,
 )
@@ -77,6 +78,7 @@ __all__ = [
     "SkillConfig",
     "SubAgentConfig",
     "SubAgentTypeSpec",
+    "SubModelConfig",
     "Event",
     "EventBus",
     "HarnessError",

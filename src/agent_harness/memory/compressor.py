@@ -172,6 +172,10 @@ class ContextCompressor:
     def model_name(self) -> str:
         return self._llm.model_name
 
+    def rebind(self, *, llm: BaseLLM, model: str) -> None:
+        self._llm = llm
+        self._model = model
+
     def clone(self, *, scope: str | None = None) -> ContextCompressor:
         return ContextCompressor(
             llm=self._llm,

@@ -349,11 +349,14 @@ def render_session_list(metas: list[SessionMeta]) -> RenderableType:
 
 # ── /provider list ───────────────────────────────────────────────────
 
-_PROFILE_EXAMPLE = """{
-  "llm_profiles": {
-    "<name>": { "provider": "..", "model": "..", "base_url": "..", "api_key": ".." }
-  }
-}"""
+_PROFILE_EXAMPLE = (
+    "{\n"
+    '  "llm_profiles": {\n'
+    '    "<name>": { "provider": "..", "model": "..", '
+    '"sub_model": "..", "base_url": "..", "api_key": ".." }\n'
+    "  }\n"
+    "}"
+)
 
 
 def render_provider_list(

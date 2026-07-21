@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import yaml
-from pydantic import BaseModel, Field, PrivateAttr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 if TYPE_CHECKING:
     from agent_harness.hooks import DefaultHooks
@@ -52,6 +59,26 @@ class _EnvVars:
     SEMANTIC_SCHOLAR_API_KEY = "SEMANTIC_SCHOLAR_API_KEY"
 
 
+class SubModelConfig(BaseModel):
+    """Model-specific overrides for the auxiliary LLM."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str | None = None
+    reasoning_effort: str | None = None
+
+    @field_validator("model", "reasoning_effort", mode="before")
+    @classmethod
+    def _unset_to_none(cls, value: str | None) -> str | None:
+        return _unset_to_none(value)
+
+    @model_validator(mode="after")
+    def _validate_model(self) -> SubModelConfig:
+        if self.model is None and self.reasoning_effort is not None:
+            raise ValueError("model is required when reasoning_effort is set")
+        return self
+
+
 class LLMConfig(BaseModel):
     """Configuration for an LLM provider."""
 
@@ -65,6 +92,7 @@ class LLMConfig(BaseModel):
     max_retries: int = 3
     retry_delay: float = 1.0
     reasoning_effort: str | None = None
+    sub_model: SubModelConfig | None = None
 
     @field_validator("api_key", "base_url", "reasoning_effort", mode="before")
     @classmethod
@@ -118,13 +146,7 @@ class CompressionConfig(BaseModel):
 
     threshold: float = 0.75
     retain_count: int = 6
-    summary_model: str | None = None
     summary_max_tokens: int | None = None
-
-    @field_validator("summary_model", mode="before")
-    @classmethod
-    def _unset_to_none(cls, value: str | None) -> str | None:
-        return _unset_to_none(value)
 
 
 class MemoryConfig(BaseModel):
@@ -360,6 +382,22 @@ def resolve_llm_config(config: HarnessConfig | LLMConfig | None) -> LLMConfig:
     if isinstance(config, LLMConfig):
         return config
     return HarnessConfig.get().llm
+
+
+def resolve_sub_llm_config(
+    config: HarnessConfig | LLMConfig | None,
+) -> LLMConfig | None:
+    llm_cfg = resolve_llm_config(config)
+    sub = llm_cfg.sub_model
+    if sub is None or sub.model is None:
+        return None
+    return llm_cfg.model_copy(
+        update={
+            "model": sub.model,
+            "reasoning_effort": sub.reasoning_effort,
+            "sub_model": None,
+        }
+    )
 
 
 def resolve_tool_config(config: HarnessConfig | ToolConfig | None) -> ToolConfig:

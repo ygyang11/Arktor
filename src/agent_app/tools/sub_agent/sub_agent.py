@@ -40,6 +40,11 @@ multiple times in a single turn.
 3. The sub-agent's outputs should generally be trusted.
 4. Set background=true when your workflow can proceed without waiting \
 for this result.
+5. Choose model independently of agent type and background mode: use sub for \
+well-specified work that does not require difficult inference, reconciling \
+competing evidence, or consequential judgment. Use main otherwise, including \
+when unsure; choose by the reasoning and judgment required, not the complexity \
+of what it examines or the workload.
 
 ## Examples
 
@@ -56,7 +61,9 @@ faster and each dives deep into one module's patterns, absorbing \
 the context cost of scanning many files. The main agent receives \
 three focused reports and synthesizes the comparison, rather than \
 carrying the full exploration history of all three modules in its \
-own context.
+own context. Each sub-agent analyzes one established implementation \
+and returns directly checkable evidence rather than reconciling the \
+modules, so use model="sub".
 </commentary>
 </example>
 
@@ -72,7 +79,9 @@ reading source files, tracing patterns, and synthesizing findings \
 into a structured analysis. This keeps the main thread clean of \
 the heavy exploration overhead. The main agent receives a concise \
 architectural summary to reference when designing the implementation, \
-rather than carrying hundreds of file reads in its own context.
+rather than carrying hundreds of file reads in its own context. \
+Because deriving architecture and design patterns across an entire codebase \
+requires broad synthesis, this sub-agent uses model="main".
 </commentary>
 </example>
 
@@ -86,7 +95,8 @@ Designing a plan requires deep analysis of the existing architecture \
 across many files. The sub-agent reads the codebase deeply, evaluates \
 trade-offs, and produces a structured plan. This is analysis-heavy \
 work that benefits from context isolation — the main agent receives \
-the plan and can then proceed based on its recommendations.
+the plan and can then proceed based on its recommendations. \
+The architectural trade-offs require model="main".
 </commentary>
 </example>
 
@@ -101,7 +111,10 @@ only the outcome matters. Use general when the task requires file \
 modifications or command execution, the scope is well-defined, and \
 you don't need the intermediate details in your context. If the task is small \
 or you need the details in your own context \
-for subsequent work, do it yourself instead.
+for subsequent work, do it yourself instead. Although this makes the task \
+suitable for delegation, designing tests still requires interpreting intended \
+behavior and deciding which normal, boundary, and failure cases matter, so use \
+model="main".
 </commentary>
 </example>
 
@@ -115,7 +128,9 @@ understand the current structure*
 The analysis will take many steps exploring an external codebase. \
 Meanwhile the agent can begin reading our own code — work that \
 doesn't depend on the analysis result. When the background research \
-completes, the agent combines both to plan the refactoring.
+completes, the agent combines both to plan the refactoring. Because the findings \
+require broad architectural synthesis and will shape later refactoring decisions, \
+use model="main".
 </commentary>
 </example>
 
@@ -144,7 +159,9 @@ Assistant: *Launches a security sub-agent to review the changes*
 A custom "security" type has been configured for this project with \
 specialized review instructions. The task falls within this agent's specialized focus area, \
 so it can apply its tailored instructions and capabilities more effectively than general. \
-Custom types appear in the agent_type enum — use them when the task matches their description.
+Custom types appear in the agent_type enum — use them when the task matches their description. \
+That specialization determines the agent type, while the subtle, high-impact \
+judgment required by security review calls for model="main".
 </commentary>
 </example>
 """
@@ -210,6 +227,18 @@ class SubAgentTool(BaseTool):
                         "enum": type_enum,
                         "description": "Select one of the available agent types listed above.",
                     },
+                    "model": {
+                        "type": "string",
+                        "enum": ["main", "sub"],
+                        "description": (
+                            "Model for this delegated task. Use 'sub' for "
+                            "well-specified work that does not require difficult "
+                            "inference, reconciling competing evidence, or "
+                            "consequential judgment; use 'main' otherwise, "
+                            "including when unsure."
+                        ),
+                        "default": "main",
+                    },
                     "background": {
                         "type": "boolean",
                         "description": (
@@ -220,7 +249,7 @@ class SubAgentTool(BaseTool):
                         "default": False,
                     },
                 },
-                "required": ["description", "prompt", "agent_type"],
+                "required": ["description", "prompt", "agent_type", "model"],
             },
         )
 
@@ -234,6 +263,7 @@ class SubAgentTool(BaseTool):
         description = kwargs.get("description", "")
         prompt = kwargs.get("prompt", "")
         agent_type = kwargs.get("agent_type", "")
+        model = kwargs.get("model")
         background = kwargs.get("background", False)
 
         if not description.strip():
@@ -242,16 +272,23 @@ class SubAgentTool(BaseTool):
             raise ToolValidationError("'prompt' is required and cannot be empty.")
         if not agent_type.strip():
             raise ToolValidationError("'agent_type' is required and cannot be empty.")
+        if not isinstance(model, str) or not model.strip():
+            raise ToolValidationError("'model' is required and cannot be empty.")
+        if model not in ("main", "sub"):
+            raise ToolValidationError(
+                f"Unknown model selection {model!r}. Available: ['main', 'sub']"
+            )
 
         available_types = self._get_available_types()
         if agent_type not in available_types:
             raise ToolValidationError(
-                f"Unknown agent_type '{agent_type}'. "
-                f"Available: {list(available_types.keys())}"
+                f"Unknown agent_type {agent_type!r}. "
+                f"Available: {list(available_types)}"
             )
 
         tools = self._resolve_tools(agent_type)
         prompt_builder = self._build_subagent_prompt_builder(agent_type)
+        child_llm = self._agent.llm if model == "main" else self._agent.sub_llm
 
         parent_name = self._agent.name
         self._type_seq[agent_type] = self._type_seq.get(agent_type, 0) + 1
@@ -264,7 +301,8 @@ class SubAgentTool(BaseTool):
 
         child = ReActAgent(
             name=subagent_name,
-            llm=self._agent.llm,
+            llm=child_llm,
+            sub_llm=self._agent.sub_llm,
             tools=tools,
             context=self._agent.context.fork(f"sub.{agent_type}.{seq}"),
             hooks=self._agent.hooks,

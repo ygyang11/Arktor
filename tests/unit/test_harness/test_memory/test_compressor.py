@@ -59,6 +59,18 @@ class TestShouldCompress:
     def test_zero_max_tokens(self, compressor: ContextCompressor) -> None:
         assert compressor.should_compress([Message.user("hi")], 0) is False
 
+    def test_rebind_updates_request_and_estimate_models(
+        self, compressor: ContextCompressor,
+    ) -> None:
+        llm = AsyncMock()
+        llm.model_name = "summary-model"
+
+        compressor.rebind(llm=llm, model="consumer-model")
+
+        assert compressor._llm is llm
+        assert compressor._model == "consumer-model"
+        assert compressor.model_name == "summary-model"
+
 
 class TestGroupAtomicPairs:
     def test_simple_messages(self) -> None:

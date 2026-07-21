@@ -102,6 +102,7 @@ class PlanAndExecuteAgent(BaseAgent):
             planner = PlannerAgent(
                 name=f"{self.name}.planner",
                 llm=self.llm,
+                sub_llm=self.sub_llm,
                 tools=[],
                 context=self.context.fork("planner"),
                 hooks=self.hooks,
@@ -112,6 +113,7 @@ class PlanAndExecuteAgent(BaseAgent):
             executor = ExecutorAgent(
                 name=f"{self.name}.executor",
                 llm=self.llm,
+                sub_llm=self.sub_llm,
                 tools=self.tools,
                 context=self.context.fork("executor"),
                 hooks=self.hooks,
@@ -125,6 +127,7 @@ class PlanAndExecuteAgent(BaseAgent):
             replanner = ReplannerAgent(
                 name=f"{self.name}.replanner",
                 llm=self.llm,
+                sub_llm=self.sub_llm,
                 tools=[],
                 context=self.context.fork("replanner"),
                 hooks=self.hooks,

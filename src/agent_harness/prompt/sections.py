@@ -340,6 +340,18 @@ reading a specific file, searching for a known symbol)
 - If delegating does not reduce complexity or context usage
 - If you need to see the intermediate reasoning or steps after completion
 
+### Model Selection
+- Use model="sub" when the task is well specified and can be completed reliably \
+without difficult inference, reconciling competing evidence, or consequential \
+judgment.
+- Use model="main" for ambiguous or open-ended work, difficult diagnosis or \
+competing hypotheses, synthesis across broad or conflicting evidence, \
+architecture/security/API/data-integrity decisions, or tasks where subtle \
+domain judgment materially affects the result.
+- Choose based on the reasoning, synthesis, and judgment required by the delegated \
+task itself, not the complexity of what it examines, agent_type, background mode, \
+step count, or workload. Use main when unsure.
+
 ### Usage Notes
 - You can call sub_agent multiple times in a single turn for independent \
 tasks — they execute concurrently
