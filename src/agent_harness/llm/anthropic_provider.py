@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import anthropic
+import httpx
 from anthropic import AsyncAnthropic
 
 from agent_harness.core.config import HarnessConfig, LLMConfig, resolve_llm_config
@@ -262,6 +263,10 @@ class AnthropicProvider(BaseLLM):
         except anthropic.AuthenticationError as e:
             raise LLMAuthenticationError(str(e)) from e
         except anthropic.APIConnectionError as e:
+            raise LLMConnectionError(str(e)) from e
+        except httpx.TransportError as e:
+            # The SDK does not wrap transport errors raised while consuming a
+            # streaming response body (e.g. an incomplete chunked read).
             raise LLMConnectionError(str(e)) from e
         except anthropic.APIStatusError as e:
             s = str(e)

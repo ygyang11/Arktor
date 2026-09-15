@@ -6,6 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 import openai
 from openai import AsyncOpenAI
 
@@ -210,6 +211,10 @@ class OpenAIProvider(BaseLLM):
         except openai.AuthenticationError as e:
             raise LLMAuthenticationError(str(e)) from e
         except openai.APIConnectionError as e:
+            raise LLMConnectionError(str(e)) from e
+        except httpx.TransportError as e:
+            # The SDK does not wrap transport errors raised while consuming a
+            # streaming response body (e.g. an incomplete chunked read).
             raise LLMConnectionError(str(e)) from e
         except openai.APIError as e:
             raise LLMError(str(e)) from e
