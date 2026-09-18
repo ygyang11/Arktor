@@ -23,6 +23,7 @@ MEDIA_REJECTION_PHRASES: tuple[str, ...] = (
     "unsupported mimetype", "unsupported image",
     "file content types",
     "file must have a file_id or file_data",
+    "must be a valid pdf",
     "image dimensions exceed",
     "expected file type",
     "inlinedata parameter",

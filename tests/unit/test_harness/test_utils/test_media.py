@@ -75,6 +75,8 @@ def test_is_media_mime_union() -> None:
         "messages[3]: unknown variant `image`, expected `text`",
         "messages[3]: unknown variant `file`, expected `text`",
         "messages[30]: file must have a file_id or file_data",
+        # qwen (aliyun MaaS compat-mode): invalid PDF payload in a file part
+        "Input file must be a valid PDF",
         # minimax
         "Error from provider: This model does not support image inputs",
         # azure openai
