@@ -178,7 +178,7 @@ class SubAgentTool(BaseTool):
         super().__init__(
             name="sub_agent",
             description="",
-            executor_timeout=600.0,
+            executor_timeout=1200.0,
         )
         self._agent: Any = None
         self._type_seq: dict[str, int] = {}

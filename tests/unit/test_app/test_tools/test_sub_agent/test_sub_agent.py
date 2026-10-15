@@ -474,7 +474,7 @@ class TestTypeSequencing:
 class TestExecutorTimeout:
     def test_executor_timeout_large(self) -> None:
         tool = SubAgentTool()
-        assert tool.executor_timeout == 600.0
+        assert tool.executor_timeout == 1200.0
 
 
 # ── Execution (mock LLM) ──
