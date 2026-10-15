@@ -38,6 +38,7 @@ arktor.yaml
 .review
 .arktor
 branding/
+/skills/internal/
 
 # ===== Output & Traces =====
 .notes
