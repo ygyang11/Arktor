@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use Arktor, please cite this repository."
+type: software
+title: Arktor
+authors:
+  - name: ygyang11
+repository-code: "https://github.com/ygyang11/Arktor"
+url: "https://github.com/ygyang11/Arktor"
+license: MIT
