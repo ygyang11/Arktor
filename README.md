@@ -2,166 +2,239 @@
   <img src="docs/images/banner.png" alt="Arktor" width="100%">
 </p>
 
-<p align="center">
-  <b>An agent harness you can run as a CLI and build on as an SDK.</b>
-</p>
+<h2 align="center">Arktor: An Agent Harness for the CLI and Your Research</h2>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License MIT">
-  <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python 3.11+">
-  <a href="README_ZH.md"><img src="https://img.shields.io/badge/📄_中文文档-click-lightgrey" alt="中文文档"></a>
+  <a href="https://github.com/ygyang11/Arktor/actions/workflows/ci.yml"><img src="https://github.com/ygyang11/Arktor/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-blue" alt="Python 3.11+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License: MIT"></a>
+  <a href="README_ZH.md"><img src="https://img.shields.io/badge/%F0%9F%93%84_%E4%B8%AD%E6%96%87%E6%96%87%E6%A1%A3-click-lightgrey" alt="中文文档"></a>
 </p>
 
-Arktor is a lightweight, hackable framework for building AI agents — and the tools, context,
-and orchestration around them. It comes two ways in one package:
+Arktor is an extensible agent harness. Use it directly through the **CLI**, or
+build and adapt agents with the **Python SDK** for your own projects.
 
-- **`arktor`** — an interactive agent in your terminal: streaming output, tool use, plan
-  mode, persistent sessions, multimodal input.
-- **`arktor-sdk`** — the Python SDK underneath: agents, tools, orchestration, memory,
-  tracing, and hooks, every piece designed to be subclassed and swapped.
-
----
+<p align="center">
+  <img src="docs/images/cli.png" alt="Arktor terminal interface with command completion." width="100%">
+</p>
 
 ## Features
 
-- **Batteries-included tools** — filesystem and a sandboxable terminal, web search & fetch,
-  sub-agents, todo lists, cross-session memory, and skills..., plus research tools — paper search across
-  arXiv & Semantic Scholar, and a document_parser that turns PDFs, scans, and images into
-  clean markdown. Images and PDFs flow through as first-class attachments.
-- **Observability built in** — every LLM call, tool, and step is a traced span, exported
-  to the console and JSONL and surfaced through a rich set of hooks (the CLI's live
-  progress runs on them).
-- **Agents & orchestration** — ReAct, Plan-and-Execute, and Conversational agents,
-  composable into pipelines, DAGs, routers, or teams.
-- **Hackable throughout** — provider-agnostic LLMs with retry and fallback, 3-layer memory
-  with auto-compression, approval policies, an optional Docker sandbox, and tuned built-in
-  prompts — clean extension point.
+### Agent capabilities
 
----
+- **Agents and workflows.** Use ReAct, Plan-and-Execute, and Conversational agents;
+  built-in agent pipelines, DAGs, routers, and teams.
 
-## Install
+- **Tools.** Built-in tools cover file system, terminal execution, web and
+  paper search/fetch, skills, todo lists and document parsing.
+
+- **Delegation and background work.** Delegate tasks to sub-agents with separate
+  contexts and configurable tools and models. Run commands or sub-agents in the
+  background.
+
+### Harness design
+
+- **Context and continuity.** Load multiple instructions, compact conversations,
+  and restore sessions with their working state. Keep project or global memories
+  across sessions, and use persistent goals for longer tasks.
+
+- **Execution controls.** Configure approval modes, resource-specific rules,
+  tool concurrency, and timeouts. Use an optional Docker sandbox for terminal
+  execution.
+
+- **Models and multimodal input.** Use OpenAI-compatible or Anthropic providers,
+  custom endpoints, and separately configured sub-models. Attach images and PDFs
+  where supported by the provider and model.
+
+- **Observability.** Follow tool activity and token usage, add lifecycle hooks,
+  and enable console or JSONL tracing.
+
+## Getting started
+
+### Installation
+
+Install the CLI and built-in tools from source:
 
 ```bash
 git clone https://github.com/ygyang11/Arktor.git
 cd Arktor
-
-# create an environment (pick one)
-conda create -n arktor python=3.11 && conda activate arktor
-# or: python -m venv .venv && source .venv/bin/activate
-# or: uv venv && source .venv/bin/activate
-
-pip install -e ".[cli,app]"     # arktor CLI + built-in tools
+conda create -n arktor python=3.11
+conda activate arktor
+python -m pip install -e ".[cli,app]"
 ```
 
-For SDK use without the REPL:
+<details>
+<summary>Optional dependencies</summary>
+
+| Extra | Includes |
+| --- | --- |
+| `cli` | Terminal interface dependencies. |
+| `app` | For tools, including web search, web extraction, and document parsing dependencies. |
+| `sandbox` | Docker client for isolated terminal execution; requires a Docker daemon. |
+| `dev` | Test, lint, and type-checking tools. |
+
+</details>
+
+### Configuration
+
+Keep your CLI configuration in `~/.arktor/arktor.yaml` to reuse it across projects.
+From the repository root:
 
 ```bash
-pip install -e ".[dev,app]"
+mkdir -p ~/.arktor
+cp arktor_example.yaml ~/.arktor/arktor.yaml
 ```
 
-Add the `sandbox` extra for Docker-isolated tool execution.
+For project-specific settings, place `arktor.yaml` in the working directory;
+the CLI gives this file priority.
 
-### Configure
-
-You only need to set three fields — model, API key, and base URL. Either drop an
-`arktor.yaml` in your project (copy [`arktor_example.yaml`](arktor_example.yaml)), or run
-`arktor` once and it writes a starter `~/.arktor/arktor.yaml` for you to edit:
+Set the model and credentials under `llm`. Choose `openai` for OpenAI-compatible
+services or `anthropic` for Anthropic:
 
 ```yaml
 llm:
-  provider: openai           # or: anthropic
-  model: gpt-5.5
-  api_key: sk-...
-  base_url: ...
+  provider: openai
+  model: "__SET_MODEL__"
+  api_key: "__SET_API_KEY__"
+  base_url: "__SET_BASE_URL__"
 ```
 
-Everything else has sensible defaults and is fully customizable; common fields can also be
-overridden with `ARKTOR_`-prefixed env vars (see [`.env_example`](.env_example)).
+See [arktor_example.yaml](arktor_example.yaml) for available settings and
+[.env_example](.env_example) for environment variables.
 
----
+## CLI
 
-## Quickstart
+### Interactive use
 
-### The CLI
-
-<p align="center">
-  <img src="docs/images/cli.png" alt="arktor CLI" width="100%">
-</p>
+Start an interactive session:
 
 ```bash
 arktor
 ```
 
-`arktor` starts an interactive agent rooted at your project directory. Attach files with
-`@path`, run a shell command with `!cmd`, and open commands with `/`. Sessions persist, so
-you can `/resume` later, and approval can switch between **Ask · Auto · Yolo** at any time.
+Describe a task, then follow the agent's activity in the
+terminal. Use `@path` to attach files, `!command` to run a shell command, and
+`AGENTS.md` or `CLAUDE.md` to supply project instructions.
 
-Slash commands cover the whole loop — the most-used ones:
+| Task | Commands |
+| --- | --- |
+| Inspect context and usage | `/context`, `/usage`, `/compact` |
+| Select a model | `/model`, `/provider`, `/effort` |
+| Continue work toward an objective | `/goal <objective>` |
+| Choose an approval mode | `/permissions` |
+| Plan and review changes | `/plan`, `/review`, `/diff` |
+| Manage sessions | `/resume`, `/new` |
 
-- **Plan & review** — `/plan` (read-only planning), `/review` (review the working diff),
-  `/diff`, `/init` (generate `AGENTS.md`)
-- **Session** — `/resume`, `/new`, `/compact` (compress context), `/export`, `/status`,
-  `/context`
-- **Model & runtime** — `/model`, `/effort`, `/provider`, `/permissions`, `/skills`,
-  `/tasks`
+Use `/help` to browse all interactive commands.
 
-Run `/help` to list them all.
+### Non-interactive runs
 
-### The SDK
+Run a task and exit with `-p`:
 
-Ten lines for a working tool-calling agent:
+```bash
+arktor -p "Inspect this repository and summarize its architecture."
+```
+
+Add `--output-format json` for newline-delimited JSON containing step events and
+a final result. Run `arktor --help` for startup options.
+
+## Python SDK
+
+### Build an agent
+
+Use the SDK to build agents and workflows for your own projects and experiments.
+This example gives an agent a tool for summarizing measurements and uses the
+user configuration created above:
 
 ```python
 import asyncio
-from agent_harness import ReActAgent, tool, HarnessConfig
+import json
+from pathlib import Path
+
+from agent_harness import HarnessConfig, ReActAgent, tool
+
 
 @tool
-def calculate(expression: str) -> str:
-    """Evaluate a math expression.
+def summarize_measurements(values: list[float]) -> str:
+    """Summarize numeric measurements.
 
     Args:
-        expression: A Python math expression like '2 + 3 * 4'.
+        values: Measurements to summarize.
     """
-    return str(eval(expression))
+    if not values:
+        return "No measurements provided."
+    return json.dumps({
+        "count": len(values),
+        "mean": sum(values) / len(values),
+        "min": min(values),
+        "max": max(values),
+    })
+
 
 async def main():
     agent = ReActAgent(
-        name="assistant",
-        tools=[calculate],
-        config=HarnessConfig.load("arktor.yaml"),
+        name="analyst",
+        tools=[summarize_measurements],
+        config=HarnessConfig.load(Path.home() / ".arktor" / "arktor.yaml"),
     )
-    result = await agent.run("What is (42 * 37 + 15) / 3?")
-    print(result.output, "·", result.step_count, "steps")
+    result = await agent.run(
+        "Use summarize_measurements to summarize [1.8, 2.1, 2.0, 2.3]."
+    )
+    print(result.output)
+    print(f"Tokens used: {result.usage.total_tokens}")
+
 
 asyncio.run(main())
 ```
 
-`@tool` derives the JSON schema from your type hints and docstring. Core types import from `agent_harness`; the built-in tools live in `agent_app`
-(e.g. `from agent_app.tools import WEB_TOOLS, FILESYSTEM_TOOLS`).
+`@tool` derives the tool schema from type hints and the docstring for simple use. The returned `AgentResult` contains the final output, execution steps, and usage.
 
----
+### Compose and extend
 
-## Examples
+Arktor separates design, capabilities, and terminal interaction
+into three clear layers:
 
-For SDK users, Ready-to-run scripts under [`examples/`](examples/):
+| Package | Role |
+| --- | --- |
+| [agent_harness](src/agent_harness/) | Core abstractions and runtime for defining agent behavior and underlying design. |
+| [agent_app](src/agent_app/) | Reusable tools and resources that equip agents for tasks. |
+| [agent_cli](src/agent_cli/) | A terminal application that integrates the design and capabilities for interactive and scripted use. |
 
-- **agents/** — [`react_agent`](examples/agents/react_agent.py),
-  [`plan_and_execute`](examples/agents/plan_and_execute.py),
-  [`multi_agent_pipeline`](examples/agents/multi_agent_pipeline.py), [`agent_team`](examples/agents/agent_team.py),
-  [`deep_research`](examples/agents/deep_research.py).
-- **features/** — [`coding_demo`](examples/features/coding_demo.py), [`session_demo`](examples/features/session_demo.py),
-  [`skill_demo`](examples/features/skill_demo.py).
+Build on these layers or adapt them to your own work, from individual
+components to how they fit together. Explore the examples and source as a
+starting point for your own methods and experiments.
+
+### Examples
+
+The example scripts read `arktor.yaml` from the repository root. To use your
+user configuration, copy it there before running an example:
 
 ```bash
-python examples/agents/react_agent.py        # ReAct loop with custom tools
+cp ~/.arktor/arktor.yaml arktor.yaml
+python examples/agents/react_agent.py
 ```
 
----
+- **Agent patterns:** [ReAct](examples/agents/react_agent.py) and
+  [Plan-and-Execute](examples/agents/plan_and_execute.py).
+- **Multi-agent workflows:** [pipelines and DAGs](examples/agents/multi_agent_pipeline.py),
+  [teams](examples/agents/agent_team.py), and
+  [deep research](examples/agents/deep_research.py).
+- **Tools and state:** [coding tools](examples/features/coding_demo.py),
+  [sessions](examples/features/session_demo.py), and
+  [skills](examples/features/skill_demo.py).
 
-## Contributing
+## Citation
 
-Contributions are welcome. For
-anything substantial, please open an issue to discuss the approach first, and keep changes
-consistent with the existing style. Before opening a PR, make sure the checks CI runs all pass.
+To cite Arktor, use the entry below or [CITATION.cff](CITATION.cff).
+
+```bibtex
+@software{arktor,
+  author = {{ygyang11}},
+  title  = {Arktor},
+  url    = {https://github.com/ygyang11/Arktor}
+}
+```
+
+## License
 
 Released under the [MIT License](LICENSE).
