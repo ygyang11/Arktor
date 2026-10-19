@@ -1,167 +1,98 @@
-<p align="center">
-  <img src="docs/images/banner.png" alt="Arktor" width="100%">
-</p>
+<h1 align="center">WirelessRoboAgent</h1>
+
+<h2 align="center">A Unified Agent Framework for Wireless Robotics</h2>
 
 <p align="center">
-  <b>An agent harness you can run as a CLI and build on as an SDK.</b>
+  <a href="https://github.com/ygyang11/WirelessRoboAgent"><img src="https://img.shields.io/badge/Paper-Repository-blue?logo=github" alt="Paper repository"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-blue" alt="Python 3.11+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License: MIT"></a>
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License MIT">
-  <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python 3.11+">
-  <a href="README_ZH.md"><img src="https://img.shields.io/badge/📄_中文文档-click-lightgrey" alt="中文文档"></a>
-</p>
+WirelessRoboAgent is a unified agent framework for diverse wireless robotics
+tasks, presented in *Agentic AI and Benchmarking for Intelligent Wireless Robotics*.
+Its software implementation, **Arktor**, combines *ark* with the agentive suffix
+*-tor*, reflecting the goal of bringing knowledge, capabilities, and experience
+together to support sustained research.
 
-Arktor is a lightweight, hackable framework for building AI agents — and the tools, context,
-and orchestration around them. It comes two ways in one package:
+## Framework
 
-- **`arktor`** — an interactive agent in your terminal: streaming output, tool use, plan
-  mode, persistent sessions, multimodal input.
-- **`arktor-sdk`** — the Python SDK underneath: agents, tools, orchestration, memory,
-  tracing, and hooks, every piece designed to be subclassed and swapped.
+[![WirelessRoboAgent integrates unified reasoning and adaptive refinement, task-adaptive capability augmentation, and long-horizon autonomy.](docs/images/wirelessroboagent.png)](docs/images/wirelessroboagent.png)
 
----
+- **Unified Reasoning and Adaptive Refinement.** Maintains task-level reasoning
+  in a unified context, revises explicit plans as understanding develops, and
+  uses execution evidence to refine models, methods, and implementations.
 
-## Features
+- **Task-Adaptive Capability Augmentation.** Combines paper and web search,
+  expert guidance, and interactive task execution with main-agent coordination
+  and on-demand assistance from subagents with independent contexts.
 
-- **Batteries-included tools** — filesystem and a sandboxable terminal, web search & fetch,
-  sub-agents, todo lists, cross-session memory, and skills..., plus research tools — paper search across
-  arXiv & Semantic Scholar, and a document_parser that turns PDFs, scans, and images into
-  clean markdown. Images and PDFs flow through as first-class attachments.
-- **Observability built in** — every LLM call, tool, and step is a traced span, exported
-  to the console and JSONL and surfaced through a rich set of hooks (the CLI's live
-  progress runs on them).
-- **Agents & orchestration** — ReAct, Plan-and-Execute, and Conversational agents,
-  composable into pipelines, DAGs, routers, or teams.
-- **Hackable throughout** — provider-agnostic LLMs with retry and fallback, 3-layer memory
-  with auto-compression, approval policies, an optional Docker sandbox, and tuned built-in
-  prompts — clean extension point.
+- **Long-Horizon Autonomy.** Uses context compression and session continuity
+  to sustain task progress, and project and global memory to retain experience
+  for reuse across tasks.
 
----
+## Getting started
 
-## Install
+### Installation
+
+Install the CLI with its built-in tools:
 
 ```bash
-git clone https://github.com/ygyang11/Arktor.git
+git clone --branch research/wireless-robo-agent \
+  https://github.com/ygyang11/Arktor.git
 cd Arktor
-
-# create an environment (pick one)
-conda create -n arktor python=3.11 && conda activate arktor
-# or: python -m venv .venv && source .venv/bin/activate
-# or: uv venv && source .venv/bin/activate
-
-pip install -e ".[cli,app]"     # arktor CLI + built-in tools
+conda create -n arktor python=3.11
+conda activate arktor
+python -m pip install -e ".[cli,app]"
 ```
 
-For SDK use without the REPL:
+### Configuration
+
+From the repository root, create a user configuration:
 
 ```bash
-pip install -e ".[dev,app]"
+mkdir -p ~/.arktor
+cp arktor_example.yaml ~/.arktor/arktor.yaml
 ```
 
-Add the `sandbox` extra for Docker-isolated tool execution.
-
-### Configure
-
-You only need to set three fields — model, API key, and base URL. Either drop an
-`arktor.yaml` in your project (copy [`arktor_example.yaml`](arktor_example.yaml)), or run
-`arktor` once and it writes a starter `~/.arktor/arktor.yaml` for you to edit:
+Set the model and credentials under `llm`:
 
 ```yaml
 llm:
-  provider: openai           # or: anthropic
-  model: gpt-5.5
-  api_key: sk-...
-  base_url: ...
+  provider: openai
+  model: "__SET_MODEL__"
+  api_key: "__SET_API_KEY__"
+  base_url: "__SET_BASE_URL__"
 ```
 
-Everything else has sensible defaults and is fully customizable; common fields can also be
-overridden with `ARKTOR_`-prefixed env vars (see [`.env_example`](.env_example)).
+Use `openai` for OpenAI-compatible services or `anthropic` for Anthropic.
+A working-directory `arktor.yaml` takes priority over `~/.arktor/arktor.yaml`.
+See [arktor_example.yaml](arktor_example.yaml) for specific settings.
 
----
+## Usage
 
-## Quickstart
-
-### The CLI
-
-<p align="center">
-  <img src="docs/images/cli.png" alt="arktor CLI" width="100%">
-</p>
+Start the agent in your research workspace:
 
 ```bash
 arktor
 ```
 
-`arktor` starts an interactive agent rooted at your project directory. Attach files with
-`@path`, run a shell command with `!cmd`, and open commands with `/`. Sessions persist, so
-you can `/resume` later, and approval can switch between **Ask · Auto · Yolo** at any time.
+Describe the wireless robotics problem, including its operating conditions,
+objectives, and constraints. The agent draws on relevant capability to develop system
+models and methods, implement and evaluate solutions, and interpret results.
+Execution feedback guides revisions to task understanding, design choices,
+and implementation.
 
-Slash commands cover the whole loop — the most-used ones:
+<p align="center">
+  <img src="docs/images/wirelessroboagent-cli.png" alt="WirelessRoboAgent command-line interface showing a wireless robotics research interaction." width="100%">
+</p>
 
-- **Plan & review** — `/plan` (read-only planning), `/review` (review the working diff),
-  `/diff`, `/init` (generate `AGENTS.md`)
-- **Session** — `/resume`, `/new`, `/compact` (compress context), `/export`, `/status`,
-  `/context`
-- **Model & runtime** — `/model`, `/effort`, `/provider`, `/permissions`, `/skills`,
-  `/tasks`
+To evaluate agents on the 60 wireless robotics tasks, use
+[WirelessRoboBench](https://github.com/ygyang11/Arktor-Bench-SelfEvolution/tree/research/wireless-robo-agent).
 
-Run `/help` to list them all.
+## Citation
 
-### The SDK
+For the paper citation, see the [paper repository](https://github.com/ygyang11/WirelessRoboAgent#citation).
 
-Ten lines for a working tool-calling agent:
-
-```python
-import asyncio
-from agent_harness import ReActAgent, tool, HarnessConfig
-
-@tool
-def calculate(expression: str) -> str:
-    """Evaluate a math expression.
-
-    Args:
-        expression: A Python math expression like '2 + 3 * 4'.
-    """
-    return str(eval(expression))
-
-async def main():
-    agent = ReActAgent(
-        name="assistant",
-        tools=[calculate],
-        config=HarnessConfig.load("arktor.yaml"),
-    )
-    result = await agent.run("What is (42 * 37 + 15) / 3?")
-    print(result.output, "·", result.step_count, "steps")
-
-asyncio.run(main())
-```
-
-`@tool` derives the JSON schema from your type hints and docstring. Core types import from `agent_harness`; the built-in tools live in `agent_app`
-(e.g. `from agent_app.tools import WEB_TOOLS, FILESYSTEM_TOOLS`).
-
----
-
-## Examples
-
-For SDK users, Ready-to-run scripts under [`examples/`](examples/):
-
-- **agents/** — [`react_agent`](examples/agents/react_agent.py),
-  [`plan_and_execute`](examples/agents/plan_and_execute.py),
-  [`multi_agent_pipeline`](examples/agents/multi_agent_pipeline.py), [`agent_team`](examples/agents/agent_team.py),
-  [`deep_research`](examples/agents/deep_research.py).
-- **features/** — [`coding_demo`](examples/features/coding_demo.py), [`session_demo`](examples/features/session_demo.py),
-  [`skill_demo`](examples/features/skill_demo.py).
-
-```bash
-python examples/agents/react_agent.py        # ReAct loop with custom tools
-```
-
----
-
-## Contributing
-
-Contributions are welcome. For
-anything substantial, please open an issue to discuss the approach first, and keep changes
-consistent with the existing style. Before opening a PR, make sure the checks CI runs all pass.
+## License
 
 Released under the [MIT License](LICENSE).
