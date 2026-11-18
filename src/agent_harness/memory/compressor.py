@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,12 @@ from agent_harness.utils.token_counter import count_messages_tokens, count_token
 if TYPE_CHECKING:
     from agent_harness.core.config import MemoryConfig
     from agent_harness.llm.base import BaseLLM
+    from agent_harness.llm.types import LLMResponse
+
+SummaryCall = Callable[
+    ["BaseLLM", list[Message], dict[str, Any]],
+    Awaitable["LLMResponse"],
+]
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +159,7 @@ class ContextCompressor:
         prune_tail_turns: int = 3,
     ) -> None:
         self._llm = llm
+        self._summary_call: SummaryCall | None = None
         self._threshold = threshold
         self._retain_count = retain_count
         self._summary_max_tokens = summary_max_tokens
@@ -175,6 +183,10 @@ class ContextCompressor:
     def rebind(self, *, llm: BaseLLM, model: str) -> None:
         self._llm = llm
         self._model = model
+
+    def bind_summary_call(self, callback: SummaryCall | None) -> None:
+        """Bind the caller used to execute summary model requests."""
+        self._summary_call = callback
 
     def clone(self, *, scope: str | None = None) -> ContextCompressor:
         return ContextCompressor(
@@ -422,13 +434,14 @@ class ContextCompressor:
             kwargs["max_tokens"] = self._summary_max_tokens
 
         try:
-            response = await self._llm.generate_with_events(
-                [
-                    Message.system(_SUMMARY_SYSTEM_PROMPT),
-                    Message.user(user_content),
-                ],
-                **kwargs,
-            )
+            messages = [
+                Message.system(_SUMMARY_SYSTEM_PROMPT),
+                Message.user(user_content),
+            ]
+            if self._summary_call is None:
+                response = await self._llm.generate_with_events(messages, **kwargs)
+            else:
+                response = await self._summary_call(self._llm, messages, kwargs)
             return response.message.content or "", response.usage
         except Exception as e:
             logger.debug("Compression LLM call failed: %s — skipping", e)

@@ -209,6 +209,7 @@ class BaseAgent(ABC, EventEmitter):
         compressor = self.context.short_term_memory.compressor
         if compressor is not None:
             compressor.rebind(llm=self.sub_llm, model=self.llm.model_name)
+            compressor.bind_summary_call(self._call_summary)
             self.context._compressor = compressor
         elif self.context.config.memory.strategy == "summarize":
             self._init_compressor()
@@ -221,8 +222,32 @@ class BaseAgent(ABC, EventEmitter):
             memory_config=self.context.config.memory,
             model=self.llm.model_name,
         )
+        compressor.bind_summary_call(self._call_summary)
         self.context.short_term_memory.compressor = compressor
         self.context._compressor = compressor
+
+    async def _call_summary(
+        self,
+        runtime_llm: BaseLLM,
+        messages: list[Message],
+        kwargs: dict[str, Any],
+    ) -> LLMResponse:
+        """Generate a summary with call attribution and response hooks."""
+        call_context = self._next_call_context("compact", runtime_llm)
+        request_kwargs = with_request_context(
+            kwargs,
+            call_context,
+            enabled=self.context.config.llm.send_request_context,
+        )
+        response = await runtime_llm.generate_with_events(messages, **request_kwargs)
+        await self.hooks.on_llm_response(
+            self.name,
+            messages,
+            response,
+            call_context=call_context,
+            tools=None,
+        )
+        return response
 
     def _make_builder_context(self) -> dict[str, Any]:
         """Prepare context dict for SystemPromptBuilder.build()."""
