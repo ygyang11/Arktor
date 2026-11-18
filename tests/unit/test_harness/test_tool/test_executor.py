@@ -196,6 +196,98 @@ class TestToolExecutorTimeout:
         assert not any(r.levelno >= logging.WARNING for r in caplog.records)
 
 
+class _GatedTool(BaseTool):
+    def __init__(self, *, swallow: bool = False, fail: bool = False) -> None:
+        super().__init__(name="gated", description="Test resource lifetime")
+        self.started = asyncio.Event()
+        self.cleaning = asyncio.Event()
+        self.release = asyncio.Event()
+        self.released = False
+        self.swallow = swallow
+        self.fail = fail
+
+    async def execute(self, **kwargs: Any) -> str:
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cleaning.set()
+            await self.release.wait()
+            self.released = True
+            if self.fail:
+                raise RuntimeError("cleanup failure")
+            if self.swallow:
+                return "recovered"
+            raise
+        raise AssertionError("tool should be cancelled")
+
+
+class TestToolExecutorCancellation:
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_repeated_cancel_waits_for_resource_release(self, stream: bool) -> None:
+        tool = _GatedTool()
+        executor = _make_executor(tool, config=ToolConfig(default_timeout=0.03))
+        call = ToolCall(name=tool.name, arguments={})
+
+        async def consume() -> None:
+            async for _ in executor.execute_stream([call]):
+                pass
+
+        task = asyncio.create_task(consume()) if stream else asyncio.create_task(executor.execute(call))
+        try:
+            if stream:
+                await asyncio.wait_for(tool.started.wait(), timeout=2)
+                task.cancel()
+                await asyncio.wait_for(tool.cleaning.wait(), timeout=2)
+                await asyncio.sleep(0.06)
+                task.cancel()
+            else:
+                await asyncio.wait_for(tool.cleaning.wait(), timeout=2)
+                task.cancel()
+                await asyncio.sleep(0)
+                task.cancel()
+
+            await asyncio.sleep(0)
+            assert not task.done()
+        finally:
+            tool.release.set()
+
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        assert tool.released
+
+    @pytest.mark.parametrize("swallow,fail", [(False, False), (True, False), (False, True)])
+    async def test_timeout_preserves_cleanup_result(self, swallow: bool, fail: bool) -> None:
+        tool = _GatedTool(swallow=swallow, fail=fail)
+        executor = _make_executor(tool, config=ToolConfig(default_timeout=0.03))
+        task = asyncio.create_task(executor.execute(ToolCall(name=tool.name, arguments={})))
+        try:
+            await asyncio.wait_for(tool.cleaning.wait(), timeout=2)
+        finally:
+            tool.release.set()
+        result = await asyncio.wait_for(task, timeout=2)
+
+        assert tool.released
+        assert result.is_error == (not swallow)
+        expected = "cleanup failure" if fail else "recovered" if swallow else "timed out"
+        assert expected in result.content
+
+    async def test_external_cancel_not_swallowed(self) -> None:
+        tool = _GatedTool(swallow=True)
+        executor = _make_executor(tool)
+        task = asyncio.create_task(executor.execute(ToolCall(name=tool.name, arguments={})))
+        try:
+            await asyncio.wait_for(tool.started.wait(), timeout=2)
+            task.cancel()
+            await asyncio.wait_for(tool.cleaning.wait(), timeout=2)
+        finally:
+            tool.release.set()
+
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        assert tool.released
+
+
 class TestToolExecutorBatch:
     @pytest.mark.asyncio
     async def test_batch_execution(self) -> None:

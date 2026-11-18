@@ -20,6 +20,10 @@ async def collect_results(agent: BaseAgent) -> bool:
     return bool(await agent._collect_background_results())
 
 
+async def collect_next_batch(agent: BaseAgent) -> bool:
+    return await agent._collect_next_background_batch()
+
+
 def cancel_all(agent: BaseAgent) -> int:
     return agent._bg_manager.cancel_all()
 

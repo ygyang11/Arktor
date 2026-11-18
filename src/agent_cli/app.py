@@ -20,6 +20,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="run a single task non-interactively, print the result, and exit",
     )
     parser.add_argument(
+        "--max-steps", type=int, dest="max_steps", metavar="N",
+        default=None,
+        help="Maximum agent steps across task.",
+    )
+    parser.add_argument(
         "--max-turns", type=int, dest="max_turns", metavar="N",
         default=None,
         help=(
@@ -193,6 +198,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.output_format is not None and args.prompt is None:
         print("arktor: --output-format requires -p/--prompt", file=sys.stderr)
+        return 2
+    if args.max_steps is not None and args.prompt is None:
+        print("arktor: --max-steps requires -p/--prompt", file=sys.stderr)
         return 2
     if args.max_turns is not None and args.prompt is None:
         print("arktor: --max-turns requires -p/--prompt", file=sys.stderr)

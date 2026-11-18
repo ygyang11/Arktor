@@ -319,7 +319,7 @@ async def run_repl(
                     console.print(f"[error]Approval handler failed: {e}[/error]")
                 continue
 
-            # 2 bg result collect — auto-trigger agent.run on completion
+            # 2 bg result collect — auto-trigger agent.run_turn on completion
             if await background.collect_results(agent):
                 lead = "\n" if state.prompt_orphaned else ""
                 state.prompt_orphaned = False
@@ -612,7 +612,7 @@ async def _run(
         cli_hooks.begin_turn(turn_ctx)
 
         task = asyncio.create_task(
-            agent.run(text, session=session_backend, after_input_appended=cb),
+            agent.run_turn(text, session=session_backend, after_input_appended=cb),
         )
         try:
             with bind_work(task):

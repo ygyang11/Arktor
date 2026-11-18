@@ -9,11 +9,15 @@ Covers:
 """
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
-from agent_harness.agent.base import StepResult
+from agent_harness.agent.base import AgentResult, BaseAgent, StepResult
 from agent_harness.agent.conversational import ConversationalAgent
 from agent_harness.approval import (
     ApprovalDecision,
@@ -25,8 +29,11 @@ from agent_harness.approval import (
 from agent_harness.context.context import AgentContext
 from agent_harness.context.state import AgentState
 from agent_harness.core.config import HarnessConfig, LLMConfig, MemoryConfig, TracingConfig
-from agent_harness.core.message import Message
+from agent_harness.core.errors import MaxStepsExceededError
+from agent_harness.core.message import Message, ToolCall, ToolResult
 from agent_harness.hooks import DefaultHooks, TracingHooks
+from agent_harness.llm.types import Usage
+from agent_harness.session import InMemorySession
 from agent_harness.tool.base import BaseTool
 from tests.conftest import MockLLM, MockTool
 
@@ -41,6 +48,324 @@ class _FailsOnceAgent(ConversationalAgent):
             self._should_fail = False
             raise RuntimeError("intentional failure")
         return await super().step()
+
+
+class _CountingAgent(BaseAgent):
+    def __init__(self, turns: list[int], **kwargs: Any) -> None:
+        super().__init__(name="counter", llm=MockLLM(), hooks=DefaultHooks(), **kwargs)
+        self.turns = turns
+        self.count = 0
+        self.turn = 0
+        self.ready = asyncio.Event()
+        self.released = False
+        self.spawn_on_finish: Callable[[], None] | None = None
+
+    async def step(self) -> StepResult:
+        self.count += 1
+        self._run_usage = self._run_usage + Usage(total_tokens=1)
+        if self.count == self.turns[self.turn]:
+            self.count = 0
+            self.turn += 1
+            if self.spawn_on_finish is not None:
+                self.spawn_on_finish()
+            return StepResult(response=f"turn-{self.turn}")
+        return StepResult(action=[ToolCall(name="count", arguments={"step": self.count})])
+
+
+class TestRun:
+    @pytest.fixture(autouse=True)
+    def _isolate_background_directory(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("agent_harness.background.manager._HARNESS_DIR", tmp_path)
+
+    async def test_budget_shared_across_background_turns(self) -> None:
+        agent = _CountingAgent([70, 30], max_steps=100)
+        steps: list[int] = []
+
+        async def background() -> tuple[str, str]:
+            await agent.ready.wait()
+            return "evidence", "completed"
+
+        def launch() -> None:
+            if agent.turn == 1:
+                agent._bg_manager.spawn("tool", "evidence", background())
+
+        async def after_turn(result: AgentResult) -> None:
+            steps.append(len(result.steps))
+            agent.ready.set()
+
+        agent.spawn_on_finish = launch
+        result = await agent.run("task", on_turn_result=after_turn)
+
+        assert steps == [70, 30]
+        assert len(result.steps) == 100 and result.usage.total_tokens == 100
+        assert result.output == "turn-2"
+        assert agent.max_steps == 100
+        assert not agent._bg_manager.has_running()
+
+    async def test_outer_budget_error_preserves_turn_state_and_notifies_once(self) -> None:
+        agent = _CountingAgent([1], max_steps=1)
+        session = InMemorySession("budget")
+        agent.hooks.on_error = AsyncMock()
+
+        async def pending() -> tuple[str, str]:
+            try:
+                agent.ready.set()
+                await asyncio.Event().wait()
+            finally:
+                agent.released = True
+            return "unused", "unused"
+
+        async def after_turn(result: AgentResult) -> None:
+            await agent.ready.wait()
+
+        agent.spawn_on_finish = lambda: agent._bg_manager.spawn("tool", "pending", pending())
+        with pytest.raises(MaxStepsExceededError, match="exhausted the step budget"):
+            await agent.run("task", session=session, on_turn_result=after_turn)
+
+        assert agent.released
+        assert agent.context.state.current == AgentState.FINISHED
+        state = await session.load_state()
+        assert state is not None and state.agent_state == "finished"
+        assert any("Background Task Cancelled" in (msg.content or "") for msg in state.messages)
+        agent.hooks.on_error.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("max_steps", "cleanup_error"), [(1, False), (2, False), (2, True)],
+    )
+    async def test_run_returns_after_cancelled_background_cleanup(
+        self, max_steps: int, cleanup_error: bool,
+    ) -> None:
+        agent = _CountingAgent([1, 1], max_steps=max_steps)
+        cleaning = asyncio.Event()
+        release = asyncio.Event()
+
+        async def background() -> tuple[str, str]:
+            try:
+                agent.ready.set()
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleaning.set()
+                await release.wait()
+                if cleanup_error:
+                    raise RuntimeError("cleanup failure")
+                return "partial output", "partial result"
+            return "unused", "unused"
+
+        task_id = agent._bg_manager.spawn("tool", "pending", background())
+
+        async def after_turn(result: AgentResult) -> None:
+            if agent.turn == 1:
+                await agent.ready.wait()
+                assert agent._bg_manager.cancel(task_id)
+
+        run = asyncio.create_task(agent.run("task", on_turn_result=after_turn))
+        try:
+            await asyncio.wait_for(cleaning.wait(), timeout=2)
+            assert not run.done()
+        finally:
+            release.set()
+
+        result = await asyncio.wait_for(run, timeout=2)
+        assert result.output == "turn-1" and len(result.steps) == 1
+        task = agent._bg_manager.get_task(task_id)
+        assert task is not None and task.status == "cancelled"
+        assert task.asyncio_task is not None and task.asyncio_task.done()
+        assert agent._bg_manager.collect_completed() == []
+
+    async def test_run_turn_does_not_drain_background(self) -> None:
+        agent = _CountingAgent([1])
+
+        async def pending() -> tuple[str, str]:
+            await agent.ready.wait()
+            return "done", "done"
+
+        agent.spawn_on_finish = lambda: agent._bg_manager.spawn("tool", "pending", pending())
+        try:
+            result = await asyncio.wait_for(agent.run_turn("task"), timeout=2)
+            assert result.output == "turn-1" and agent._bg_manager.has_running()
+            agent.ready.set()
+            await agent._bg_manager.wait_next()
+        finally:
+            await agent._bg_manager.shutdown()
+
+    @pytest.mark.parametrize("entry", ["run", "run_turn"])
+    async def test_invalid_budget_does_not_mutate_memory(self, entry: str) -> None:
+        agent = _CountingAgent([1])
+        before = list(await agent.context.short_term_memory.get_context_messages())
+
+        with pytest.raises(ValueError, match="positive"):
+            await getattr(agent, entry)("task", max_steps=0)
+
+        assert before == await agent.context.short_term_memory.get_context_messages()
+
+    async def test_task_budget_resets_and_override_does_not_change_default(self) -> None:
+        agent = _CountingAgent([1, 1], max_steps=3)
+        assert (await agent.run("first", max_steps=1)).output == "turn-1"
+        assert (await agent.run("second", max_steps=1)).output == "turn-2"
+        assert agent.max_steps == 3
+
+    async def test_callback_error_preserved_and_cleanup_waited(self) -> None:
+        agent = _CountingAgent([1])
+        cleaning = asyncio.Event()
+        release = asyncio.Event()
+        failure = RuntimeError("callback")
+
+        async def pending() -> tuple[str, str]:
+            try:
+                agent.ready.set()
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+                agent.released = True
+            return "unused", "unused"
+
+        async def after_turn(result: AgentResult) -> None:
+            await agent.ready.wait()
+            raise failure
+
+        agent.spawn_on_finish = lambda: agent._bg_manager.spawn("tool", "pending", pending())
+        task = asyncio.create_task(agent.run("task", on_turn_result=after_turn))
+        try:
+            await asyncio.wait_for(cleaning.wait(), timeout=2)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+        finally:
+            release.set()
+
+        with pytest.raises(RuntimeError) as caught:
+            await asyncio.wait_for(task, timeout=2)
+        assert caught.value is failure and agent.released
+
+    async def test_restore_failure_does_not_save_current_context(self) -> None:
+        agent = _CountingAgent([1])
+        session = InMemorySession("broken")
+        failure = OSError("read failed")
+        session.load_state = AsyncMock(side_effect=failure)
+        session.save_state = AsyncMock()
+
+        with pytest.raises(OSError) as caught:
+            await agent.run("task", session=session)
+
+        assert caught.value is failure
+        session.save_state.assert_not_awaited()
+
+    @pytest.mark.parametrize("fail_turn", [False, True])
+    async def test_save_failure_only_replaces_success(self, fail_turn: bool) -> None:
+        agent = _CountingAgent([2 if fail_turn else 1], max_steps=1)
+        session = InMemorySession("save")
+        session.save_state = AsyncMock(side_effect=OSError("save failed"))
+
+        with pytest.raises(MaxStepsExceededError if fail_turn else OSError):
+            await agent.run("task", session=session)
+
+    async def test_multiple_background_batches_and_followup_spawn(self) -> None:
+        agent = _CountingAgent([1, 1, 1, 1], max_steps=4)
+        releases = [asyncio.Event() for _ in range(3)]
+        task_ids: list[str] = []
+        observed: list[str] = []
+
+        async def work(index: int) -> tuple[str, str]:
+            await releases[index].wait()
+            return f"output-{index}", f"evidence-{index}"
+
+        def launch() -> None:
+            if agent.turn == 1:
+                task_ids.extend(
+                    agent._bg_manager.spawn("tool", f"batch-{index}", work(index))
+                    for index in (0, 1)
+                )
+            elif agent.turn == 2:
+                task_ids.append(agent._bg_manager.spawn("tool", "batch-2", work(2)))
+
+        async def after_turn(result: AgentResult) -> None:
+            observed.append(result.output)
+            texts = [message.content or "" for message in result.messages]
+            if agent.turn > 1:
+                assert any(f"evidence-{agent.turn - 2}" in text for text in texts)
+            if agent.turn <= 3:
+                releases[agent.turn - 1].set()
+
+        agent.spawn_on_finish = launch
+        result = await asyncio.wait_for(agent.run("task", on_turn_result=after_turn), timeout=2)
+
+        assert observed == ["turn-1", "turn-2", "turn-3", "turn-4"]
+        assert result.output == "turn-4" and len(result.steps) == 4
+        assert result.usage.total_tokens == 4
+        messages = [message.content or "" for message in result.messages]
+        for index, task_id in enumerate(task_ids):
+            assert sum(f"[Background Task Completed] {task_id}" in text for text in messages) == 1
+            task = agent._bg_manager.get_task(task_id)
+            assert task.status == "completed" and task.asyncio_task.done()
+            assert Path(task.result.output_path).read_text() == f"output-{index}"
+        assert not agent._bg_manager.has_running()
+
+    async def test_failed_background_result_is_delivered_once(self) -> None:
+        agent = _CountingAgent([1, 1], max_steps=2)
+
+        async def fail() -> tuple[str, str]:
+            await agent.ready.wait()
+            raise RuntimeError("background evidence unavailable")
+
+        def launch() -> None:
+            if agent.turn == 1:
+                agent._bg_manager.spawn("tool", "failure", fail())
+
+        async def after_turn(result: AgentResult) -> None:
+            agent.ready.set()
+
+        agent.spawn_on_finish = launch
+        result = await agent.run("task", on_turn_result=after_turn)
+
+        assert result.output == "turn-2"
+        failures = [
+            message for message in result.messages
+            if "[Background Task Failed]" in (message.content or "")
+        ]
+        assert len(failures) == 1
+        assert "background evidence unavailable" in failures[0].content
+        assert failures[0].metadata["is_background_result"]
+        assert agent._bg_manager.collect_completed() == []
+
+    async def test_outer_budget_failure_preserves_parent_pipeline_trace(self) -> None:
+        from agent_harness.orchestration.pipeline import Pipeline, PipelineStep
+
+        hooks = TracingHooks(exporter="none")
+        hooks.on_error = AsyncMock(wraps=hooks.on_error)
+        child = _CountingAgent([1], max_steps=1)
+        child.hooks = hooks
+
+        async def pending() -> tuple[str, str]:
+            await asyncio.Event().wait()
+            return "unused", "unused"
+
+        child.spawn_on_finish = lambda: child._bg_manager.spawn("tool", "pending", pending())
+        pipeline = Pipeline([PipelineStep(agent=child)], hooks=hooks)
+        try:
+            with pytest.raises(MaxStepsExceededError):
+                await pipeline.run("task")
+            assert hooks._depth == 1
+            assert len(hooks._pipeline_span_stack) == 1
+            parent_span = hooks._pipeline_span_stack[0]
+            trace_id = hooks._trace_id
+            assert parent_span in hooks._span_stack and parent_span.end_time is None
+            hooks.on_error.assert_not_awaited()
+
+            following = _CountingAgent([1])
+            following.hooks = hooks
+            await following.run("continue within parent")
+
+            assert hooks._trace_id == trace_id and hooks._depth == 1
+            assert hooks._pipeline_span_stack == [parent_span]
+            agent_spans = [span for span in hooks._all_spans if span.kind == "agent"]
+            assert len(agent_spans) == 2
+            assert all(span.parent_span_id == parent_span.span_id for span in agent_spans)
+        finally:
+            await hooks.on_pipeline_end("pipeline")
+        assert hooks._depth == 0 and not hooks._span_stack
 
 
 class TestAgentReuse:
@@ -603,6 +928,75 @@ class TestExecuteToolsTwoPhase:
         assert len(tool_msgs) == 2
         assert tool_msgs[0].tool_result is not None
         assert tool_msgs[1].tool_result is not None
+
+    @pytest.mark.parametrize("hook_error", [False, True])
+    async def test_run_turn_waits_for_tool_cleanup(self, hook_error: bool) -> None:
+        from agent_harness.agent.react import ReActAgent
+        from agent_harness.core.config import ToolConfig
+        from agent_harness.llm.types import LLMResponse
+
+        started = asyncio.Event()
+        cleaning = asyncio.Event()
+        release = asyncio.Event()
+        released = asyncio.Event()
+
+        class _GatedTool(BaseTool):
+            def __init__(self) -> None:
+                super().__init__(name="gated", description="Test resource lifetime")
+
+            async def execute(self, **kwargs: Any) -> str:
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cleaning.set()
+                    await release.wait()
+                    released.set()
+                    if hook_error:
+                        raise RuntimeError("cleanup failure")
+                    raise
+                raise AssertionError("tool should be cancelled")
+
+        class _QuickTool(BaseTool):
+            def __init__(self) -> None:
+                super().__init__(name="quick", description="Wait until sibling starts")
+
+            async def execute(self, **kwargs: Any) -> str:
+                await started.wait()
+                return "quick result"
+
+        class _HookFailure(Exception):
+            pass
+
+        class _FailingHook(DefaultHooks):
+            async def on_tool_result(self, agent_name: str, result: ToolResult) -> None:
+                raise _HookFailure("original hook")
+
+        tools = [_GatedTool(), _QuickTool()] if hook_error else [_GatedTool()]
+        calls = [ToolCall(name=tool.name, arguments={}) for tool in tools]
+        llm = MockLLM(responses=[LLMResponse(message=Message.assistant(None, tool_calls=calls))])
+        agent = ReActAgent(
+            name="test", llm=llm, tools=tools,
+            hooks=_FailingHook() if hook_error else DefaultHooks(),
+            config=HarnessConfig(tool=ToolConfig(default_timeout=20)),
+        )
+        task = asyncio.create_task(agent.run_turn("test"))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+            if not hook_error:
+                task.cancel()
+            await asyncio.wait_for(cleaning.wait(), timeout=2)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+        finally:
+            release.set()
+
+        with pytest.raises(_HookFailure if hook_error else asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        assert released.is_set()
 
 
 class _SelfHealTracker(DefaultHooks):

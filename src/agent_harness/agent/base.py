@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -419,13 +420,158 @@ class BaseAgent(ABC, EventEmitter):
         input: str | Message,
         *,
         session: str | BaseSession | None = None,
+        after_input_appended: (
+            Callable[[BaseAgent, Message, str], Awaitable[None]] | None
+        ) = None,
+        on_turn_result: Callable[[AgentResult], Awaitable[None]] | None = None,
+        max_steps: int | None = None,
+    ) -> AgentResult:
+        """Run a task, including follow-up turns for background results.
+
+        Call on_turn_result after each completed turn. Combine steps and usage
+        across turns; return output and messages from the final turn.
+        max_steps limits this entire task, defaulting to self.max_steps.
+        """
+        from agent_harness.session.base import resolve_session
+
+        step_limit = self.max_steps if max_steps is None else max_steps
+        if step_limit <= 0:
+            raise ValueError("max_steps must be positive.")
+
+        resolved_session = resolve_session(session)
+        remaining_steps = step_limit
+        steps: list[StepResult] = []
+        usage = Usage()
+        next_input = input
+        first_turn = True
+        started = False
+
+        async def after_input(
+            agent: BaseAgent, message: Message, text: str,
+        ) -> None:
+            nonlocal started
+            started = True
+            if after_input_appended is not None:
+                await after_input_appended(agent, message, text)
+
+        try:
+            while True:
+                result = await self.run_turn(
+                    next_input,
+                    session=resolved_session,
+                    after_input_appended=after_input if first_turn else None,
+                    max_steps=remaining_steps,
+                )
+                first_turn = False
+                steps.extend(result.steps)
+                remaining_steps -= len(result.steps)
+                usage = usage + result.usage
+                if on_turn_result is not None:
+                    await on_turn_result(result)
+
+                if remaining_steps <= 0:
+                    if (
+                        await self._collect_background_results()
+                        or self._bg_manager.has_running()
+                    ):
+                        raise MaxStepsExceededError(
+                            f"Agent '{self.name}' exhausted the step budget",
+                        )
+                elif await self._collect_next_background_batch():
+                    next_input = Message.system(
+                        "[Background Task Notification] Process the completed "
+                        "background task results.",
+                        metadata={"is_background_result": True},
+                    )
+                    continue
+
+                await self._bg_manager.shutdown()
+                return AgentResult(
+                    output=result.output,
+                    messages=result.messages,
+                    steps=steps,
+                    usage=usage,
+                )
+        except BaseException:
+            cleanup = asyncio.create_task(
+                self._cleanup_failed_run(resolved_session if started else None),
+            )
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            try:
+                cleanup.result()
+            except BaseException:
+                logger.warning("Run cleanup failed.", exc_info=True)
+            raise
+
+    async def _collect_next_background_batch(self) -> bool:
+        """Collect results, waiting while background work remains."""
+        while True:
+            if await self._collect_background_results():
+                return True
+            if not self._bg_manager.has_running():
+                return False
+            await self._bg_manager.wait_next()
+
+    async def _cleanup_failed_run(self, session: BaseSession | None) -> None:
+        """Stop background work and persist its final state after a failed run."""
+        running = [
+            task for task in self._bg_manager.get_all() if task.status == "running"
+        ]
+        try:
+            await self._bg_manager.shutdown()
+        finally:
+            if not self.context.state.is_terminal:
+                self.context.state.reset()
+
+        await self._collect_background_results()
+        for task in running:
+            if task.status != "cancelled":
+                continue
+            note = (
+                f"[Background Task Cancelled] {task.task_id} ({task.tool_name}): "
+                f"{task.description} — Run ended before completion."
+            )
+            await self.context.short_term_memory.add_message(
+                Message.system(note, metadata={"is_background_result": True}),
+            )
+        if session is not None:
+            await self._save_session(session)
+
+    async def _save_session(self, session: BaseSession) -> None:
+        """Persist the current session using the existing snapshot fields."""
+        now = datetime.now()
+        state = self.context.to_session_state(session.session_id, agent_name=self.name)
+        state.created_at = self._ensure_session_created_at()
+        state.updated_at = now
+        state.metadata.update(self._session_metadata_extras)
+        tool_states = self.tool_registry.save_states()
+        if tool_states:
+            state.metadata["_tool_states"] = tool_states
+        state.metadata["_approval_mode"] = self._approval.mode
+        grants = self._approval.export_session_grants()
+        if grants:
+            state.metadata["_approval_grants"] = grants
+        await session.save_state(state)
+
+    async def run_turn(
+        self,
+        input: str | Message,
+        *,
+        session: str | BaseSession | None = None,
         after_input_appended: (Callable[[BaseAgent, Message, str], Awaitable[None]] | None) = None,
+        max_steps: int | None = None,
     ) -> AgentResult:
         """Main execution loop.
 
         Repeatedly calls step() until:
         1. step() returns a final response, or
-        2. max_steps is reached.
+        2. the per-turn max_steps limit is reached.
 
         Safe to call multiple times — state is reset automatically when
         the agent is in a terminal state (FINISHED or ERROR).
@@ -436,6 +582,10 @@ class BaseAgent(ABC, EventEmitter):
         after input append + on_run_start, before the first step.
         """
         from agent_harness.session.base import resolve_session
+
+        step_limit = self.max_steps if max_steps is None else max_steps
+        if step_limit <= 0:
+            raise ValueError("max_steps must be positive.")
 
         resolved_session: BaseSession | None = resolve_session(session)
 
@@ -472,12 +622,13 @@ class BaseAgent(ABC, EventEmitter):
         self._loop_detector.reset()
         self._pending_loop_warning = None
         final_output = ""
+        turn_completed = False
 
         try:
             if after_input_appended is not None:
                 await after_input_appended(self, input_msg, input_text)
 
-            for step_num in range(1, self.max_steps + 1):
+            for step_num in range(1, step_limit + 1):
                 # Harvest completed background tasks
                 await self._collect_background_results()
 
@@ -513,7 +664,10 @@ class BaseAgent(ABC, EventEmitter):
             else:
                 # max_steps exceeded
                 self.context.state.transition(AgentState.ERROR)
-                raise MaxStepsExceededError(f"Agent '{self.name}' exceeded {self.max_steps} steps")
+                raise MaxStepsExceededError(
+                    f"Agent '{self.name}' exhausted the step budget",
+                )
+            turn_completed = True
 
         except Exception as e:
             await self.hooks.on_error(self.name, e)
@@ -525,22 +679,12 @@ class BaseAgent(ABC, EventEmitter):
 
         finally:
             if resolved_session:
-                now = datetime.now()
-                ss = self.context.to_session_state(
-                    resolved_session.session_id,
-                    agent_name=self.name,
-                )
-                ss.created_at = self._ensure_session_created_at()
-                ss.updated_at = now
-                ss.metadata.update(self._session_metadata_extras)
-                tool_states = self.tool_registry.save_states()
-                if tool_states:
-                    ss.metadata["_tool_states"] = tool_states
-                ss.metadata["_approval_mode"] = self._approval.mode
-                grants = self._approval.export_session_grants()
-                if grants:
-                    ss.metadata["_approval_grants"] = grants
-                await resolved_session.save_state(ss)
+                try:
+                    await self._save_session(resolved_session)
+                except Exception:
+                    if turn_completed:
+                        raise
+                    logger.warning("Session save failed during error handling.", exc_info=True)
 
         messages = await self.context.short_term_memory.get_context_messages()
         result = AgentResult(
@@ -581,7 +725,7 @@ class BaseAgent(ABC, EventEmitter):
                         input_task = None
                     print("\n[Background task completed]")
                     try:
-                        await self.run(
+                        await self.run_turn(
                             Message.system(
                                 "[Background Task Notification] "
                                 "Process the completed background task results.",
@@ -618,7 +762,7 @@ class BaseAgent(ABC, EventEmitter):
                     if user_input.lower() in exit_commands:
                         break
                     try:
-                        result = await self.run(user_input, session=session)
+                        result = await self.run_turn(user_input, session=session)
                         if not self._stream:
                             print(result.output)
                     except Exception as e:
@@ -631,7 +775,7 @@ class BaseAgent(ABC, EventEmitter):
                     print("\n[Background task completed]")
                     await self._collect_background_results()
                     try:
-                        await self.run(
+                        await self.run_turn(
                             Message.system(
                                 "[Background Task Notification] "
                                 "Process the completed background task results.",
@@ -892,9 +1036,19 @@ class BaseAgent(ABC, EventEmitter):
             await self.hooks.on_tool_result(self.name, r)
 
         if approved:
-            async for tool_result in self.tool_executor.execute_stream(approved):
-                result_map[tool_result.tool_call_id] = tool_result
-                await self.hooks.on_tool_result(self.name, tool_result)
+            results = self.tool_executor.execute_stream(approved)
+            try:
+                async for tool_result in results:
+                    result_map[tool_result.tool_call_id] = tool_result
+                    await self.hooks.on_tool_result(self.name, tool_result)
+            except BaseException:
+                try:
+                    await results.aclose()
+                except BaseException:
+                    logger.debug("Tool result stream cleanup failed.", exc_info=True)
+                raise
+            else:
+                await results.aclose()
 
         # ── Memory: write in original call order (transcript stable) ──
         self.context.state.transition(AgentState.OBSERVING)

@@ -139,6 +139,9 @@ def _parse_task(
             file=sys.stderr,
         )
         return None
+    if args.max_steps is not None and args.max_steps <= 0:
+        print("arktor: --max-steps must be positive", file=sys.stderr)
+        return None
     if args.max_turns is not None:
         if args.max_turns <= 0:
             print("arktor: --max-turns must be positive", file=sys.stderr)
@@ -261,6 +264,7 @@ async def run_headless(args: argparse.Namespace) -> int:
                 save,
                 fmt,
                 args.max_turns,
+                args.max_steps,
             )
         else:
             task_output = await _drive_task(
@@ -268,6 +272,7 @@ async def run_headless(args: argparse.Namespace) -> int:
                 task,
                 backend,
                 fmt,
+                args.max_steps,
             )
     except asyncio.CancelledError:
         interrupted = True
@@ -276,7 +281,7 @@ async def run_headless(args: argparse.Namespace) -> int:
         err = str(exc) or type(exc).__name__
         rc = 1
     finally:
-        if run_started:
+        if goal is not None:
             await _safe(
                 background.collect_results(agent),
                 "collect completed background results",
@@ -286,29 +291,23 @@ async def run_headless(args: argparse.Namespace) -> int:
                     background.cancel_all_with_note(agent),
                     "cancel background tasks",
                 )
-        await _safe(
-            background.shutdown(agent),
-            "shut down background tasks",
-        )
-        if run_started:
+            await _safe(
+                background.shutdown(agent),
+                "shut down background tasks",
+            )
             await _safe(
                 background.collect_results(agent),
                 "collect completed background results",
             )
-
-        if (
-            goal is not None
-            and goal_mode.get_state(agent) is goal
-            and goal.status == "active"
-        ):
-            reason = (
-                "interrupted"
-                if interrupted
-                else f"error: {err}"
-                if err
-                else "goal stopped without a terminal verdict"
-            )
-            goal_mode.pause(agent, reason=reason)
+            if goal_mode.get_state(agent) is goal and goal.status == "active":
+                reason = (
+                    "interrupted"
+                    if interrupted
+                    else f"error: {err}"
+                    if err
+                    else "goal stopped without a terminal verdict"
+                )
+                goal_mode.pause(agent, reason=reason)
 
         if original_mode is not None:
             get_policy(agent).set_mode(original_mode)
@@ -345,7 +344,7 @@ async def run_headless(args: argparse.Namespace) -> int:
         return 0 if goal.status == "complete" else 3
 
     if fmt == "json":
-        if task_output is None:
+        if rc != 0 or task_output is None:
             _emit_error_result(session_id, err)
         else:
             _emit_success_result(
@@ -355,7 +354,7 @@ async def run_headless(args: argparse.Namespace) -> int:
                 task_output.usage,
                 collect_window(agent),
             )
-    elif task_output is not None:
+    elif rc == 0 and task_output is not None:
         print(task_output.output)
     else:
         print(f"arktor: {err}", file=sys.stderr)
@@ -367,28 +366,24 @@ async def _drive_task(
     task: str,
     backend: BaseSession,
     fmt: str,
+    max_steps: int | None = None,
 ) -> _TaskOutput:
-    result = await agent.run(task, session=backend)
-    output = _TaskOutput(
+    next_index = 0
+
+    async def emit_turn(result: AgentResult) -> None:
+        nonlocal next_index
+        if fmt == "json":
+            _emit_step_events(result, next_index)
+        next_index += len(result.steps)
+
+    result = await agent.run(
+        task, session=backend, on_turn_result=emit_turn, max_steps=max_steps,
+    )
+    return _TaskOutput(
         output=result.output,
         num_steps=len(result.steps),
         usage=result.usage,
     )
-    if fmt == "json":
-        _emit_step_events(result, 0)
-
-    while await _collect_next_background_batch(agent):
-        result = await agent.run(
-            _background_notification(),
-            session=backend,
-        )
-        if fmt == "json":
-            _emit_step_events(result, output.num_steps)
-        output.output = result.output
-        output.num_steps += len(result.steps)
-        output.usage = output.usage + result.usage
-
-    return output
 
 
 async def _run_goal_turn(
@@ -399,10 +394,13 @@ async def _run_goal_turn(
     backend: BaseSession,
     save: SaveSession,
     fmt: str,
+    step_limit: int,
 ) -> bool:
     from agent_cli.runtime.goal import mode as goal_mode
 
-    result = await agent.run(inp, session=backend)
+    result = await agent.run_turn(
+        inp, session=backend, max_steps=step_limit - output.num_steps,
+    )
     if goal_mode.get_state(agent) is not goal or goal.status != "active":
         return False
     if goal_mode.record_completed_turn(agent) is None:
@@ -425,10 +423,18 @@ async def _drain_background_for_goal(
     save: SaveSession,
     fmt: str,
     max_turns: int | None,
+    step_limit: int,
 ) -> None:
+    from agent_cli.runtime import background
     from agent_cli.runtime.goal import mode as goal_mode
 
-    while await _collect_next_background_batch(agent):
+    while True:
+        if output.num_steps >= step_limit:
+            await background.collect_results(agent)
+            await save()
+            return
+        if not await _collect_next_background_batch(agent):
+            return
         if (
             goal_mode.get_state(agent) is not goal
             or goal.status != "active"
@@ -445,6 +451,7 @@ async def _drain_background_for_goal(
             backend,
             save,
             fmt,
+            step_limit,
         ):
             return
 
@@ -457,9 +464,12 @@ async def _drive_goal(
     save: SaveSession,
     fmt: str,
     max_turns: int | None,
+    max_steps: int | None = None,
 ) -> None:
     from agent_cli.runtime.goal import driver as goal_driver
     from agent_cli.runtime.goal import mode as goal_mode
+
+    step_limit = agent.max_steps if max_steps is None else max_steps
 
     if not await _run_goal_turn(
         agent,
@@ -469,6 +479,7 @@ async def _drive_goal(
         backend,
         save,
         fmt,
+        step_limit,
     ):
         return
 
@@ -481,6 +492,7 @@ async def _drive_goal(
             save,
             fmt,
             max_turns,
+            step_limit,
         )
 
         if (
@@ -494,16 +506,18 @@ async def _drive_goal(
         status = decision.status
         reason = decision.reason
         continuation = decision.continuation
-        if (
-            continuation is not None
-            and max_turns is not None
-            and goal.turns >= max_turns
-        ):
-            status = "blocked"
-            reason = f"reached --max-turns ({max_turns})"
-            if goal_mode.finish(agent, "blocked", reason) is None:
-                return
-            continuation = None
+        if continuation is not None:
+            limit_reason = ""
+            if max_turns is not None and goal.turns >= max_turns:
+                limit_reason = f"reached --max-turns ({max_turns})"
+            elif output.num_steps >= step_limit:
+                limit_reason = f"reached max_steps ({step_limit})"
+            if limit_reason:
+                status = "blocked"
+                reason = limit_reason
+                if goal_mode.finish(agent, "blocked", reason) is None:
+                    return
+                continuation = None
 
         await save()
         _emit_goal_status(fmt, agent, goal, status, reason)
@@ -519,6 +533,7 @@ async def _drive_goal(
             backend,
             save,
             fmt,
+            step_limit,
         ):
             return
 
@@ -536,9 +551,4 @@ def _background_notification() -> Message:
 async def _collect_next_background_batch(agent: BaseAgent) -> bool:
     from agent_cli.runtime import background
 
-    while True:
-        if await background.collect_results(agent):
-            return True
-        if not background.has_running(agent):
-            return False
-        await background.wait_next(agent)
+    return await background.collect_next_batch(agent)
