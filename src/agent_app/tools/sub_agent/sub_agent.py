@@ -303,7 +303,7 @@ class SubAgentTool(BaseTool):
             llm=child_llm,
             sub_llm=self._agent.sub_llm,
             tools=tools,
-            context=self._agent.context.fork(f"sub.{agent_type}.{seq}"),
+            context=self._agent.context.fork(subagent_name),
             hooks=self._agent.hooks,
             max_steps=max_steps,
             stream=False if background else self._agent._stream,
@@ -312,6 +312,11 @@ class SubAgentTool(BaseTool):
             prompt_builder=prompt_builder,
         )
         child._bg_manager.set_scope(subagent_name)
+        child._parent_name = parent_name
+        child._agent_type = agent_type
+        child._llm_source = (
+            self._agent._llm_source if child_llm is self._agent.llm else "sub"
+        )
         child._usage_source = "background" if background else "subagent"
         # Share parent's sandbox (child reuses the same container / backend)
         child._sandbox = self._agent._sandbox
