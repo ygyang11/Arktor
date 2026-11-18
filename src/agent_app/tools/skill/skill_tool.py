@@ -47,14 +47,26 @@ class SkillTool(BaseTool):
             name="skill_tool",
             description="Load a skill to get specialized instructions for the current task.",
         )
+        self._agent: Any = None
         self._loader: SkillLoader | None = None
         self._loader_dirs_key: tuple[str, ...] | None = None
         self._loader_state_key: tuple[str, ...] | None = None
         self._state_key_checked_at: float = 0.0
 
+    def bind_agent(self, agent: Any) -> None:
+        self._agent = agent
+        self._loader = None
+        self._loader_dirs_key = None
+        self._loader_state_key = None
+        self._state_key_checked_at = 0.0
+
     def _ensure_loader(self, *, force: bool = False) -> SkillLoader:
-        dirs: list[str | Path] = list(HarnessConfig.get().skill.dirs)
-        dirs_key = tuple(str(d) for d in dirs)
+        config = self._agent.context.config if self._agent is not None else HarnessConfig.get()
+        dirs: list[str | Path] = [
+            Path(directory).expanduser().resolve()
+            for directory in config.skill.dirs
+        ]
+        dirs_key = tuple(str(directory) for directory in dirs)
 
         now = time.monotonic()
         ttl_valid = (now - self._state_key_checked_at) < self._STATE_CHECK_INTERVAL
