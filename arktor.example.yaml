@@ -4,22 +4,25 @@
 # Copy this file to `arktor.yaml` and fill in your values.
 # ============================================================
 
+# Supported ARKTOR_* environment overrides take precedence over this file.
+# Service API keys from the environment are used when not configured here.
+
 # --- LLM Provider ---
 llm:
   provider: "openai"            # "openai" | "anthropic"
-  model: "__SET_MODEL__"   # Model identifier (e.g. gpt-5.4, claude-4.6-opus)
+  model: "__SET_MODEL__"        # Model identifier (e.g. gpt-5.4, claude-4.6-opus)
   temperature: 1.0              # Sampling temperature (0.0 – 2.0)
   max_tokens: 32000             # Maximum output tokens
-  api_key: "__SET_API_KEY__"    # API key (overrides env var)
+  api_key: "__SET_API_KEY__"    # API key for the selected provider
   base_url: "__SET_BASE_URL__"  # Custom API endpoint
   timeout: 180.0                # Request timeout in seconds
   max_retries: 5                # Max retry attempts for rate-limit errors
   retry_delay: 1.0              # Initial retry delay in seconds (exponential backoff)
-  reasoning_effort: ""          # "low" | "medium" | "high" | "xhigh/max.."  (leave empty to use model default)
+  reasoning_effort: ""          # "low" | "medium" | "high" | "xhigh/max.."
   sub_model:                    # Context window must be >= memory.max_tokens
     model: ""                   # Empty = use main model
     reasoning_effort: ""        # Empty = use the sub model's default
-
+  send_request_context: false   # Include agent and call identifiers in API request headers
 # --- Tool Execution ---
 tool:
   max_concurrency: 5            # Max parallel tool executions
@@ -70,10 +73,9 @@ paper:
 # --- Skills ---
 skill:
   dirs:                         # Skill directories to scan (must end with "skills")
-    - "~/.arktor/skills" # Personal global skills
-    - "skills"                  # Project root skills
-    # - "/path/to/shared/skills"# Team-shared skills
-
+    - "skills"                  # Project skills, relative to the process cwd
+    - "~/.arktor/skills"        # Personal global skills
+    # - "/path/to/shared/skills" # Team-shared skills
 # --- Approval (Human-in-the-Loop) ---
 approval:
   mode: "never"                 # "never" | "auto" | "ask"
