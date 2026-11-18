@@ -426,6 +426,22 @@ class BaseAgent(ABC, EventEmitter):
             input, session=session, after_input_appended=after_input_appended, max_steps=max_steps,
         )
 
+    async def _save_session(self, session: BaseSession) -> None:
+        """Persist the current session using the existing snapshot fields."""
+        now = datetime.now()
+        state = self.context.to_session_state(session.session_id, agent_name=self.name)
+        state.created_at = self._ensure_session_created_at()
+        state.updated_at = now
+        state.metadata.update(self._session_metadata_extras)
+        tool_states = self.tool_registry.save_states()
+        if tool_states:
+            state.metadata["_tool_states"] = tool_states
+        state.metadata["_approval_mode"] = self._approval.mode
+        grants = self._approval.export_session_grants()
+        if grants:
+            state.metadata["_approval_grants"] = grants
+        await session.save_state(state)
+
     async def run_turn(
         self,
         input: str | Message,
@@ -489,6 +505,7 @@ class BaseAgent(ABC, EventEmitter):
         self._loop_detector.reset()
         self._pending_loop_warning = None
         final_output = ""
+        turn_completed = False
 
         try:
             if after_input_appended is not None:
@@ -533,6 +550,7 @@ class BaseAgent(ABC, EventEmitter):
                 raise MaxStepsExceededError(
                     f"Agent '{self.name}' exhausted the step budget",
                 )
+            turn_completed = True
 
         except Exception as e:
             await self.hooks.on_error(self.name, e)
@@ -544,22 +562,12 @@ class BaseAgent(ABC, EventEmitter):
 
         finally:
             if resolved_session:
-                now = datetime.now()
-                ss = self.context.to_session_state(
-                    resolved_session.session_id,
-                    agent_name=self.name,
-                )
-                ss.created_at = self._ensure_session_created_at()
-                ss.updated_at = now
-                ss.metadata.update(self._session_metadata_extras)
-                tool_states = self.tool_registry.save_states()
-                if tool_states:
-                    ss.metadata["_tool_states"] = tool_states
-                ss.metadata["_approval_mode"] = self._approval.mode
-                grants = self._approval.export_session_grants()
-                if grants:
-                    ss.metadata["_approval_grants"] = grants
-                await resolved_session.save_state(ss)
+                try:
+                    await self._save_session(resolved_session)
+                except Exception:
+                    if turn_completed:
+                        raise
+                    logger.warning("Session save failed during error handling.", exc_info=True)
 
         messages = await self.context.short_term_memory.get_context_messages()
         result = AgentResult(
