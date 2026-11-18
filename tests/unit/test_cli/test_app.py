@@ -399,3 +399,60 @@ def test_main_dispatches_headless_empty_prompt(
     rc = main(["-p", "   "])
     assert rc == 2
     assert "non-empty task" in capsys.readouterr().err
+
+
+async def test_recording_creation_failure_prevents_agent(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from agent_cli.app import _async_main
+
+    monkeypatch.setattr('agent_harness.setup_logging', MagicMock())
+    monkeypatch.setattr('agent_cli.config.attach_rich_logging', MagicMock())
+
+    record = tmp_path / 'record.jsonl'
+    record.write_text('existing')
+    monkeypatch.setattr('agent_cli.config.load_config', lambda: SimpleNamespace(bootstrapped=False))
+    factory = MagicMock()
+    monkeypatch.setattr('agent_cli.agent_factory.create_cli_agent', factory)
+    assert await _async_main(_args('--record-file', str(record))) == 2
+    factory.assert_not_called()
+    assert record.read_text() == 'existing'
+    assert 'cannot create interaction record' in capsys.readouterr().err
+
+
+async def test_recording_preserves_repl_cli_hooks(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent_cli.app import _async_main
+
+    monkeypatch.setattr('agent_harness.setup_logging', MagicMock())
+    monkeypatch.setattr('agent_cli.config.attach_rich_logging', MagicMock())
+    from agent_cli.hooks import CliHooks
+    from agent_harness.hooks import CompositeHooks, RecordingHooks
+
+    monkeypatch.setattr('agent_cli.config.load_config', lambda: SimpleNamespace(bootstrapped=False, path=None))
+    monkeypatch.setattr('prompt_toolkit.PromptSession', MagicMock())
+    monkeypatch.setattr('prompt_toolkit.input.create_input', MagicMock())
+    monkeypatch.setattr('prompt_toolkit.output.create_output', MagicMock())
+    monkeypatch.setattr('agent_cli.runtime.session.resolve_session_id', AsyncMock(return_value='test'))
+    monkeypatch.setattr('agent_cli.commands.builtin.register_dynamic', MagicMock())
+    monkeypatch.setattr('agent_cli.runtime.sigint.install_idle', MagicMock())
+    monkeypatch.setattr('agent_cli.runtime.sigint.uninstall', MagicMock())
+    monkeypatch.setattr('agent_cli.render.ui.render_welcome', MagicMock())
+    monkeypatch.setattr('agent_cli.render.ui.print_exit_reminder', AsyncMock())
+    monkeypatch.setattr('agent_cli.runtime.background.shutdown', AsyncMock())
+    monkeypatch.setattr('agent_cli.runtime.session.stop_sandbox', AsyncMock())
+    factory = MagicMock(return_value=MagicMock(aclose=AsyncMock()))
+    monkeypatch.setattr('agent_cli.agent_factory.create_cli_agent', factory)
+    repl = AsyncMock()
+    monkeypatch.setattr('agent_cli.repl.loop.run_repl', repl)
+    assert await _async_main(_args('--record-file', str(tmp_path / 'record.jsonl'))) == 0
+    combined = factory.call_args.kwargs['hooks']
+    cli_hooks = repl.call_args.args[9]
+    assert isinstance(combined, CompositeHooks)
+    assert isinstance(cli_hooks, CliHooks)
+    assert combined._hooks[0] is cli_hooks
+    assert isinstance(combined._hooks[1], RecordingHooks)
+    factory.return_value.aclose.assert_awaited_once()

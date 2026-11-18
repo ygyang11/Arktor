@@ -38,6 +38,7 @@ from agent_harness.core.config import (
 from agent_harness.core.errors import HarnessError, LLMConnectionError
 from agent_harness.core.event import Event, EventBus
 from agent_harness.core.message import Attachment, Message, Role, ToolCall, ToolOutput, ToolResult
+from agent_harness.hooks.recording import RecordingHooks
 from agent_harness.llm.base import BaseLLM
 from agent_harness.sandbox import ExecuteResult, LocalBackend, SandboxBackend, SandboxManager
 from agent_harness.session import BaseSession, FileSession, InMemorySession, SessionState
@@ -85,6 +86,7 @@ __all__ = [
     "LLMConnectionError",
     # LLM
     "BaseLLM",
+    "RecordingHooks",
     # Tool
     "BaseTool",
     "ToolSchema",
