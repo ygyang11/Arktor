@@ -6,7 +6,7 @@ Demonstrates: The Plan-Execute-Replan loop architecture.
 import asyncio
 from pathlib import Path
 
-from agent_app.tools import PDF_TOOLS, WEB_TOOLS
+from agent_app.tools import DOCUMENT_TOOLS, WEB_TOOLS
 from agent_harness import HarnessConfig, PlanAndExecuteAgent, tool
 
 
@@ -49,7 +49,7 @@ async def main() -> None:
 
     agent = PlanAndExecuteAgent(
         name="researcher",
-        tools=[*WEB_TOOLS, *PDF_TOOLS, analyze_data, write_summary],
+        tools=[*WEB_TOOLS, *DOCUMENT_TOOLS, analyze_data, write_summary],
         executor_max_steps=20,
         config=config,
     )

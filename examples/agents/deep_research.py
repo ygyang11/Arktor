@@ -6,7 +6,7 @@ from pathlib import Path
 from agent_harness import BaseTool, ConversationalAgent, HarnessConfig, ReActAgent
 from agent_harness.agent.base import AgentResult
 from agent_harness.orchestration import AgentTeam, DAGNode, DAGOrchestrator, TeamMode
-from agent_app.tools import WEB_TOOLS, PAPER_TOOLS, PDF_TOOLS
+from agent_app.tools import DOCUMENT_TOOLS, PAPER_TOOLS, WEB_TOOLS
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -124,7 +124,7 @@ async def main() -> None:
     research_tools: list[BaseTool] = [
         *WEB_TOOLS,
         *PAPER_TOOLS,
-        *PDF_TOOLS,
+        *DOCUMENT_TOOLS,
     ]
     query = "What is the current state of quantum computing and its potential impact?"
 

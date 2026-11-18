@@ -125,7 +125,7 @@ async def test_research() -> None:
     """Scenario 2: Deep research — test proactive knowledge save."""
     _cleanup()
     config = HarnessConfig.load(PROJECT_ROOT / "arktor.yaml")
-    agent = ReActAgent(name="research_test", tools=TOOLS, max_steps=20, config=config)
+    agent = ReActAgent(name="research_test", tools=TOOLS, max_steps=60, config=config)
 
     print(f"\n{'='*60}")
     print("SCENARIO 2: Deep research session")

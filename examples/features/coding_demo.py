@@ -12,9 +12,9 @@ Usage:
 import argparse
 import asyncio
 import shutil
+from contextlib import chdir
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 from agent_app.tools import (
     BACKGROUND_TOOLS, FILESYSTEM_TOOLS, TERMINAL_TOOLS, WEB_TOOLS,
@@ -214,40 +214,13 @@ async def main() -> None:
     setup_mini_project(workspace)
     print("Mini project created.\n")
 
-    patches = [
-        patch(
-            "agent_app.tools.filesystem._security.get_workspace_root",
-            return_value=workspace,
-        ),
-        patch(
-            "agent_app.tools.filesystem.list_dir.get_workspace_root",
-            return_value=workspace,
-        ),
-        patch(
-            "agent_app.tools.filesystem.glob_files.get_workspace_root",
-            return_value=workspace,
-        ),
-        patch(
-            "agent_app.tools.filesystem.grep_files.get_workspace_root",
-            return_value=workspace,
-        ),
-        patch(
-            "agent_app.tools.terminal.terminal_tool._workspace_root",
-            return_value=workspace,
-        ),
-    ]
-
     try:
-        for p in patches:
-            p.start()
-
-        if args.chat:
-            await run_chat(config, workspace)
-        else:
-            await run_auto(config, workspace)
+        with chdir(workspace):
+            if args.chat:
+                await run_chat(config, workspace)
+            else:
+                await run_auto(config, workspace)
     finally:
-        for p in reversed(patches):
-            p.stop()
         shutil.rmtree(workspace, ignore_errors=True)
 
 
