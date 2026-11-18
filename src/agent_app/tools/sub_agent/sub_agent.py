@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from agent_app.tools.sub_agent.types import (
     _ALWAYS_EXCLUDE,
     _BUILTIN_TYPES,
-    _SUBAGENT_BG_CONSTRAINT,
     _SUBAGENT_INTRO,
 )
 from agent_harness.core.errors import ToolExecutionError, ToolValidationError
@@ -312,6 +311,7 @@ class SubAgentTool(BaseTool):
             approval_handler=self._agent._approval_handler,
             prompt_builder=prompt_builder,
         )
+        child._bg_manager.set_scope(subagent_name)
         child._usage_source = "background" if background else "subagent"
         # Share parent's sandbox (child reuses the same container / backend)
         child._sandbox = self._agent._sandbox
@@ -463,7 +463,6 @@ class SubAgentTool(BaseTool):
 
         type_spec = self._get_available_types()[agent_type]
         intro = type_spec.get("intro") or _SUBAGENT_INTRO
-        intro = f"{intro}\n\n{_SUBAGENT_BG_CONSTRAINT}"
         builder.register(make_intro_section(intro))
 
         return builder

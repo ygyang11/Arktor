@@ -1,6 +1,9 @@
 """Tests for SubAgentTool."""
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,12 +14,16 @@ from agent_app.tools.sub_agent.types import (
     _BUILTIN_TYPES,
     _SUBAGENT_INTRO,
 )
-from agent_harness.agent.base import AgentResult, StepResult
+from agent_harness.agent.base import AgentResult, BaseAgent, StepResult
+from agent_harness.agent.react import ReActAgent
+from agent_harness.approval import ApprovalPolicy
 from agent_harness.core.config import HarnessConfig, SubAgentConfig, SubAgentTypeSpec
 from agent_harness.core.errors import ToolExecutionError, ToolValidationError
 from agent_harness.core.message import ToolCall
 from agent_harness.hooks.base import DefaultHooks
 from agent_harness.prompt.sections import _TOOL_SUPPLEMENTS
+from agent_harness.tool.base import BaseTool
+from tests.conftest import MockLLM
 
 
 # ── Helpers ──
@@ -310,11 +317,7 @@ class TestPromptBuilder:
         section = forked.register.call_args[0][0]
         assert "sub-agent assisting" in section.content.lower()
 
-    def test_bg_constraint_injected_for_all_types(self) -> None:
-        """The background-mode ban must reach EVERY sub-agent prompt —
-        built-in, custom-with-intro, and the no-intro fallback — since
-        it's the sole (prompt-only) guard against backgrounded results
-        being lost in a sub-agent."""
+    def test_obsolete_bg_constraint_removed_for_all_types(self) -> None:
         cfg = HarnessConfig(
             sub_agent=SubAgentConfig(
                 types={
@@ -330,10 +333,10 @@ class TestPromptBuilder:
             tool._build_subagent_prompt_builder(agent_type)
             forked = tool._agent._prompt_builder.fork.return_value
             section = forked.register.call_args[0][0]
-            assert "background mode (background=true)" in section.content, (
-                f"bg constraint missing for type {agent_type!r}"
+            assert "background mode (background=true)" not in section.content, (
+                f"obsolete bg constraint present for type {agent_type!r}"
             )
-            assert "GUARANTEED LOST" in section.content
+            assert "GUARANTEED LOST" not in section.content
 
 
 # ── Result formatting ──
@@ -423,6 +426,7 @@ class TestBindSession:
 
         with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
             mock_instance = AsyncMock()
+            mock_instance._bg_manager = MagicMock()
             mock_instance.run = AsyncMock(return_value=mock_result)
             MockAgent.return_value = mock_instance
 
@@ -445,6 +449,7 @@ class TestBindSession:
 
         with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
             mock_instance = AsyncMock()
+            mock_instance._bg_manager = MagicMock()
             mock_instance.run = AsyncMock(return_value=mock_result)
             MockAgent.return_value = mock_instance
 
@@ -494,6 +499,7 @@ class TestExecution:
 
         with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
             mock_instance = AsyncMock()
+            mock_instance._bg_manager = MagicMock()
             mock_instance.run = AsyncMock(return_value=mock_result)
             MockAgent.return_value = mock_instance
 
@@ -516,6 +522,7 @@ class TestExecution:
 
         with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
             mock_instance = AsyncMock()
+            mock_instance._bg_manager = MagicMock()
             mock_instance.run = AsyncMock(return_value=mock_result)
             MockAgent.return_value = mock_instance
 
@@ -546,6 +553,7 @@ class TestExecution:
 
         with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
             mock_instance = AsyncMock()
+            mock_instance._bg_manager = MagicMock()
             mock_instance.run = AsyncMock(return_value=mock_result)
             MockAgent.return_value = mock_instance
 
@@ -568,6 +576,7 @@ class TestExecution:
 
         with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
             mock_instance = AsyncMock()
+            mock_instance._bg_manager = MagicMock()
             mock_instance.run = AsyncMock(side_effect=RuntimeError("LLM failed"))
             MockAgent.return_value = mock_instance
 
@@ -586,6 +595,7 @@ class TestExecution:
 
         with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
             mock_instance = AsyncMock()
+            mock_instance._bg_manager = MagicMock()
             mock_instance.run = AsyncMock(return_value=mock_result)
             MockAgent.return_value = mock_instance
 
@@ -611,6 +621,7 @@ class TestExecution:
 
         with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
             mock_instance = AsyncMock()
+            mock_instance._bg_manager = MagicMock()
             mock_instance.run = AsyncMock(side_effect=RuntimeError("boom"))
             MockAgent.return_value = mock_instance
 
@@ -635,6 +646,7 @@ class TestExecution:
 
         with patch("agent_harness.agent.react.ReActAgent") as MockAgent:
             mock_instance = AsyncMock()
+            mock_instance._bg_manager = MagicMock()
             mock_instance.run = AsyncMock(return_value=mock_result)
             MockAgent.return_value = mock_instance
 
@@ -648,3 +660,88 @@ class TestExecution:
         calls = hooks.on_subagent_start.call_args_list
         assert "research.1" in calls[0][0][1]
         assert "research.2" in calls[1][0][1]
+
+    @pytest.mark.parametrize("cancel", [False, True])
+    async def test_synchronous_child_background_cleanup(
+        self, cancel: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("agent_harness.background.manager._HARNESS_DIR", tmp_path)
+        gate = asyncio.Event()
+        cleaned = asyncio.Event()
+        child_finished = asyncio.Event()
+        child_names: list[str] = []
+
+        class _BackgroundTool(BaseTool):
+            def __init__(self) -> None:
+                super().__init__(name="bg_probe", description="Start child background work")
+                self._agent: BaseAgent | None = None
+
+            def bind_agent(self, agent: BaseAgent) -> None:
+                self._agent = agent
+
+            async def execute(self, **kwargs: Any) -> str:
+                async def work() -> tuple[str, str]:
+                    try:
+                        await gate.wait()
+                        return "child evidence", "child evidence"
+                    finally:
+                        cleaned.set()
+
+                assert self._agent is not None
+                return self._agent._bg_manager.spawn("bg_probe", "probe", work())
+
+        class _ChildHooks(DefaultHooks):
+            async def on_run_end(self, agent_name: str, output: str) -> None:
+                if ".sub." in agent_name:
+                    child_names.append(agent_name)
+                    child_finished.set()
+                    if not cancel:
+                        gate.set()
+
+        llm = MockLLM()
+        llm.add_tool_call_response("sub_agent", {
+            "description": "child work", "prompt": "work", "agent_type": "worker", "model": "main",
+        })
+        llm.add_tool_call_response("bg_probe", {})
+        llm.add_text_response("interim")
+        llm.add_text_response("child final")
+        llm.add_text_response("parent final")
+        config = HarnessConfig(sub_agent=SubAgentConfig(
+            types={"worker": SubAgentTypeSpec(tools=["bg_probe"], intro="test")},
+        ))
+        agent = ReActAgent(
+            name="parent", llm=llm, tools=[SubAgentTool(), _BackgroundTool()],
+            hooks=_ChildHooks(), config=config, approval=ApprovalPolicy(mode="never"),
+        )
+        llm.aclose = AsyncMock()
+        agent._sandbox.close = AsyncMock()
+
+        task = asyncio.create_task(agent.run("test"))
+        finished = asyncio.create_task(child_finished.wait())
+        try:
+            await asyncio.wait([task, finished], timeout=2, return_when=asyncio.FIRST_COMPLETED)
+            if task.done():
+                assert task.result().output == "parent final"
+            assert child_finished.is_set()
+
+            if cancel:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=2)
+            else:
+                result = await asyncio.wait_for(task, timeout=2)
+                assert result.output == "parent final"
+                assert child_names == ["parent.sub.worker.1"] * 2
+                assert len(llm.call_history) == 5
+
+            assert cleaned.is_set()
+            assert not agent._bg_manager.has_running()
+        finally:
+            gate.set()
+            finished.cancel()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(finished, task, return_exceptions=True)
+
+        llm.aclose.assert_not_awaited()
+        agent._sandbox.close.assert_not_awaited()

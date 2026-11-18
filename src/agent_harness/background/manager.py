@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class BackgroundTaskManager:
         )
         self._output_dir = self._anonymous_dir
         self._task_seq = 0
+        self._task_prefix = "bg"
 
     def bind_session(self, session_id: str | None) -> None:
         """Bind to a session for output directory isolation.
@@ -72,25 +74,28 @@ class BackgroundTaskManager:
         self._output_dir = new_dir
         self._restore_task_seq()
 
+    def set_scope(self, scope: str | None) -> None:
+        """Set the task ID namespace before any task is created."""
+        if self._tasks:
+            raise RuntimeError("Cannot change the scope after creating tasks.")
+        self._task_prefix = "bg" if scope is None else f"bg_{quote(scope, safe='._-')}"
+        self._task_seq = 0
+        self._restore_task_seq()
+
     def _next_task_id(self) -> str:
         self._task_seq += 1
-        return f"bg_{self._task_seq:04d}"
+        return f"{self._task_prefix}_{self._task_seq:04d}"
 
     def _restore_task_seq(self) -> None:
-        """When binding to a persisted session dir, advance the counter
-        past any ``bg_*.txt`` artifacts from prior runs so we don't
-        overwrite content that the persisted message history still
-        references by path."""
+        """Advance the counter past artifacts in this manager's namespace."""
         out = Path(self._output_dir)
         if not out.exists():
             return
-        for p in out.glob("bg_*.txt"):
-            try:
-                n = int(p.stem.split("_", 1)[1])
-            except (ValueError, IndexError):
-                continue
-            if n > self._task_seq:
-                self._task_seq = n
+        prefix = f"{self._task_prefix}_"
+        for path in out.glob(f"{prefix}*.txt"):
+            suffix = path.stem.removeprefix(prefix)
+            if suffix.isdecimal():
+                self._task_seq = max(self._task_seq, int(suffix))
 
     def _new_task(self, tool_name: str, description: str, *, streaming: bool) -> BackgroundTask:
         task = BackgroundTask(

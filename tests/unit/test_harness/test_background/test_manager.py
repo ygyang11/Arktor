@@ -429,3 +429,35 @@ class TestStreaming:
         task = manager.get_all()[0]
         assert task.result is not None
         assert task.result.output_path is None
+
+
+async def test_scope_ids_and_restoration_are_independent(tmp_path, monkeypatch):
+    from urllib.parse import quote
+    from agent_harness.background import manager as mod
+    monkeypatch.setattr(mod, "_HARNESS_DIR", tmp_path)
+    scopes = [None, "main.sub.worker.1", "main.sub.worker.2", "a/b[]"]
+    managers = []
+    ids = []
+    async def work():
+        return "done", "done"
+    for scope in scopes:
+        manager = mod.BackgroundTaskManager()
+        manager.set_scope(scope)
+        manager.bind_session("shared")
+        ids.append(manager.spawn("tool", "task", work()))
+        managers.append(manager)
+    for manager in managers:
+        await manager.wait_next()
+        manager.collect_completed()
+    assert ids == ["bg_0001", "bg_main.sub.worker.1_0001",
+                   "bg_main.sub.worker.2_0001", f"bg_{quote('a/b[]', safe='._-')}_0001"]
+    assert len({task.log_path for manager in managers for task in manager.get_all()}) == 4
+    for scope, previous in zip(scopes, ids, strict=True):
+        restored = mod.BackgroundTaskManager()
+        restored.bind_session("shared")
+        restored.set_scope(scope)
+        assert restored.spawn("tool", "next", work()) == previous[:-4] + "0002"
+        await restored.wait_next()
+        with pytest.raises(RuntimeError):
+            restored.set_scope("changed")
+        await restored.shutdown()
