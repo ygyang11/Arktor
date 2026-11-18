@@ -45,7 +45,7 @@ from agent_harness.session import BaseSession, FileSession, InMemorySession, Ses
 from agent_harness.tool.base import BaseTool, ToolSchema
 from agent_harness.tool.decorator import tool
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 
 __all__ = [
     # Logging
