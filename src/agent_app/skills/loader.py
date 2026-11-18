@@ -50,19 +50,8 @@ class _SkillMeta(NamedTuple):
     dir: Path
 
 
-def _find_project_root() -> Path:
-    current = Path(__file__).resolve().parent
-    while current != current.parent:
-        if (current / "LICENSE").exists():
-            return current
-        current = current.parent
-    return Path.cwd()
-
-
 class SkillLoader:
     """Loads skills from multiple directories using progressive disclosure."""
-
-    _PROJECT_ROOT: Path = _find_project_root()
 
     def __init__(self, dirs: list[str | Path]) -> None:
         self._dirs = self._resolve_dirs(dirs)
@@ -73,14 +62,7 @@ class SkillLoader:
 
     @classmethod
     def _resolve_dirs(cls, dirs: list[str | Path]) -> list[Path]:
-        resolved: list[Path] = []
-        for d in dirs:
-            p = Path(d).expanduser()
-            if p.is_absolute():
-                resolved.append(p)
-            else:
-                resolved.append(cls._PROJECT_ROOT / p)
-        return resolved
+        return [Path(directory).expanduser().resolve() for directory in dirs]
 
     @classmethod
     def build_state_key(cls, dirs: list[str | Path]) -> tuple[str, ...]:

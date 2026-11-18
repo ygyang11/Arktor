@@ -245,3 +245,26 @@ class TestSkillToolXmlEscape:
 
         result = await skill_tool.execute(skill_name='a"b')
         assert 'name="a&quot;b"' in result
+
+
+async def test_agent_binding_uses_own_config_and_project_first(tmp_path, monkeypatch, restore_harness_config):
+    from agent_harness import ReActAgent
+    from agent_harness.hooks import DefaultHooks
+    from tests.conftest import MockLLM
+    project = tmp_path / 'project'
+    personal = tmp_path / 'personal' / 'skills'
+    _write_skill(project / 'skills', 'same', 'Project.', 'project wins')
+    _write_skill(personal, 'same', 'Global.', 'global fallback')
+    monkeypatch.chdir(project)
+    HarnessConfig._instance = HarnessConfig(skill=SkillConfig(dirs=[str(personal)]))
+    standalone = SkillTool()
+    assert 'global fallback' in await standalone.execute(skill_name='same')
+    agent = ReActAgent(name="skills", llm=MockLLM(), tools=[standalone], hooks=DefaultHooks(),
+        config=HarnessConfig(skill=SkillConfig(dirs=['skills', str(personal)])))
+    bound = agent.tool_registry.get('skill_tool')
+    assert 'project wins' in await bound.execute(skill_name='same')
+    assert 'global fallback' in await standalone.execute(skill_name='same')
+    other = tmp_path / 'other'
+    _write_skill(other / 'skills', 'same', 'Other.', 'different cwd')
+    monkeypatch.chdir(other)
+    assert 'different cwd' in await bound.execute(skill_name='same')
