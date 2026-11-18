@@ -409,3 +409,32 @@ class TestApprovalConfigValidation:
     def test_empty_rule_raises(self) -> None:
         with pytest.raises(ValueError, match="Empty"):
             ApprovalConfig(always_deny=[""])
+
+
+@pytest.mark.parametrize("value", ["", "   ", "__SET_API_KEY__", "valid-env"])
+def test_env_priority(tmp_path, monkeypatch, value):
+    config = tmp_path / "config.yaml"
+    config.write_text("llm:\n  provider: openai\n  api_key: yaml-token\n")
+    monkeypatch.setenv("OPENAI_API_KEY", "service-token")
+    monkeypatch.setenv("ARKTOR_LLM_API_KEY", value)
+    assert HarnessConfig.load(config).llm.api_key == ("valid-env" if value == "valid-env" else "yaml-token")
+
+
+def test_load_explicit_defaults_false_and_invalid_global_unchanged(tmp_path, monkeypatch):
+    path = tmp_path / 'config.yaml'
+    path.write_text('llm:\n  provider: anthropic\n  model: yaml-model\n  temperature: 1.5\nverbose: true\ntracing:\n  enabled: true\n')
+    monkeypatch.setenv('ARKTOR_LLM_MODEL', 'env-model')
+    monkeypatch.setenv('ARKTOR_LLM_TEMPERATURE', '0.7')
+    monkeypatch.setenv('ARKTOR_VERBOSE', 'false')
+    monkeypatch.setenv('ARKTOR_TRACING_ENABLED', 'false')
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'anthropic-test')
+    config = HarnessConfig.load(path)
+    assert config.llm.provider == 'anthropic' and config.llm.api_key == 'anthropic-test'
+    assert config.llm.model == 'env-model' and config.llm.temperature == 0.7
+    assert not config.verbose and not config.tracing.enabled
+    monkeypatch.setenv('ARKTOR_LLM_TEMPERATURE', 'invalid')
+    with pytest.raises(ValueError):
+        HarnessConfig.load(path)
+    assert HarnessConfig.get() is config
+    yaml_only = HarnessConfig.from_yaml(path)
+    assert yaml_only.llm.model == 'yaml-model' and yaml_only.verbose

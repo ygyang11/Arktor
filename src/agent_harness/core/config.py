@@ -326,15 +326,12 @@ class HarnessConfig(BaseModel):
     ) -> HarnessConfig:
         """Load from YAML and optionally override with environment variables."""
         with cls._lock:
-            file_cfg = cls.from_yaml(path) if path is not None else cls()
-            if not env_override:
-                cls._instance = file_cfg
-                return file_cfg
-
-            env_cfg = cls.from_env()
-            merged = file_cfg.merge(env_cfg)
-            cls._instance = merged
-            return merged
+            data = _read_yaml(path) if path is not None else {}
+            if env_override:
+                data = _deep_merge(data, _read_env_overrides())
+            config = cls.model_validate(data)
+            cls._instance = config
+            return config
 
     def merge(self, other: HarnessConfig) -> HarnessConfig:
         """Merge another config into this one. `other` values take precedence."""
