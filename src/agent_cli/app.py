@@ -38,6 +38,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="-p output format: text (default) or json "
              "(NDJSON)",
     )
+    parser.add_argument(
+        "--record-file", metavar="PATH", default=None,
+        help="save records (llm/tool-call/result) to a new JSONL file",
+    )
     grp = parser.add_mutually_exclusive_group()
     grp.add_argument(
         "-c", "--continue", dest="resume_latest", action="store_true",
@@ -80,8 +84,10 @@ async def _async_main(args: argparse.Namespace) -> int:
     from agent_cli.hooks import CliHooks
     from agent_cli.render.ui import print_exit_reminder, render_welcome
     from agent_cli.repl.loop import run_repl
+    from agent_cli.runtime import background
     from agent_cli.runtime.shell import ShellState
     from agent_cli.theme import DEPTH_MAP, load_saved_theme
+    from agent_harness.hooks import CompositeHooks, DefaultHooks, RecordingHooks
     from agent_harness.session.file_session import FileSession
 
     config_result = load_config()
@@ -95,6 +101,13 @@ async def _async_main(args: argparse.Namespace) -> int:
             "edit this file to configure your model and API key[/dim]\n"
         )
         console.print()
+    recorder: RecordingHooks | None = None
+    if args.record_file is not None:
+        try:
+            recorder = RecordingHooks(args.record_file)
+        except Exception as exc:
+            print(f"arktor: cannot create interaction record: {exc}", file=sys.stderr)
+            return 2
     adapter = CliAdapter(console, theme)
     color_depth = (
         ColorDepth.DEPTH_1_BIT if console.no_color
@@ -114,51 +127,55 @@ async def _async_main(args: argparse.Namespace) -> int:
         pt_session=pt_session,
     )
     hooks = CliHooks(adapter, approval_handler=approval_handler)
-    agent = create_cli_agent(hooks=hooks, approval_handler=approval_handler)
+    agent_hooks: DefaultHooks = hooks
+    if recorder is not None:
+        agent_hooks = CompositeHooks(hooks, recorder)
+    agent = create_cli_agent(hooks=agent_hooks, approval_handler=approval_handler)
 
     from agent_cli.runtime.session import resolve_session_id, restore_session, stop_sandbox
-
-    probe = FileSession("_probe")
-    session_id = await resolve_session_id(args, probe)
-    if session_id is None:
-        return 2
-
-    registry = CommandRegistry()
-    register_builtin(registry)
-    register_dynamic(registry, agent)
-    backend = FileSession(session_id)
-
-    if args.resume_latest or args.resume:
-        if await restore_session(agent, backend) is None:
-            print(f"arktor: session corrupted: {session_id}", file=sys.stderr)
-            return 2
-
-    config_source = str(config_result.path) if config_result.path else "Defaults env"
-    welcome_kwargs: dict[str, str] = {}
-    if args.resume_latest or args.resume or args.session_id:
-        welcome_kwargs["session_label"] = session_id
-    render_welcome(
-        console,
-        version=__version__,
-        model=agent.llm.model_name,
-        cwd=str(Path.cwd()),
-        config_source=config_source,
-        **welcome_kwargs,
-    )
-    if args.resume_latest or args.resume:
-        from agent_cli.render.replay import render_session_replay
-
-        msgs = await agent.context.short_term_memory.get_context_messages()
-        render_session_replay(console, theme, msgs, session_id)
-
-    # Take over SIGINT from asyncio.run's default handler. Between-turn
-    # idle absorbs Ctrl+C silently; per-turn task-bound handlers (via
-    # runtime.sigint.bind_work) cancel only their own work task.
     from agent_cli.runtime.sigint import install_idle, uninstall
 
-    install_idle()
-
+    sigint_installed = False
     try:
+        probe = FileSession("_probe")
+        session_id = await resolve_session_id(args, probe)
+        if session_id is None:
+            return 2
+
+        registry = CommandRegistry()
+        register_builtin(registry)
+        register_dynamic(registry, agent)
+        backend = FileSession(session_id)
+
+        if args.resume_latest or args.resume:
+            if await restore_session(agent, backend) is None:
+                print(f"arktor: session corrupted: {session_id}", file=sys.stderr)
+                return 2
+
+        config_source = str(config_result.path) if config_result.path else "Defaults env"
+        welcome_kwargs: dict[str, str] = {}
+        if args.resume_latest or args.resume or args.session_id:
+            welcome_kwargs["session_label"] = session_id
+        render_welcome(
+            console,
+            version=__version__,
+            model=agent.llm.model_name,
+            cwd=str(Path.cwd()),
+            config_source=config_source,
+            **welcome_kwargs,
+        )
+        if args.resume_latest or args.resume:
+            from agent_cli.render.replay import render_session_replay
+
+            msgs = await agent.context.short_term_memory.get_context_messages()
+            render_session_replay(console, theme, msgs, session_id)
+
+        # Take over SIGINT from asyncio.run's default handler. Between-turn
+        # idle absorbs Ctrl+C silently; per-turn task-bound handlers (via
+        # runtime.sigint.bind_work) cancel only their own work task.
+        install_idle()
+        sigint_installed = True
+
         await run_repl(
             agent,
             console,
@@ -172,13 +189,17 @@ async def _async_main(args: argparse.Namespace) -> int:
             hooks,
             theme,
         )
+
     finally:
         with suppress(Exception):
             shell_state.cleanup()
-        with suppress(Exception):
-            uninstall()
+        if sigint_installed:
+            with suppress(Exception):
+                uninstall()
         with suppress(Exception):
             await adapter.end_step()
+        with suppress(Exception):
+            await background.shutdown(agent)
         with suppress(Exception):
             await stop_sandbox(agent)
         with suppress(Exception):
