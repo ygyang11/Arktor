@@ -143,7 +143,7 @@ def _agent_with_stm(messages: list | None = None) -> MagicMock:
 async def test_run_cancelled_error_resets_state_and_ends_step() -> None:
     agent = _agent_with_stm()
     agent.context.state.reset = MagicMock()
-    agent.run = AsyncMock(side_effect=asyncio.CancelledError())
+    agent.run_turn = AsyncMock(side_effect=asyncio.CancelledError())
     adapter = MagicMock()
     adapter.end_step = AsyncMock()
     adapter.begin_run = MagicMock()
@@ -160,7 +160,7 @@ async def test_run_cancelled_error_resets_state_and_ends_step() -> None:
 
 async def test_run_swallows_generic_exception_to_keep_repl_alive() -> None:
     agent = _agent_with_stm()
-    agent.run = AsyncMock(side_effect=RuntimeError("boom"))
+    agent.run_turn = AsyncMock(side_effect=RuntimeError("boom"))
     adapter = MagicMock()
     adapter.end_step = AsyncMock()
     adapter.begin_run = MagicMock()
@@ -178,7 +178,7 @@ async def test_run_swallows_generic_exception_to_keep_repl_alive() -> None:
 
 async def test_run_ends_step_on_success() -> None:
     agent = _agent_with_stm()
-    agent.run = AsyncMock(return_value=None)
+    agent.run_turn = AsyncMock(return_value=None)
     adapter = MagicMock()
     adapter.end_step = AsyncMock()
     adapter.begin_run = MagicMock()
@@ -188,7 +188,7 @@ async def test_run_ends_step_on_success() -> None:
         run_gate=asyncio.Lock(),
     )
 
-    agent.run.assert_awaited_once()
+    agent.run_turn.assert_awaited_once()
     adapter.end_step.assert_awaited_once()
 
 
@@ -456,7 +456,7 @@ def _make_run_repl_mocks(prompt_results: list[object]):
     handler.cancel_pending = MagicMock()
 
     agent = MagicMock()
-    agent.run = AsyncMock(return_value=None)
+    agent.run_turn = AsyncMock(return_value=None)
     agent.llm.model_name = "test-model"
     agent.context.config.approval.mode = "auto"
     agent.context.short_term_memory.displayed_input_tokens = 0
@@ -725,7 +725,7 @@ async def test_run_passes_session_backend_instance_not_string() -> None:
     async def fake_run(text: object, session: object = None, **_: object) -> None:
         captured["session"] = session
 
-    agent.run = fake_run
+    agent.run_turn = fake_run
     adapter = MagicMock()
     adapter.begin_run = MagicMock()
     adapter.end_step = AsyncMock()
@@ -750,7 +750,7 @@ async def test_run_pre_commit_cancel_rolls_back_messages_and_calls_save() -> Non
         agent.context.short_term_memory._messages.append(Message.user("text"))
         raise asyncio.CancelledError()
 
-    agent.run = fake_run
+    agent.run_turn = fake_run
     adapter = MagicMock()
     adapter.begin_run = MagicMock()
     adapter.end_step = AsyncMock()
@@ -781,7 +781,7 @@ async def test_run_post_commit_cancel_does_not_rollback() -> None:
         agent.context.short_term_memory._messages.append(Message.assistant("partial"))
         raise asyncio.CancelledError()
 
-    agent.run = fake_run
+    agent.run_turn = fake_run
     adapter = MagicMock()
     adapter.begin_run = MagicMock()
     adapter.end_step = AsyncMock()
@@ -809,7 +809,7 @@ async def test_run_preserves_bg_message_during_rollback() -> None:
         agent.context.short_term_memory._messages.append(bg)
         raise asyncio.CancelledError()
 
-    agent.run = fake_run
+    agent.run_turn = fake_run
     adapter = MagicMock()
     adapter.begin_run = MagicMock()
     adapter.end_step = AsyncMock()
@@ -832,7 +832,7 @@ async def test_run_preserves_bg_message_during_rollback() -> None:
 async def test_run_end_turn_called_in_finally_after_normal_completion() -> None:
     initial: list[Message] = []
     agent = _real_agent_with_messages(initial)
-    agent.run = AsyncMock(return_value=None)
+    agent.run_turn = AsyncMock(return_value=None)
     adapter = MagicMock()
     adapter.begin_run = MagicMock()
     adapter.end_step = AsyncMock()
@@ -851,7 +851,7 @@ async def test_run_end_turn_called_in_finally_after_normal_completion() -> None:
 async def test_run_end_turn_called_in_finally_after_cancel() -> None:
     initial: list[Message] = []
     agent = _real_agent_with_messages(initial)
-    agent.run = AsyncMock(side_effect=asyncio.CancelledError())
+    agent.run_turn = AsyncMock(side_effect=asyncio.CancelledError())
     adapter = MagicMock()
     adapter.begin_run = MagicMock()
     adapter.end_step = AsyncMock()
@@ -876,7 +876,7 @@ async def test_run_media_rejection_with_rollback() -> None:
     """User-side rejection: nothing committed → rollback + reverted notice."""
     agent = _agent_with_stm()
     agent.context.state.reset = MagicMock()
-    agent.run = AsyncMock(side_effect=LLMUnsupportedContentError("invalid part type: file"))
+    agent.run_turn = AsyncMock(side_effect=LLMUnsupportedContentError("invalid part type: file"))
     adapter = MagicMock()
     adapter.end_step = AsyncMock()
     adapter.begin_run = MagicMock()
@@ -912,7 +912,7 @@ async def test_run_media_rejection_after_auto_compression_still_rolls_back() -> 
         await captured_hooks[0].on_compression_start("test")
         raise LLMUnsupportedContentError("invalid part type: file")
 
-    agent.run = fake_run
+    agent.run_turn = fake_run
 
     adapter = MagicMock()
     adapter.end_step = AsyncMock()
@@ -943,7 +943,7 @@ async def test_run_media_rejection_without_rollback() -> None:
     """Committed state → no rollback; partial-recovery notice with /clear."""
     agent = _agent_with_stm()
     agent.context.state.reset = MagicMock()
-    agent.run = AsyncMock(side_effect=LLMUnsupportedContentError("invalid part type: file"))
+    agent.run_turn = AsyncMock(side_effect=LLMUnsupportedContentError("invalid part type: file"))
     adapter = MagicMock()
     adapter.end_step = AsyncMock()
     adapter.begin_run = MagicMock()
@@ -979,7 +979,7 @@ async def test_run_media_rejection_without_rollback() -> None:
 
 async def test_run_gate_serializes_concurrent_runs() -> None:
     """Two concurrent _run on one agent serialize through run_gate: their
-    agent.run executions never overlap, and neither dispatch is dropped."""
+    agent.run_turn executions never overlap, and neither dispatch is dropped."""
     agent = _real_agent_with_messages([])
     gate = asyncio.Lock()
     active = 0
@@ -994,7 +994,7 @@ async def test_run_gate_serializes_concurrent_runs() -> None:
         active -= 1
         completed += 1
 
-    agent.run = fake_run
+    agent.run_turn = fake_run
     adapter = MagicMock()
     adapter.begin_run = MagicMock()
     adapter.end_step = AsyncMock()
@@ -1029,7 +1029,7 @@ async def test_run_completed_goal_turn_records_and_schedules_evaluation() -> Non
     from agent_cli.runtime.goal import mode as goal_mode
 
     agent = _goal_agent()
-    agent.run = AsyncMock(return_value=None)
+    agent.run_turn = AsyncMock(return_value=None)
     adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
     save = AsyncMock()
     state = _LoopState()
@@ -1058,7 +1058,7 @@ async def test_run_goal_save_failure_pauses_and_clears_pending() -> None:
     from agent_cli.runtime.goal import mode as goal_mode
 
     agent = _goal_agent()
-    agent.run = AsyncMock(return_value=None)
+    agent.run_turn = AsyncMock(return_value=None)
     adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
     console = MagicMock()
     state = _LoopState()
@@ -1095,7 +1095,7 @@ async def test_run_failed_goal_turn_pauses_and_clears_pending() -> None:
     from agent_cli.runtime.goal import mode as goal_mode
 
     agent = _goal_agent()
-    agent.run = AsyncMock(side_effect=RuntimeError("boom"))
+    agent.run_turn = AsyncMock(side_effect=RuntimeError("boom"))
     adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
     state = _LoopState(goal_eval_pending=True)
     save = AsyncMock()
@@ -1124,7 +1124,7 @@ async def test_run_failed_goal_turn_pauses_and_clears_pending() -> None:
 
 async def test_run_non_goal_clears_stale_evaluation_flag() -> None:
     agent = _real_agent_with_messages([])
-    agent.run = AsyncMock(return_value=None)
+    agent.run_turn = AsyncMock(return_value=None)
     adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
     state = _LoopState(goal_eval_pending=True)
     save = AsyncMock()
@@ -1156,7 +1156,7 @@ async def test_run_expands_mentions_only_for_string_input(
         message = inp if isinstance(inp, Message) else Message.user(inp)
         await after_input_appended(agent, message, message.content or "")
 
-    agent.run = run
+    agent.run_turn = run
     adapter = MagicMock(begin_run=MagicMock(), end_step=AsyncMock())
     extras = (_make_real_cli_hooks(), MagicMock(), AsyncMock())
 
@@ -1241,7 +1241,7 @@ async def test_repl_goal_continues_then_completes(
     monkeypatch.setattr("agent_cli.repl.loop.goal_driver.decide", decide)
     await _drive_run_repl(mocks)
 
-    assert agent.run.await_count == 2
+    assert agent.run_turn.await_count == 2
     assert decisions == 2
     assert goal.status == "complete"
     assert goal.turns == 2
@@ -1361,7 +1361,7 @@ async def test_repl_goal_save_failure_stops_continuation(
 
     await _drive_run_repl(mocks)
 
-    assert agent.run.await_count == 1
+    assert agent.run_turn.await_count == 1
     assert save.await_count == 2
     assert goal.status == "paused"
     assert goal.reason == "session save failed (OSError): disk full"

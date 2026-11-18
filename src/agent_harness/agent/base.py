@@ -725,7 +725,7 @@ class BaseAgent(ABC, EventEmitter):
                         input_task = None
                     print("\n[Background task completed]")
                     try:
-                        await self.run(
+                        await self.run_turn(
                             Message.system(
                                 "[Background Task Notification] "
                                 "Process the completed background task results.",
@@ -762,7 +762,7 @@ class BaseAgent(ABC, EventEmitter):
                     if user_input.lower() in exit_commands:
                         break
                     try:
-                        result = await self.run(user_input, session=session)
+                        result = await self.run_turn(user_input, session=session)
                         if not self._stream:
                             print(result.output)
                     except Exception as e:
@@ -775,7 +775,7 @@ class BaseAgent(ABC, EventEmitter):
                     print("\n[Background task completed]")
                     await self._collect_background_results()
                     try:
-                        await self.run(
+                        await self.run_turn(
                             Message.system(
                                 "[Background Task Notification] "
                                 "Process the completed background task results.",
