@@ -49,7 +49,13 @@ Arktor 是一个可扩展的 Agent Harness。既可直接通过 **CLI** 使用�
 
 ### 安装
 
-从源码安装 CLI 与内置工具：
+安装或升级 CLI：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ygyang11/Arktor/main/scripts/install.sh | sh
+```
+
+用 `python -m pip install arktor` 安装 SDK，详见[安装与 SDK 用法](docs/usage.md)。从源码安装 CLI 与内置工具：
 
 ```bash
 git clone https://github.com/ygyang11/Arktor.git
@@ -78,7 +84,7 @@ python -m pip install -e ".[cli,app]"
 
 ```bash
 mkdir -p ~/.arktor
-cp arktor_example.yaml ~/.arktor/arktor.yaml
+cp arktor.example.yaml ~/.arktor/arktor.yaml
 ```
 
 如需单独配置某个项目，可在工作目录放置 `arktor.yaml`，CLI 会优先读取此文件。
@@ -93,8 +99,8 @@ llm:
   base_url: "__SET_BASE_URL__"
 ```
 
-可用配置见 [arktor_example.yaml](arktor_example.yaml)，
-环境变量见 [.env_example](.env_example)。
+可用配置见 [arktor.example.yaml](arktor.example.yaml)，
+环境变量见 [.env.example](.env.example)。
 
 ## CLI
 
