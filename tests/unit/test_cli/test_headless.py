@@ -16,7 +16,9 @@ from agent_cli.headless import _parse_task, run_headless
 from agent_cli.runtime import plan_mode
 from agent_cli.runtime.goal import mode as goal_mode
 from agent_cli.runtime.goal.driver import GoalDecision
-from agent_harness import AgentResult
+from agent_harness import AgentResult, HarnessConfig, ReActAgent
+from agent_harness.core.config import LLMConfig
+from tests.conftest import MockLLM
 from agent_harness.agent.base import StepResult
 from agent_harness.approval.handler import AutoApproveHandler
 from agent_harness.approval.types import ApprovalDecision, ApprovalRequest
@@ -56,6 +58,7 @@ class _FakeAgent:
         self, *, output: str = "", error: Exception | None = None,
         mode: str = "auto", steps: list[StepResult] | None = None,
     ) -> None:
+        self.max_steps = 1000
         self._approval = _FakeApproval(mode)
         self._session_metadata_extras: dict[str, Any] = {}
         self.run_mode_seen: str | None = None
@@ -73,9 +76,16 @@ class _FakeAgent:
 
             async def _run(task: str, *, session: Any = None, **kw: Any) -> AgentResult:
                 self.run_mode_seen = self._approval.mode
+                if kw.get('on_turn_result') is not None:
+                    await kw['on_turn_result'](res)
                 return res
 
             self.run = _run  # type: ignore[assignment]
+
+    async def _collect_next_background_batch(self) -> bool:
+        from agent_cli.runtime import background
+
+        return await background.collect_results(self)
 
     async def aclose(self) -> None:
         return None
@@ -282,7 +292,29 @@ def _install_runs(
         )
         return item
 
-    agent.run = run  # type: ignore[assignment]
+    agent.run_turn = run
+
+    async def complete_run(inp: object, *, session: Any = None, **kwargs: Any) -> AgentResult:
+        from agent_cli.runtime import background
+
+        result = await run(inp, session=session)
+        steps = list(result.steps)
+        usage = result.usage
+        callback = kwargs.get("on_turn_result")
+        if callback is not None:
+            await callback(result)
+        while await background.collect_next_batch(agent):
+            result = await run(
+                Message.system("background", metadata={"is_background_result": True}),
+                session=session,
+            )
+            steps.extend(result.steps)
+            usage = usage + result.usage
+            if callback is not None:
+                await callback(result)
+        return AgentResult(output=result.output, steps=steps, usage=usage)
+
+    agent.run = complete_run  # type: ignore[assignment]
     return inputs
 
 
@@ -541,3 +573,33 @@ async def test_oversized_goal_returns_2_with_file_hint(
     assert "file" in output.lower()
     captured["save"].assert_not_awaited()
     assert agent._approval.history == ["auto"]
+
+
+@pytest.mark.parametrize('step_limit,turn_limit,expected_turns',[(1,None,1),(3,1,1),(2,2,2)])
+async def test_goal_budget_interaction(step_limit,turn_limit,expected_turns,tmp_path,monkeypatch,capsys):
+    from agent_cli.runtime.goal import mode
+    monkeypatch.setattr('agent_harness.session.file_session._DEFAULT_SESSION_DIR',tmp_path/'sessions')
+    monkeypatch.setattr('agent_cli.config.load_config',lambda: None)
+    llm=MockLLM()
+    verdict='<status>continue</status>\n<reason>needs work</reason>\n<directive>continue</directive>'
+    for _ in range(expected_turns):
+        llm.add_text_response('partial')
+        llm.add_text_response(verdict)
+    seen=[]
+    def factory(*, hooks, approval_handler):
+        agent=ReActAgent(name='budget',llm=llm,sub_llm=llm,hooks=hooks,
+            config=HarnessConfig(llm=LLMConfig(model='test',api_key='fake')))
+        seen.append(agent)
+        return agent
+    monkeypatch.setattr('agent_cli.agent_factory.create_cli_agent',factory)
+    opts=['-p','/goal finish task','--max-steps',str(step_limit),'--output-format','json']
+    if turn_limit:
+        opts.extend(['--max-turns',str(turn_limit)])
+    rc=await run_headless(_build_parser().parse_args(opts))
+    rows=[json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert rc==3
+    assert len([r for r in rows if r['type']=='step'])==expected_turns
+    assert rows[-1]['num_steps']==expected_turns
+    assert mode.get_state(seen[0]).turns==expected_turns
+    assert len(llm.call_history)==expected_turns*2
+    assert rows[-2]['status']=='blocked'
