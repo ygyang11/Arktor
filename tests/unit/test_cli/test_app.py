@@ -440,6 +440,7 @@ async def test_recording_preserves_repl_cli_hooks(tmp_path, monkeypatch):
     monkeypatch.setattr('agent_cli.commands.builtin.register_dynamic', MagicMock())
     monkeypatch.setattr('agent_cli.runtime.sigint.install_idle', MagicMock())
     monkeypatch.setattr('agent_cli.runtime.sigint.uninstall', MagicMock())
+    monkeypatch.setattr('agent_cli.runtime.update.read_cached_notice', lambda version: (None, False))
     monkeypatch.setattr('agent_cli.render.ui.render_welcome', MagicMock())
     monkeypatch.setattr('agent_cli.render.ui.print_exit_reminder', AsyncMock())
     monkeypatch.setattr('agent_cli.runtime.background.shutdown', AsyncMock())

@@ -40,6 +40,7 @@ def render_welcome(
     cwd: str,
     config_source: str,
     session_label: str = _DEFAULT_SESSION_LABEL,
+    update_version: str | None = None,
 ) -> None:
     """Print the welcome block — banner, tagline, meta rows, command hint."""
     console.print()
@@ -61,6 +62,18 @@ def render_welcome(
     console.print(_meta_row("cwd", shorten_home(cwd)))
     console.print(_meta_row("config", shorten_home(config_source)))
     console.print(_session_row(session_label))
+    if update_version is not None:
+        console.print()
+        console.print(_meta_row(
+            "update", f"New version available: v{version} → v{update_version}",
+        ))
+        console.print(_meta_row(
+            "changes", f"https://github.com/ygyang11/Arktor/releases/tag/v{update_version}",
+        ))
+        console.print(_meta_row(
+            "upgrade", "curl -fsSL "
+            "https://raw.githubusercontent.com/ygyang11/Arktor/main/scripts/install.sh | sh",
+        ))
     console.print()
     console.print(_hint_row())
     console.print()
