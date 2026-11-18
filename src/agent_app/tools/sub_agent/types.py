@@ -18,13 +18,13 @@ Rules:
 - If the first approach doesn't work, try alternative strategies — \
 exhaust reasonable options before reporting failure"""
 
-# Injected into EVERY sub-agent prompt (built-in, custom, and fallback),
-# so the constraint can't be bypassed by a custom type that supplies its own intro.
-_SUBAGENT_BG_CONSTRAINT = (
-    "You MUST NOT run tools in background mode (background=true): the "
-    "result is GUARANTEED LOST — continuing means it never returns to "
-    "you, and ANY attempt to wait exits you immediately."
-)
+# Deprecated: child.run() now waits for background task results.
+# Historical prompt retained as comments only; do not inject into prompts.
+# _SUBAGENT_BG_CONSTRAINT = (
+#     "You MUST NOT run tools in background mode (background=true): the "
+#     "result is GUARANTEED LOST — continuing means it never returns to "
+#     "you, and ANY attempt to wait exits you immediately."
+# )
 
 # ── Built-in type definitions ──
 
