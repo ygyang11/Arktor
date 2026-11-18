@@ -87,20 +87,15 @@ class BackgroundTaskManager:
         return f"{self._task_prefix}_{self._task_seq:04d}"
 
     def _restore_task_seq(self) -> None:
-        """When binding to a persisted session dir, advance the counter
-        past any ``bg_*.txt`` artifacts from prior runs so we don't
-        overwrite content that the persisted message history still
-        references by path."""
+        """Advance the counter past artifacts in this manager's namespace."""
         out = Path(self._output_dir)
         if not out.exists():
             return
-        for p in out.glob("bg_*.txt"):
-            try:
-                n = int(p.stem.split("_", 1)[1])
-            except (ValueError, IndexError):
-                continue
-            if n > self._task_seq:
-                self._task_seq = n
+        prefix = f"{self._task_prefix}_"
+        for path in out.glob(f"{prefix}*.txt"):
+            suffix = path.stem.removeprefix(prefix)
+            if suffix.isdecimal():
+                self._task_seq = max(self._task_seq, int(suffix))
 
     def _new_task(self, tool_name: str, description: str, *, streaming: bool) -> BackgroundTask:
         task = BackgroundTask(
