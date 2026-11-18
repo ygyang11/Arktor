@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -419,12 +420,128 @@ class BaseAgent(ABC, EventEmitter):
         input: str | Message,
         *,
         session: str | BaseSession | None = None,
-        after_input_appended: (Callable[[BaseAgent, Message, str], Awaitable[None]] | None) = None,
+        after_input_appended: (
+            Callable[[BaseAgent, Message, str], Awaitable[None]] | None
+        ) = None,
+        on_turn_result: Callable[[AgentResult], Awaitable[None]] | None = None,
         max_steps: int | None = None,
     ) -> AgentResult:
-        return await self.run_turn(
-            input, session=session, after_input_appended=after_input_appended, max_steps=max_steps,
-        )
+        """Run a task, including follow-up turns for background results.
+
+        Call on_turn_result after each completed turn. Combine steps and usage
+        across turns; return output and messages from the final turn.
+        max_steps limits this entire task, defaulting to self.max_steps.
+        """
+        from agent_harness.session.base import resolve_session
+
+        step_limit = self.max_steps if max_steps is None else max_steps
+        if step_limit <= 0:
+            raise ValueError("max_steps must be positive.")
+
+        resolved_session = resolve_session(session)
+        remaining_steps = step_limit
+        steps: list[StepResult] = []
+        usage = Usage()
+        next_input = input
+        first_turn = True
+        started = False
+
+        async def after_input(
+            agent: BaseAgent, message: Message, text: str,
+        ) -> None:
+            nonlocal started
+            started = True
+            if after_input_appended is not None:
+                await after_input_appended(agent, message, text)
+
+        try:
+            while True:
+                result = await self.run_turn(
+                    next_input,
+                    session=resolved_session,
+                    after_input_appended=after_input if first_turn else None,
+                    max_steps=remaining_steps,
+                )
+                first_turn = False
+                steps.extend(result.steps)
+                remaining_steps -= len(result.steps)
+                usage = usage + result.usage
+                if on_turn_result is not None:
+                    await on_turn_result(result)
+
+                if remaining_steps <= 0:
+                    if (
+                        await self._collect_background_results()
+                        or self._bg_manager.has_running()
+                    ):
+                        raise MaxStepsExceededError(
+                            f"Agent '{self.name}' exhausted the step budget",
+                        )
+                elif await self._collect_next_background_batch():
+                    next_input = Message.system(
+                        "[Background Task Notification] Process the completed "
+                        "background task results.",
+                        metadata={"is_background_result": True},
+                    )
+                    continue
+
+                await self._bg_manager.shutdown()
+                return AgentResult(
+                    output=result.output,
+                    messages=result.messages,
+                    steps=steps,
+                    usage=usage,
+                )
+        except BaseException:
+            cleanup = asyncio.create_task(
+                self._cleanup_failed_run(resolved_session if started else None),
+            )
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            try:
+                cleanup.result()
+            except BaseException:
+                logger.warning("Run cleanup failed.", exc_info=True)
+            raise
+
+    async def _collect_next_background_batch(self) -> bool:
+        """Collect results, waiting while background work remains."""
+        while True:
+            if await self._collect_background_results():
+                return True
+            if not self._bg_manager.has_running():
+                return False
+            await self._bg_manager.wait_next()
+
+    async def _cleanup_failed_run(self, session: BaseSession | None) -> None:
+        """Stop background work and persist its final state after a failed run."""
+        running = [
+            task for task in self._bg_manager.get_all() if task.status == "running"
+        ]
+        try:
+            await self._bg_manager.shutdown()
+        finally:
+            if not self.context.state.is_terminal:
+                self.context.state.reset()
+
+        await self._collect_background_results()
+        for task in running:
+            if task.status != "cancelled":
+                continue
+            note = (
+                f"[Background Task Cancelled] {task.task_id} ({task.tool_name}): "
+                f"{task.description} — Run ended before completion."
+            )
+            await self.context.short_term_memory.add_message(
+                Message.system(note, metadata={"is_background_result": True}),
+            )
+        if session is not None:
+            await self._save_session(session)
 
     async def _save_session(self, session: BaseSession) -> None:
         """Persist the current session using the existing snapshot fields."""

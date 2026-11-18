@@ -134,6 +134,8 @@ class BackgroundTaskManager:
         log = Path(task.log_path)
         try:
             output, summary = await coro
+            if task.status == "cancelled":
+                raise asyncio.CancelledError
             if not task.streaming and output:
                 log.parent.mkdir(parents=True, exist_ok=True)
                 log.write_text(output, encoding="utf-8")
@@ -149,6 +151,10 @@ class BackgroundTaskManager:
             logger.debug("Background task %s cancelled", task_id)
             raise
         except Exception as e:
+            if task.status == "cancelled":
+                task.error = str(e)
+                logger.warning("Background task %s failed during cancellation: %s", task_id, e)
+                raise asyncio.CancelledError from e
             task.result = BackgroundResult(
                 summary=f"Error: {e}",
                 output_path=str(log) if log.exists() and log.stat().st_size > 0 else None,
@@ -209,12 +215,14 @@ class BackgroundTaskManager:
         return count
 
     async def shutdown(self) -> None:
-        """Cancel all incomplete tasks and wait for them to finish."""
+        """Cancel incomplete tasks once and wait for their cleanup."""
         tasks_to_wait: list[asyncio.Task[BackgroundResult]] = []
         for task in self._tasks.values():
-            if task.asyncio_task and not task.asyncio_task.done():
-                task.asyncio_task.cancel()
+            worker = task.asyncio_task
+            if worker is not None and not worker.done():
+                if worker.cancelling() == 0:
+                    worker.cancel()
                 task.status = "cancelled"
-                tasks_to_wait.append(task.asyncio_task)
+                tasks_to_wait.append(worker)
         if tasks_to_wait:
-            await asyncio.gather(*tasks_to_wait, return_exceptions=True)
+            await asyncio.shield(asyncio.gather(*tasks_to_wait, return_exceptions=True))
