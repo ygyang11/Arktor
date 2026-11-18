@@ -54,6 +54,8 @@ class _EnvVars:
     ARKTOR_LLM_TEMPERATURE = "ARKTOR_LLM_TEMPERATURE"
     ARKTOR_LLM_MAX_TOKENS = "ARKTOR_LLM_MAX_TOKENS"
     ARKTOR_LLM_BASE_URL = "ARKTOR_LLM_BASE_URL"
+    ARKTOR_LLM_API_KEY = "ARKTOR_LLM_API_KEY"
+    ARKTOR_LLM_SEND_REQUEST_CONTEXT = "ARKTOR_LLM_SEND_REQUEST_CONTEXT"
     ARKTOR_VERBOSE = "ARKTOR_VERBOSE"
     ARKTOR_TRACING_ENABLED = "ARKTOR_TRACING_ENABLED"
     SEMANTIC_SCHOLAR_API_KEY = "SEMANTIC_SCHOLAR_API_KEY"
@@ -93,6 +95,7 @@ class LLMConfig(BaseModel):
     retry_delay: float = 1.0
     reasoning_effort: str | None = None
     sub_model: SubModelConfig | None = None
+    send_request_context: bool = False
 
     @field_validator("api_key", "base_url", "reasoning_effort", mode="before")
     @classmethod
@@ -299,12 +302,7 @@ class HarnessConfig(BaseModel):
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         """Load configuration from a YAML file."""
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"Config file not found: {path}")
-        with open(path) as f:
-            data = yaml.safe_load(f) or {}
-        config = cls.model_validate(data)
+        config = cls.model_validate(_read_yaml(path))
         cls._instance = config
         return config
 
@@ -314,35 +312,10 @@ class HarnessConfig(BaseModel):
 
         Recognized env vars:
             ARKTOR_LLM_PROVIDER, ARKTOR_LLM_MODEL, ARKTOR_LLM_TEMPERATURE,
-            ARKTOR_LLM_MAX_TOKENS, ARKTOR_LLM_BASE_URL,
-            ARKTOR_VERBOSE, ARKTOR_TRACING_ENABLED
+            ARKTOR_LLM_MAX_TOKENS, ARKTOR_LLM_BASE_URL, ARKTOR_LLM_API_KEY,
+            ARKTOR_LLM_SEND_REQUEST_CONTEXT, ARKTOR_VERBOSE, ARKTOR_TRACING_ENABLED
         """
-        data: dict[str, Any] = {}
-
-        llm_data: dict[str, Any] = {}
-        if v := os.environ.get(_EnvVars.ARKTOR_LLM_PROVIDER):
-            llm_data["provider"] = v
-        if v := os.environ.get(_EnvVars.ARKTOR_LLM_MODEL):
-            llm_data["model"] = v
-        if v := os.environ.get(_EnvVars.ARKTOR_LLM_TEMPERATURE):
-            llm_data["temperature"] = float(v)
-        if v := os.environ.get(_EnvVars.ARKTOR_LLM_MAX_TOKENS):
-            llm_data["max_tokens"] = int(v)
-        if v := os.environ.get(_EnvVars.ARKTOR_LLM_BASE_URL):
-            llm_data["base_url"] = v
-        if llm_data:
-            data["llm"] = llm_data
-
-        if v := os.environ.get(_EnvVars.ARKTOR_VERBOSE):
-            data["verbose"] = v.lower() in ("1", "true", "yes")
-
-        tracing_data: dict[str, Any] = {}
-        if v := os.environ.get(_EnvVars.ARKTOR_TRACING_ENABLED):
-            tracing_data["enabled"] = v.lower() in ("1", "true", "yes")
-        if tracing_data:
-            data["tracing"] = tracing_data
-
-        return cls.model_validate(data)
+        return cls.model_validate(_read_env_overrides())
 
     @classmethod
     def load(
@@ -443,3 +416,51 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
         else:
             result[key] = value
     return result
+
+
+def _read_yaml(path: str | Path) -> dict[str, Any]:
+    """Read configuration data from a YAML file."""
+    path = Path(path).expanduser()
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError("Config root must be a mapping.")
+    return data
+
+
+def _read_env_overrides() -> dict[str, Any]:
+    """Read explicitly supplied environment overrides."""
+    data: dict[str, Any] = {}
+
+    llm_data: dict[str, Any] = {}
+    if v := os.environ.get(_EnvVars.ARKTOR_LLM_PROVIDER):
+        llm_data["provider"] = v
+    if v := os.environ.get(_EnvVars.ARKTOR_LLM_MODEL):
+        llm_data["model"] = v
+    if v := os.environ.get(_EnvVars.ARKTOR_LLM_TEMPERATURE):
+        llm_data["temperature"] = float(v)
+    if v := os.environ.get(_EnvVars.ARKTOR_LLM_MAX_TOKENS):
+        llm_data["max_tokens"] = int(v)
+    if v := os.environ.get(_EnvVars.ARKTOR_LLM_BASE_URL):
+        llm_data["base_url"] = v
+    if v := _unset_to_none(os.environ.get(_EnvVars.ARKTOR_LLM_API_KEY)):
+        llm_data["api_key"] = v
+    if v := os.environ.get(_EnvVars.ARKTOR_LLM_SEND_REQUEST_CONTEXT):
+        llm_data["send_request_context"] = v.lower() in ("1", "true", "yes")
+    if llm_data:
+        data["llm"] = llm_data
+
+    if v := os.environ.get(_EnvVars.ARKTOR_VERBOSE):
+        data["verbose"] = v.lower() in ("1", "true", "yes")
+
+    tracing_data: dict[str, Any] = {}
+    if v := os.environ.get(_EnvVars.ARKTOR_TRACING_ENABLED):
+        tracing_data["enabled"] = v.lower() in ("1", "true", "yes")
+    if tracing_data:
+        data["tracing"] = tracing_data
+
+    return data
