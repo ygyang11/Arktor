@@ -1036,9 +1036,19 @@ class BaseAgent(ABC, EventEmitter):
             await self.hooks.on_tool_result(self.name, r)
 
         if approved:
-            async for tool_result in self.tool_executor.execute_stream(approved):
-                result_map[tool_result.tool_call_id] = tool_result
-                await self.hooks.on_tool_result(self.name, tool_result)
+            results = self.tool_executor.execute_stream(approved)
+            try:
+                async for tool_result in results:
+                    result_map[tool_result.tool_call_id] = tool_result
+                    await self.hooks.on_tool_result(self.name, tool_result)
+            except BaseException:
+                try:
+                    await results.aclose()
+                except BaseException:
+                    logger.debug("Tool result stream cleanup failed.", exc_info=True)
+                raise
+            else:
+                await results.aclose()
 
         # ── Memory: write in original call order (transcript stable) ──
         self.context.state.transition(AgentState.OBSERVING)

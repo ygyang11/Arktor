@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, Iterable
+from typing import TypeVar
 
 from agent_harness.core.config import HarnessConfig, ToolConfig, resolve_tool_config
 from agent_harness.core.errors import (
@@ -15,6 +16,26 @@ from agent_harness.core.message import ToolCall, ToolOutput, ToolResult
 from agent_harness.tool.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+_T = TypeVar("_T")
+
+
+async def _cancel_and_wait(tasks: Iterable[asyncio.Task[_T]]) -> bool:
+    """Cancel once and finish cleanup; report cancellation of this waiter."""
+    workers = tuple(tasks)
+    for task in workers:
+        if not task.done() and task.cancelling() == 0:
+            task.cancel()
+    completion = asyncio.gather(*workers, return_exceptions=True)
+    interrupted = False
+    while not completion.done():
+        try:
+            await asyncio.shield(completion)
+        except asyncio.CancelledError:
+            interrupted = True
+    completion.result()
+    return interrupted
 
 
 class ToolExecutor(EventEmitter):
@@ -72,10 +93,20 @@ class ToolExecutor(EventEmitter):
 
             # Execute with concurrency limit and timeout
             async with self._semaphore:
-                raw = await asyncio.wait_for(
-                    tool.execute(**tool_call.arguments),
-                    timeout=effective_timeout,
-                )
+                tool_task = asyncio.create_task(tool.execute(**tool_call.arguments))
+                try:
+                    raw = await asyncio.wait_for(
+                        asyncio.shield(tool_task), timeout=effective_timeout,
+                    )
+                except BaseException as exc:
+                    interrupted = await _cancel_and_wait([tool_task])
+                    if not isinstance(exc, TimeoutError):
+                        raise
+                    if interrupted:
+                        raise asyncio.CancelledError from exc
+                    if tool_task.cancelled():
+                        raise
+                    raw = tool_task.result()
 
             if isinstance(raw, ToolOutput):
                 result_str = raw.content
@@ -178,7 +209,7 @@ class ToolExecutor(EventEmitter):
         self,
         tool_calls: list[ToolCall],
         timeout: float | None = None,
-    ) -> AsyncIterator[ToolResult]:
+    ) -> AsyncGenerator[ToolResult, None]:
         """Execute tool calls concurrently, yielding results as each completes.
 
         Unlike execute_batch (which waits for all), this yields each result
@@ -195,11 +226,14 @@ class ToolExecutor(EventEmitter):
             asyncio.create_task(self.execute(tc, timeout=timeout)): tc
             for tc in tool_calls
         }
+        failure: BaseException | None = None
         try:
             for future in asyncio.as_completed(tasks):
                 yield await future
+        except BaseException as exc:
+            failure = exc
+            raise
         finally:
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            interrupted = await _cancel_and_wait(tasks)
+            if interrupted and (failure is None or isinstance(failure, GeneratorExit)):
+                raise asyncio.CancelledError
