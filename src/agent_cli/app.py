@@ -86,6 +86,7 @@ async def _async_main(args: argparse.Namespace) -> int:
     from agent_cli.repl.loop import run_repl
     from agent_cli.runtime import background
     from agent_cli.runtime.shell import ShellState
+    from agent_cli.runtime.update import read_cached_notice, refresh_version_cache
     from agent_cli.theme import DEPTH_MAP, load_saved_theme
     from agent_harness.hooks import CompositeHooks, DefaultHooks, RecordingHooks
     from agent_harness.session.file_session import FileSession
@@ -136,6 +137,7 @@ async def _async_main(args: argparse.Namespace) -> int:
     from agent_cli.runtime.sigint import install_idle, uninstall
 
     sigint_installed = False
+    update_task: asyncio.Task[None] | None = None
     try:
         probe = FileSession("_probe")
         session_id = await resolve_session_id(args, probe)
@@ -156,14 +158,18 @@ async def _async_main(args: argparse.Namespace) -> int:
         welcome_kwargs: dict[str, str] = {}
         if args.resume_latest or args.resume or args.session_id:
             welcome_kwargs["session_label"] = session_id
+        update_version, needs_refresh = read_cached_notice(__version__)
         render_welcome(
             console,
             version=__version__,
             model=agent.llm.model_name,
             cwd=str(Path.cwd()),
             config_source=config_source,
+            update_version=update_version,
             **welcome_kwargs,
         )
+        if needs_refresh:
+            update_task = asyncio.create_task(refresh_version_cache())
         if args.resume_latest or args.resume:
             from agent_cli.render.replay import render_session_replay
 
@@ -191,6 +197,10 @@ async def _async_main(args: argparse.Namespace) -> int:
         )
 
     finally:
+        if update_task is not None:
+            update_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await update_task
         with suppress(Exception):
             shell_state.cleanup()
         if sigint_installed:

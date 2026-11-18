@@ -53,7 +53,14 @@ build and adapt agents with the **Python SDK** for your own projects.
 
 ### Installation
 
-Install the CLI and built-in tools from source:
+Install or upgrade the CLI:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ygyang11/Arktor/main/scripts/install.sh | sh
+```
+
+Install the SDK with `python -m pip install arktor`. See [installation and SDK usage](docs/usage.md)
+for more options. To work from source:
 
 ```bash
 git clone https://github.com/ygyang11/Arktor.git
@@ -69,7 +76,7 @@ python -m pip install -e ".[cli,app]"
 | Extra | Includes |
 | --- | --- |
 | `cli` | Terminal interface dependencies. |
-| `app` | For tools, including web search, web extraction, and document parsing dependencies. |
+| `app` | Dependencies for web search, page extraction, and PDF parsing. |
 | `sandbox` | Docker client for isolated terminal execution; requires a Docker daemon. |
 | `dev` | Test, lint, and type-checking tools. |
 
@@ -82,7 +89,7 @@ From the repository root:
 
 ```bash
 mkdir -p ~/.arktor
-cp arktor_example.yaml ~/.arktor/arktor.yaml
+cp arktor.example.yaml ~/.arktor/arktor.yaml
 ```
 
 For project-specific settings, place `arktor.yaml` in the working directory;
@@ -99,8 +106,8 @@ llm:
   base_url: "__SET_BASE_URL__"
 ```
 
-See [arktor_example.yaml](arktor_example.yaml) for available settings and
-[.env_example](.env_example) for environment variables.
+See [arktor.example.yaml](arktor.example.yaml) for available settings and
+[.env.example](.env.example) for environment variables.
 
 ## CLI
 
