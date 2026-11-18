@@ -52,19 +52,24 @@ class PlanAndExecuteAgent(BaseAgent):
         self._executor_approval_handler = self._approval_handler
 
     async def step(self) -> StepResult:
-        """Not used — run() is overridden."""
+        """Not used — run_turn() is overridden."""
         return StepResult()
 
-    async def run(
+    async def run_turn(
         self,
         input: str | Message,
         *,
         session: str | BaseSession | None = None,
         after_input_appended: (Callable[[BaseAgent, Message, str], Awaitable[None]] | None) = None,
+        max_steps: int | None = None,
     ) -> AgentResult:
         from datetime import datetime
 
         from agent_harness.session.base import resolve_session
+
+        step_limit = self.max_steps if max_steps is None else max_steps
+        if step_limit <= 0:
+            raise ValueError("max_steps must be positive.")
 
         resolved_session: BaseSession | None = resolve_session(session)
 
@@ -94,6 +99,7 @@ class PlanAndExecuteAgent(BaseAgent):
 
         total_usage = Usage()
         steps: list[StepResult] = []
+        turn_completed = False
 
         try:
             if after_input_appended is not None:
@@ -149,7 +155,7 @@ class PlanAndExecuteAgent(BaseAgent):
             final_output = ""
             iteration = 0
 
-            while iteration < self.max_steps:
+            while iteration < step_limit:
                 iteration += 1
 
                 if plan.is_complete:
@@ -238,7 +244,7 @@ class PlanAndExecuteAgent(BaseAgent):
 
             else:
                 final_output = (
-                    f"Max iterations reached ({self.max_steps}). "
+                    f"Max iterations reached ({step_limit}). "
                     f"Partial result: {plan.progress_summary}"
                 )
 
@@ -266,6 +272,7 @@ class PlanAndExecuteAgent(BaseAgent):
                     suffix="",
                 ),
             )
+            turn_completed = True
             return result
 
         except Exception as e:
@@ -277,14 +284,19 @@ class PlanAndExecuteAgent(BaseAgent):
 
         finally:
             if resolved_session:
-                now = datetime.now()
-                ss = self.context.to_session_state(
-                    resolved_session.session_id,
-                    agent_name=self.name,
-                )
-                ss.created_at = self._ensure_session_created_at()
-                ss.updated_at = now
-                await resolved_session.save_state(ss)
+                try:
+                    now = datetime.now()
+                    ss = self.context.to_session_state(
+                        resolved_session.session_id,
+                        agent_name=self.name,
+                    )
+                    ss.created_at = self._ensure_session_created_at()
+                    ss.updated_at = now
+                    await resolved_session.save_state(ss)
+                except Exception:
+                    if turn_completed:
+                        raise
+                    logger.warning("Session save failed during error handling.", exc_info=True)
 
     @staticmethod
     def _step_signature(step: PlanStep) -> tuple[str, str]:
