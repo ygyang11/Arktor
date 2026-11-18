@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agent_cli.runtime.goal import evaluator
+from agent_harness.agent.base import BaseAgent
+from agent_harness.core.config import HarnessConfig, LLMConfig
+from agent_harness.agent.react import ReActAgent
+from tests.conftest import MockLLM
+from agent_harness.hooks.base import DefaultHooks
 from agent_harness.core.message import Attachment, Message, ToolCall
 from agent_harness.llm.types import LLMResponse, ProcessUsageMeter, Usage
 from agent_harness.memory.short_term import CallSnapshot, SectionWeights, ShortTermMemory
@@ -41,7 +47,15 @@ def _agent(
     agent.context = SimpleNamespace(
         short_term_memory=stm,
         usage_meter=ProcessUsageMeter(),
+        config=HarnessConfig(),
     )
+    agent.name = 'test'
+    agent._parent_name = None
+    agent._agent_type = 'main'
+    agent._llm_source = 'main'
+    agent._llm_call_seq = 0
+    agent._next_call_context = MethodType(BaseAgent._next_call_context, agent)
+    agent.hooks = DefaultHooks()
     return agent
 
 
@@ -311,3 +325,62 @@ def test_untrimmable_transcript_raises_compact_error() -> None:
             budget=10,
             model="test-model",
         )
+
+
+VALID = "<status>complete</status>\n<reason>done</reason>\n<directive></directive>"
+
+class HookFailure(Exception):
+    pass
+
+
+class Capture(DefaultHooks):
+    def __init__(self):
+        self.rows = []
+        self.agent = None
+        self.failure = None
+    async def on_llm_response(self, name, messages, response, *, call_context, tools=None):
+        assert self.agent.context.usage_meter.by_source["goal_eval"].calls == len(self.rows) + 1
+        self.rows.append((call_context, response.message.content, [m.model_copy(deep=True) for m in messages]))
+        if self.failure:
+            raise self.failure
+
+
+@pytest.mark.parametrize("separate", [False, True])
+@pytest.mark.parametrize("headers", [False, True])
+async def test_goal_real_agent_sequence_and_model(separate, headers):
+    hooks = Capture()
+    main = MockLLM()
+    sub = MockLLM() if separate else main
+    sub.generate_with_events = AsyncMock(side_effect=[
+        LLMResponse(message=Message.assistant("bad"), usage=Usage(total_tokens=4)),
+        LLMResponse(message=Message.assistant(VALID), usage=Usage(total_tokens=5)),
+    ])
+    cfg = HarnessConfig(llm=LLMConfig(model="test", api_key="fake", send_request_context=headers))
+    agent = ReActAgent(name="judge", llm=main, sub_llm=sub, hooks=hooks, config=cfg)
+    hooks.agent = agent
+    before = await agent.context.short_term_memory.get_context_messages()
+    verdict = await evaluator.evaluate(agent, "objective", turns=1, elapsed_s=2, tokens=3)
+    assert verdict.status == "complete"
+    assert [row[0].seq for row in hooks.rows] == [1,2]
+    assert all(row[0].kind == "goal_eval" for row in hooks.rows)
+    assert all(row[0].llm == ("sub" if separate else "main") for row in hooks.rows)
+    assert hooks.rows[0][1] == "bad"
+    assert len(hooks.rows[0][2]) == 2 and len(hooks.rows[1][2]) == 4
+    assert before == await agent.context.short_term_memory.get_context_messages()
+    for i, call in enumerate(sub.generate_with_events.await_args_list, 1):
+        if headers:
+            context = json.loads(call.kwargs["extra_headers"]["X-Arktor-Context"])
+            assert context["call"]["seq"] == i and context["call"]["kind"] == "goal_eval"
+        else:
+            assert call.kwargs == {}
+
+
+async def test_goal_hook_error_is_not_request_error():
+    hooks = Capture()
+    hooks.failure = HookFailure("hook failed")
+    llm = MockLLM(responses=[LLMResponse(message=Message.assistant(VALID), usage=Usage(total_tokens=7))])
+    agent = ReActAgent(name="judge", llm=llm, hooks=hooks)
+    hooks.agent = agent
+    with pytest.raises(HookFailure, match="hook failed"):
+        await evaluator.evaluate(agent, "objective", turns=1, elapsed_s=2, tokens=3)
+    assert agent.context.usage_meter.by_source["goal_eval"].usage.total_tokens == 7

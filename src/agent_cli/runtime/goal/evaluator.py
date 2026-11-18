@@ -9,6 +9,7 @@ from typing import Literal, cast
 from agent_cli.runtime.goal import mode as goal_mode
 from agent_harness.agent.base import BaseAgent
 from agent_harness.core.message import Message, Role, ToolResult
+from agent_harness.llm.call_context import with_request_context
 from agent_harness.utils.media import describe_attachment_short
 from agent_harness.utils.token_counter import count_messages_tokens, count_tokens
 
@@ -236,8 +237,12 @@ async def evaluate(
             raise GoalEvaluationError(
                 "input exceeds context limit; run /compact before resuming"
             )
+        call_context = agent._next_call_context("goal_eval", llm)
+        request_kwargs = with_request_context(
+            {}, call_context, enabled=agent.context.config.llm.send_request_context,
+        )
         try:
-            response = await llm.generate_with_events(messages)
+            response = await llm.generate_with_events(messages, **request_kwargs)
         except Exception as exc:
             raise GoalEvaluationError(
                 f"request failed: {type(exc).__name__}"
@@ -247,6 +252,13 @@ async def evaluate(
             response.usage,
             model=llm.model_name,
             source="goal_eval",
+        )
+        await agent.hooks.on_llm_response(
+            agent.name,
+            messages,
+            response,
+            call_context=call_context,
+            tools=None,
         )
         content = response.message.content or ""
         verdict, error = _parse(content)
