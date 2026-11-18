@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class BackgroundTaskManager:
         )
         self._output_dir = self._anonymous_dir
         self._task_seq = 0
+        self._task_prefix = "bg"
 
     def bind_session(self, session_id: str | None) -> None:
         """Bind to a session for output directory isolation.
@@ -72,9 +74,17 @@ class BackgroundTaskManager:
         self._output_dir = new_dir
         self._restore_task_seq()
 
+    def set_scope(self, scope: str | None) -> None:
+        """Set the task ID namespace before any task is created."""
+        if self._tasks:
+            raise RuntimeError("Cannot change the scope after creating tasks.")
+        self._task_prefix = "bg" if scope is None else f"bg_{quote(scope, safe='._-')}"
+        self._task_seq = 0
+        self._restore_task_seq()
+
     def _next_task_id(self) -> str:
         self._task_seq += 1
-        return f"bg_{self._task_seq:04d}"
+        return f"{self._task_prefix}_{self._task_seq:04d}"
 
     def _restore_task_seq(self) -> None:
         """When binding to a persisted session dir, advance the counter
