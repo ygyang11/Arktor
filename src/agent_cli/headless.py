@@ -209,7 +209,7 @@ async def run_headless(args: argparse.Namespace) -> int:
     )
     from agent_cli.runtime.status import collect_window
     from agent_harness import AutoApproveHandler, setup_logging
-    from agent_harness.hooks.base import DefaultHooks
+    from agent_harness.hooks import DefaultHooks, RecordingHooks
     from agent_harness.session.file_session import FileSession
 
     setup_logging("WARNING")
@@ -221,10 +221,21 @@ async def run_headless(args: argparse.Namespace) -> int:
         return 2
 
     backend = FileSession(session_id)
-    agent = create_cli_agent(
-        hooks=DefaultHooks(),
-        approval_handler=AutoApproveHandler(),
-    )
+    recorder: RecordingHooks | None = None
+    try:
+        if args.record_file is not None:
+            recorder = RecordingHooks(args.record_file)
+        agent = create_cli_agent(
+            hooks=recorder if recorder is not None else DefaultHooks(),
+            approval_handler=AutoApproveHandler(),
+        )
+    except Exception as exc:
+        err = str(exc) or type(exc).__name__
+        if fmt == "json":
+            _emit_error_result(session_id, err)
+        else:
+            print(f"arktor: {err}", file=sys.stderr)
+        return 1
     save = make_save_session(agent, backend)
 
     task_output: _TaskOutput | None = None
@@ -315,6 +326,11 @@ async def run_headless(args: argparse.Namespace) -> int:
             await _safe(save(), "persist session")
         await _safe(stop_sandbox(agent), "stop sandbox")
         await _safe(agent.aclose(), "close llm client")
+
+    if recorder is not None and recorder.error is not None:
+        if not err:
+            err = f"Interaction recording failed: {recorder.error}"
+        rc = 1
 
     if objective is not None:
         if (

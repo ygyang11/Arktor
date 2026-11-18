@@ -16,8 +16,9 @@ from agent_cli.headless import _parse_task, run_headless
 from agent_cli.runtime import plan_mode
 from agent_cli.runtime.goal import mode as goal_mode
 from agent_cli.runtime.goal.driver import GoalDecision
-from agent_harness import AgentResult, HarnessConfig, ReActAgent
+from agent_harness import AgentResult, HarnessConfig, ReActAgent, RecordingHooks
 from agent_harness.core.config import LLMConfig
+from agent_harness.approval.policy import ApprovalPolicy
 from tests.conftest import MockLLM
 from agent_harness.agent.base import StepResult
 from agent_harness.approval.handler import AutoApproveHandler
@@ -575,6 +576,50 @@ async def test_oversized_goal_returns_2_with_file_hint(
     assert agent._approval.history == ["auto"]
 
 
+
+VALID = '<status>complete</status>\n<reason>verified</reason>\n<directive></directive>'
+
+@pytest.mark.parametrize('goal', [False, True])
+@pytest.mark.parametrize('record_fail', [False, True])
+async def test_headless_real_recording(goal, record_fail, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr('agent_harness.session.file_session._DEFAULT_SESSION_DIR', tmp_path / 'sessions')
+    monkeypatch.setattr('agent_cli.config.load_config', lambda: None)
+    llm = MockLLM()
+    llm.add_text_response('done')
+    if goal:
+        llm.add_text_response('invalid format')
+        llm.add_text_response(VALID)
+    seen=[]
+    def factory(*, hooks, approval_handler):
+        agent=ReActAgent(name='test',llm=llm,sub_llm=llm,hooks=hooks,
+            approval_handler=approval_handler, approval=ApprovalPolicy(mode='auto'),
+            config=HarnessConfig(llm=LLMConfig(model='test', api_key='fake')))
+        seen.append(agent)
+        return agent
+    monkeypatch.setattr('agent_cli.agent_factory.create_cli_agent',factory)
+    if record_fail:
+        def fail(self, record):
+            raise OSError('disk failed')
+        monkeypatch.setattr(RecordingHooks,'_append',fail)
+    record=tmp_path/'record.jsonl'
+    args=_build_parser().parse_args(['-p','/goal complete task' if goal else 'complete task',
+        '--record-file',str(record),'--output-format','json','--max-steps','1'])
+    rc=await run_headless(args)
+    rows=[json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    finals=[r for r in rows if r['type']=='result']
+    assert len(finals)==1
+    assert rc==(1 if record_fail else 0)
+    assert finals[0]['is_error']==record_fail
+    if not record_fail:
+        records=[json.loads(line) for line in record.read_text().splitlines()]
+        assert len(records)==(3 if goal else 1)
+        assert [r['call']['seq'] for r in records]==list(range(1,len(records)+1))
+        if goal:
+            assert [r['call']['kind'] for r in records]==['agent','goal_eval','goal_eval']
+    else:
+        assert 'Interaction recording failed' in finals[0]['error']
+    assert seen[0]._approval.mode=='auto'
+
 @pytest.mark.parametrize('step_limit,turn_limit,expected_turns',[(1,None,1),(3,1,1),(2,2,2)])
 async def test_goal_budget_interaction(step_limit,turn_limit,expected_turns,tmp_path,monkeypatch,capsys):
     from agent_cli.runtime.goal import mode
@@ -603,3 +648,87 @@ async def test_goal_budget_interaction(step_limit,turn_limit,expected_turns,tmp_
     assert mode.get_state(seen[0]).turns==expected_turns
     assert len(llm.call_history)==expected_turns*2
     assert rows[-2]['status']=='blocked'
+
+
+async def test_existing_record_prevents_execution(tmp_path,monkeypatch,capsys):
+    from unittest.mock import Mock
+    monkeypatch.setattr('agent_harness.session.file_session._DEFAULT_SESSION_DIR',tmp_path/'sessions')
+    monkeypatch.setattr('agent_cli.config.load_config',lambda: None)
+    factory=Mock()
+    monkeypatch.setattr('agent_cli.agent_factory.create_cli_agent',factory)
+    record=tmp_path/'record.jsonl'
+    record.write_text('kept')
+    rc=await run_headless(_build_parser().parse_args(['-p','task','--record-file',str(record),'--output-format','json']))
+    assert rc==1 and record.read_text()=='kept'
+    factory.assert_not_called()
+    rows=[json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert len(rows)==1 and rows[0]['type']=='result' and rows[0]['is_error']
+
+
+async def test_task_error_wins_over_recording_error(tmp_path, monkeypatch, capsys):
+    from agent_harness.llm.types import LLMResponse
+    from tests.conftest import MockLLM
+    monkeypatch.setattr('agent_cli.config.load_config', lambda: None)
+    monkeypatch.setattr('agent_harness.session.file_session._DEFAULT_SESSION_DIR', tmp_path / 'sessions')
+    llm = MockLLM()
+    llm.generate_with_events = AsyncMock(side_effect=[
+        LLMResponse(message=Message.assistant(tool_calls=[ToolCall(name='missing', arguments={})])),
+        RuntimeError('original task failure'),
+    ])
+    def factory(*, hooks, approval_handler):
+        return ReActAgent(name='failure', llm=llm, hooks=hooks, stream=False)
+    monkeypatch.setattr('agent_cli.agent_factory.create_cli_agent', factory)
+    def fail_record(self, record):
+        raise OSError('disk failure')
+    monkeypatch.setattr(RecordingHooks, '_append', fail_record)
+    args = _args('-p', 'task', '--record-file', str(tmp_path / 'record.jsonl'), '--output-format', 'json')
+    assert await run_headless(args) == 1
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    results = [row for row in rows if row['type'] == 'result']
+    assert len(results) == 1 and results[0]['error'] == 'original task failure'
+
+
+@pytest.mark.parametrize("goal", [False, True])
+async def test_recording_failure_during_shutdown_is_reported(goal, tmp_path, monkeypatch, capsys):
+    from agent_harness.core.message import ToolResult
+
+    monkeypatch.setattr("agent_cli.config.load_config", lambda: None)
+    monkeypatch.setattr(
+        "agent_harness.session.file_session._DEFAULT_SESSION_DIR", tmp_path / "sessions",
+    )
+    llm = MockLLM()
+    llm.add_text_response("done")
+    if goal:
+        llm.add_text_response(VALID)
+    shutdown = AsyncMock()
+
+    def factory(*, hooks, approval_handler):
+        async def record_cleanup():
+            await hooks.on_tool_result(
+                "cleanup", ToolResult(tool_call_id="cleanup", name="tool", content="done"),
+            )
+
+        agent = ReActAgent(name="cleanup", llm=llm, hooks=hooks)
+        shutdown.side_effect = record_cleanup
+        monkeypatch.setattr(agent._bg_manager, "shutdown", shutdown)
+        return agent
+
+    append = RecordingHooks._append
+
+    def fail_cleanup(self, record):
+        if record["type"] == "tool_result":
+            raise OSError("cleanup record failed")
+        append(self, record)
+
+    monkeypatch.setattr("agent_cli.agent_factory.create_cli_agent", factory)
+    monkeypatch.setattr(RecordingHooks, "_append", fail_cleanup)
+    args = _args(
+        "-p", "/goal task" if goal else "task",
+        "--record-file", str(tmp_path / "record.jsonl"), "--output-format", "json",
+    )
+    assert await run_headless(args) == 1
+    shutdown.assert_awaited_once_with()
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    results = [row for row in rows if row["type"] == "result"]
+    assert len(results) == 1 and results[0]["is_error"]
+    assert "cleanup record failed" in results[0]["error"]
