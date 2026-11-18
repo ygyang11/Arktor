@@ -5,8 +5,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agent_harness.approval.types import ApprovalRequest, ApprovalResult
-    from agent_harness.core.message import ToolCall
-    from agent_harness.llm.types import LLMRetryInfo, StreamDelta
+    from agent_harness.core.message import Message, ToolCall
+    from agent_harness.llm.call_context import ModelCallContext
+    from agent_harness.llm.types import LLMResponse, LLMRetryInfo, StreamDelta
+    from agent_harness.tool.base import ToolSchema
 
 
 class DefaultHooks:
@@ -19,6 +21,17 @@ class DefaultHooks:
         pass
 
     async def on_llm_call(self, agent_name: str, messages: list[Any]) -> None:
+        pass
+
+    async def on_llm_response(
+        self,
+        agent_name: str,
+        messages: list[Message],
+        response: LLMResponse,
+        *,
+        call_context: ModelCallContext,
+        tools: list[ToolSchema] | None = None,
+    ) -> None:
         pass
 
     async def on_llm_stream_delta(self, agent_name: str, delta: StreamDelta) -> None:
