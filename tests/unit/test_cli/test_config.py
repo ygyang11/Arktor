@@ -1,10 +1,12 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from rich.console import Console
 
+from agent_cli import config as cli_config
 from agent_cli.config import ConfigLoadResult, attach_rich_logging, load_config
 from agent_harness.utils.logging_config import setup_logging
 
@@ -36,18 +38,16 @@ def test_project_config_wins(
     mock_load.assert_called_once_with(project)
 
 
-def test_bootstrap_from_repo_template_when_user_config_missing(
+def test_bootstrap_from_package_template_when_user_config_missing(
     isolated_home: Path, isolated_cwd: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake_repo = isolated_cwd.parent / "repo"
-    fake_pkg_dir = fake_repo / "src" / "agent_cli"
-    fake_pkg_dir.mkdir(parents=True)
-    (fake_repo / "arktor_example.yaml").write_text("# example\nllm:\n  provider: anthropic\n")
-    fake_init = fake_pkg_dir / "__init__.py"
-    fake_init.write_text("")
-
-    import agent_cli as _agent_cli
-    monkeypatch.setattr(_agent_cli, "__file__", str(fake_init))
+    package = isolated_cwd.parent / "agent_harness"
+    resources = package / "resources"
+    resources.mkdir(parents=True)
+    (resources / "arktor.example.yaml").write_text(
+        "# example\nllm:\n  provider: anthropic\n"
+    )
+    monkeypatch.setattr("agent_cli.config.files", lambda _: package)
 
     with patch("agent_harness.core.config.HarnessConfig.load") as mock_load:
         result = load_config()
@@ -62,18 +62,13 @@ def test_bootstrap_from_repo_template_when_user_config_missing(
 def test_fallback_when_template_missing(
     isolated_home: Path, isolated_cwd: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake_pkg = isolated_cwd.parent / "pkg" / "agent_cli" / "__init__.py"
-    fake_pkg.parent.mkdir(parents=True)
-    fake_pkg.write_text("")
-
-    import agent_cli as _agent_cli
-    monkeypatch.setattr(_agent_cli, "__file__", str(fake_pkg))
+    monkeypatch.setattr("agent_cli.config.files", lambda _: isolated_cwd / "missing")
 
     with patch("agent_harness.core.config.HarnessConfig.load") as mock_load:
         result = load_config()
 
     assert result == ConfigLoadResult(path=None, bootstrapped=False)
-    mock_load.assert_called_once_with(None, env_override=True)
+    mock_load.assert_called_once_with()
 
 
 @pytest.fixture
@@ -210,3 +205,50 @@ async def test_attach_rich_logging_defers_during_active_prompt(
     monkeypatch.setattr(cfg, "get_app_or_none", lambda: _BrokenApp())
     handler.emit(rec)
     assert len(sync_calls) == 1
+
+
+def test_bootstrap_concurrent_and_preserves_existing(tmp_path):
+    dest = tmp_path / "arktor.yaml"
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: cli_config._bootstrap_user_config(dest), range(16)))
+    assert sum(results) == 1
+    expected = cli_config.files("agent_harness").joinpath("resources", "arktor.example.yaml").read_text()
+    assert dest.read_text() == expected
+    assert not list(tmp_path.glob("*.tmp"))
+    dest.write_text("user file")
+    assert cli_config._bootstrap_user_config(dest) is False
+    assert dest.read_text() == "user file"
+
+
+@pytest.mark.parametrize("when", ["write", "close", "publish"])
+def test_bootstrap_faults(tmp_path, monkeypatch, when):
+    original = cli_config.NamedTemporaryFile
+    class Broken:
+        def __init__(self, *args, **kwargs):
+            self.inner = original(*args, **kwargs)
+            self.name = self.inner.name
+        def __enter__(self):
+            return self
+        def write(self, text):
+            if when == "write":
+                self.inner.write(text[:4])
+                raise OSError("write failure")
+            self.inner.write(text)
+        def __exit__(self, *args):
+            self.inner.close()
+            if when == "close":
+                raise OSError("close failure")
+    monkeypatch.setattr(cli_config, "NamedTemporaryFile", Broken)
+    if when == "publish":
+        monkeypatch.setattr(cli_config.os, "link", lambda *a: (_ for _ in ()).throw(OSError("link failure")))
+    dest = tmp_path / "arktor.yaml"
+    assert cli_config._bootstrap_user_config(dest) is False
+    assert not dest.exists()
+    assert not list(tmp_path.iterdir())
+
+
+def test_bootstrap_cleanup_failure_keeps_success(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "unlink", lambda *a, **k: (_ for _ in ()).throw(OSError("unlink failure")))
+    dest = tmp_path / "arktor.yaml"
+    assert cli_config._bootstrap_user_config(dest) is True
+    assert dest.read_text()

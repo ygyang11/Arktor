@@ -6,14 +6,14 @@ import copy
 import logging
 import os
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING
 
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.application.current import get_app_or_none
 from rich.logging import RichHandler
-
-import agent_cli
 
 if TYPE_CHECKING:
     from rich.console import Console
@@ -31,14 +31,33 @@ def current_effort() -> str | None:
 
 
 def _bootstrap_user_config(dest: Path) -> bool:
-    template = Path(agent_cli.__file__).resolve().parents[2] / "arktor_example.yaml"
-    if not template.exists():
-        return False
+    temp_path: Path | None = None
     try:
+        template = (
+            files("agent_harness")
+            .joinpath("resources", "arktor.example.yaml")
+            .read_text(encoding="utf-8")
+        )
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+        with NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=dest.parent,
+            prefix=f".{dest.name}.", suffix=".tmp", delete=False,
+        ) as output:
+            temp_path = Path(output.name)
+            output.write(template)
+        os.link(temp_path, dest)
+    except FileExistsError:
+        return False
     except OSError:
         return False
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                logging.getLogger(__name__).debug(
+                    "Temporary config cleanup failed.", exc_info=True,
+                )
     return True
 
 

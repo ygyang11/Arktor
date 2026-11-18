@@ -84,6 +84,12 @@ async def _async_main(args: argparse.Namespace) -> int:
     theme = load_saved_theme()
     console = Console(theme=theme.rich)
     attach_rich_logging(console)
+    if config_result.bootstrapped:
+        console.print(
+            f"[dim]config created at [bold]{config_result.path}[/bold] — "
+            "edit this file to configure your model and API key[/dim]\n"
+        )
+        console.print()
     adapter = CliAdapter(console, theme)
     color_depth = (
         ColorDepth.DEPTH_1_BIT if console.no_color
@@ -139,11 +145,6 @@ async def _async_main(args: argparse.Namespace) -> int:
 
         msgs = await agent.context.short_term_memory.get_context_messages()
         render_session_replay(console, theme, msgs, session_id)
-    if config_result.bootstrapped:
-        console.print(
-            f"[dim]config created at [bold]{config_result.path}[/bold] — edit to customize[/dim]\n"
-        )
-        console.print()
 
     # Take over SIGINT from asyncio.run's default handler. Between-turn
     # idle absorbs Ctrl+C silently; per-turn task-bound handlers (via
