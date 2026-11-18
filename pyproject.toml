@@ -55,6 +55,7 @@ app = [
 cli = [
     "prompt-toolkit>=3.0.50",
     "rich>=13.0",
+    "packaging>=23.0",
 ]
 sandbox = [
     "docker>=7.0,<8.0",

@@ -20,6 +20,10 @@ def _check_deps() -> None:
         import rich  # noqa: F401
     except ImportError:
         missing.append("rich")
+    try:
+        import packaging  # noqa: F401
+    except ImportError:
+        missing.append("packaging")
     if missing:
         import sys
         sys.stderr.write(_MISSING_DEPS_TEMPLATE.format(deps=", ".join(missing)) + "\n")
