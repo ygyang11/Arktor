@@ -420,12 +420,25 @@ class BaseAgent(ABC, EventEmitter):
         *,
         session: str | BaseSession | None = None,
         after_input_appended: (Callable[[BaseAgent, Message, str], Awaitable[None]] | None) = None,
+        max_steps: int | None = None,
+    ) -> AgentResult:
+        return await self.run_turn(
+            input, session=session, after_input_appended=after_input_appended, max_steps=max_steps,
+        )
+
+    async def run_turn(
+        self,
+        input: str | Message,
+        *,
+        session: str | BaseSession | None = None,
+        after_input_appended: (Callable[[BaseAgent, Message, str], Awaitable[None]] | None) = None,
+        max_steps: int | None = None,
     ) -> AgentResult:
         """Main execution loop.
 
         Repeatedly calls step() until:
         1. step() returns a final response, or
-        2. max_steps is reached.
+        2. the per-turn max_steps limit is reached.
 
         Safe to call multiple times — state is reset automatically when
         the agent is in a terminal state (FINISHED or ERROR).
@@ -436,6 +449,10 @@ class BaseAgent(ABC, EventEmitter):
         after input append + on_run_start, before the first step.
         """
         from agent_harness.session.base import resolve_session
+
+        step_limit = self.max_steps if max_steps is None else max_steps
+        if step_limit <= 0:
+            raise ValueError("max_steps must be positive.")
 
         resolved_session: BaseSession | None = resolve_session(session)
 
@@ -477,7 +494,7 @@ class BaseAgent(ABC, EventEmitter):
             if after_input_appended is not None:
                 await after_input_appended(self, input_msg, input_text)
 
-            for step_num in range(1, self.max_steps + 1):
+            for step_num in range(1, step_limit + 1):
                 # Harvest completed background tasks
                 await self._collect_background_results()
 
@@ -513,7 +530,9 @@ class BaseAgent(ABC, EventEmitter):
             else:
                 # max_steps exceeded
                 self.context.state.transition(AgentState.ERROR)
-                raise MaxStepsExceededError(f"Agent '{self.name}' exceeded {self.max_steps} steps")
+                raise MaxStepsExceededError(
+                    f"Agent '{self.name}' exhausted the step budget",
+                )
 
         except Exception as e:
             await self.hooks.on_error(self.name, e)
