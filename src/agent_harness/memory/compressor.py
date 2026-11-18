@@ -510,6 +510,29 @@ class ContextCompressor:
             return f"compression_round_{round_num}.md"
         return f"compression_{self._scope}_round_{round_num}.md"
 
+    @staticmethod
+    def _write_archive(path: Path, content: str) -> Path:
+        """Write a complete archive without replacing an existing file."""
+        candidate = path
+        suffix = 1
+        while True:
+            try:
+                output = candidate.open("x", encoding="utf-8")
+            except FileExistsError:
+                candidate = path.with_name(f"{path.stem}.{suffix}{path.suffix}")
+                suffix += 1
+                continue
+            try:
+                with output:
+                    output.write(content)
+            except BaseException:
+                try:
+                    candidate.unlink(missing_ok=True)
+                except OSError:
+                    logger.debug("Incomplete archive cleanup failed.", exc_info=True)
+                raise
+            return candidate
+
     def _archive(self, messages: list[Message], round_num: int) -> Path:
         """Write compressed messages to session-bound archive file."""
         archive_dir = (
@@ -557,8 +580,7 @@ class ContextCompressor:
             lines.append("---")
             lines.append("")
 
-        path.write_text("\n".join(lines), encoding="utf-8")
-        return path
+        return self._write_archive(path, "\n".join(lines))
 
     # -- Pruning --
 
@@ -634,8 +656,7 @@ class ContextCompressor:
             lines += ["", "**Attachments**:"]
             lines += [f"- {describe_attachment_full(a)}" for a in tr.attachments]
 
-        path.write_text("\n".join(lines), encoding="utf-8")
-        return path
+        return self._write_archive(path, "\n".join(lines))
 
 
 def create_compressor(
