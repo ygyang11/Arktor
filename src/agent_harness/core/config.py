@@ -231,7 +231,7 @@ class TracingConfig(BaseModel):
 class SkillConfig(BaseModel):
     """Configuration for the skill system."""
 
-    dirs: list[str] = Field(default_factory=lambda: ["skills"])
+    dirs: list[str] = Field(default_factory=lambda: ["skills", "~/.arktor/skills"])
 
     @field_validator("dirs")
     @classmethod
