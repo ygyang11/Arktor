@@ -50,6 +50,7 @@ class PlanAndExecuteAgent(BaseAgent):
         self._executor_max_steps = executor_max_steps
         self._executor_approval = self._approval
         self._executor_approval_handler = self._approval_handler
+        self._component_seq = 0
 
     async def step(self) -> StepResult:
         """Not used — run_turn() is overridden."""
@@ -105,41 +106,55 @@ class PlanAndExecuteAgent(BaseAgent):
             if after_input_appended is not None:
                 await after_input_appended(self, input_msg, input_text)
 
+            self._component_seq += 1
+
             planner = PlannerAgent(
-                name=f"{self.name}.planner",
+                name=f"{self.name}.planner.{self._component_seq}",
                 llm=self.llm,
                 sub_llm=self.sub_llm,
                 tools=[],
-                context=self.context.fork("planner"),
+                context=self.context.fork(f"{self.name}.planner.{self._component_seq}"),
                 hooks=self.hooks,
                 max_steps=1,
                 prompt_builder=self._prompt_builder.fork(),
             )
+            planner._parent_name = self.name
+            planner._agent_type = "planner"
+            planner._llm_source = self._llm_source
+            planner._bg_manager.set_scope(planner.name)
             planner._usage_source = "subagent"
             executor = ExecutorAgent(
-                name=f"{self.name}.executor",
+                name=f"{self.name}.executor.{self._component_seq}",
                 llm=self.llm,
                 sub_llm=self.sub_llm,
                 tools=self.tools,
-                context=self.context.fork("executor"),
+                context=self.context.fork(f"{self.name}.executor.{self._component_seq}"),
                 hooks=self.hooks,
                 max_steps=self._executor_max_steps,
                 approval=self._executor_approval,
                 approval_handler=self._executor_approval_handler,
                 prompt_builder=self._prompt_builder.fork(),
             )
+            executor._parent_name = self.name
+            executor._agent_type = "executor"
+            executor._llm_source = self._llm_source
+            executor._bg_manager.set_scope(executor.name)
             executor._usage_source = "subagent"
             executor._sandbox = self._sandbox
             replanner = ReplannerAgent(
-                name=f"{self.name}.replanner",
+                name=f"{self.name}.replanner.{self._component_seq}",
                 llm=self.llm,
                 sub_llm=self.sub_llm,
                 tools=[],
-                context=self.context.fork("replanner"),
+                context=self.context.fork(f"{self.name}.replanner.{self._component_seq}"),
                 hooks=self.hooks,
                 max_steps=1,
                 prompt_builder=self._prompt_builder.fork(),
             )
+            replanner._parent_name = self.name
+            replanner._agent_type = "replanner"
+            replanner._llm_source = self._llm_source
+            replanner._bg_manager.set_scope(replanner.name)
             replanner._usage_source = "subagent"
 
             plan_result = await planner.run(input_text)
