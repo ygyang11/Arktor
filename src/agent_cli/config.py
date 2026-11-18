@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -48,6 +49,11 @@ def load_config() -> ConfigLoadResult:
 
     load_dotenv(find_dotenv(usecwd=True))
 
+    if explicit := os.environ.get("ARKTOR_CONFIG"):
+        config_path = Path(explicit).expanduser()
+        HarnessConfig.load(config_path)
+        return ConfigLoadResult(path=config_path, bootstrapped=False)
+
     project_cfg = Path.cwd() / "arktor.yaml"
     if project_cfg.exists():
         HarnessConfig.load(project_cfg)
@@ -62,7 +68,7 @@ def load_config() -> ConfigLoadResult:
         HarnessConfig.load(user_cfg)
         return ConfigLoadResult(path=user_cfg, bootstrapped=bootstrapped)
 
-    HarnessConfig.load(None, env_override=True)
+    HarnessConfig.load()
     return ConfigLoadResult(path=None, bootstrapped=False)
 
 
