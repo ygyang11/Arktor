@@ -3,6 +3,7 @@ from agent_harness.core.config import HarnessConfig
 from agent_harness.hooks.base import DefaultHooks
 from agent_harness.hooks.composite import CompositeHooks
 from agent_harness.hooks.progress import ProgressHooks
+from agent_harness.hooks.recording import RecordingHooks
 from agent_harness.hooks.tracing import TracingHooks
 
 
@@ -34,5 +35,6 @@ __all__ = [
     "TracingHooks",
     "ProgressHooks",
     "CompositeHooks",
+    "RecordingHooks",
     "resolve_hooks",
 ]
