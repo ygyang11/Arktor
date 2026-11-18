@@ -1,12 +1,14 @@
 """Tests for agent_harness.memory.compressor — ContextCompressor."""
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agent_harness import ReActAgent, RecordingHooks
 from agent_harness.core.message import Attachment, Message, Role, ToolCall, ToolResult
 from agent_harness.memory.compressor import ContextCompressor
 from tests.conftest import MockLLM
@@ -271,6 +273,39 @@ class TestCompress:
         assert clone._session_id == "test"
         assert clone._compression_count == 0
         assert clone._archive_paths == []
+
+    @pytest.mark.parametrize("distinct", [False, True])
+    async def test_summary_binds_agent_and_clone_drops_callback(
+        self, tmp_path: Path, distinct: bool,
+    ) -> None:
+        main = MockLLM()
+        sub = MockLLM() if distinct else main
+        recorder = RecordingHooks(tmp_path / "compact.jsonl")
+        agent = ReActAgent(name="owner", llm=main, sub_llm=sub, hooks=recorder)
+        compressor = agent.context.short_term_memory.compressor
+        assert compressor is not None
+        compressor._retain_count = 1
+        messages = [Message.user("older"), Message.assistant("answer"), Message.user("recent")]
+
+        compressed = await compressor.compress(messages)
+
+        assert any(message.metadata.get("is_compression_summary") for message in compressed)
+        record = json.loads(recorder.path.read_text().splitlines()[0])
+        assert record["call"] == {"seq": 1, "kind": "compact", "llm": "sub" if distinct else "main"}
+        assert record["agent_name"] == "owner"
+
+        clone = compressor.clone(scope="child")
+        assert clone._summary_call is None
+        child = ReActAgent(
+            name="child", llm=main, sub_llm=sub,
+            context=agent.context.fork("child"), hooks=recorder,
+        )
+        child_compressor = child.context.short_term_memory.compressor
+        assert child_compressor is not None
+        await child_compressor.compress(messages)
+
+        records = [json.loads(line) for line in recorder.path.read_text().splitlines()]
+        assert records[-1]["agent_name"] == "child" and records[-1]["call"]["seq"] == 1
 
     def test_restore_runtime_state_recovers_round_and_archive_paths(
         self, compressor: ContextCompressor

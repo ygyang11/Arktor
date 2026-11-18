@@ -1,13 +1,18 @@
-"""Tests for retrying transport failures during provider streaming."""
+"""Tests for provider request and stream retries."""
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
+from openai import AsyncOpenAI
 
+from agent_harness import HarnessConfig, ReActAgent, RecordingHooks
+from agent_harness.core.config import LLMConfig
 from agent_harness.core.message import Message
 from agent_harness.llm.anthropic_provider import AnthropicProvider
 from agent_harness.llm.openai_provider import OpenAIProvider
@@ -101,6 +106,67 @@ async def test_openai_stream_retries_httpx_transport_error(error: httpx.Transpor
 
     assert response.message.content == "ok"
     assert calls == 2
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_openai_http_header_retry_and_record(
+    stream: bool, enabled: bool, tmp_path: Path,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(429, json={"error": {"message": "retry", "type": "rate_limit"}})
+
+        usage = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+        if stream:
+            data = {
+                "id": "test", "object": "chat.completion.chunk", "created": 0, "model": "mock",
+                "choices": [{"index": 0, "delta": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": usage,
+            }
+            return httpx.Response(
+                200, headers={"content-type": "text/event-stream"},
+                text=f"data: {json.dumps(data)}\n\ndata: [DONE]\n\n",
+            )
+
+        return httpx.Response(200, json={
+            "id": "test", "object": "chat.completion", "created": 0, "model": "mock",
+            "choices": [{
+                "index": 0, "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop",
+            }],
+            "usage": usage,
+        })
+
+    config = HarnessConfig(llm=LLMConfig(
+        model="mock", api_key="test", max_retries=2,
+        retry_delay=0, send_request_context=enabled,
+    ))
+    provider = OpenAIProvider(config.llm)
+    await provider._client.close()
+    provider._client = AsyncOpenAI(
+        api_key="test", base_url="http://test/v1", max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+    )
+    recorder = RecordingHooks(tmp_path / "trace.jsonl")
+    agent = ReActAgent(name="worker", llm=provider, config=config, hooks=recorder, stream=stream)
+    try:
+        result = await agent.run("respond")
+    finally:
+        await agent.aclose()
+
+    assert result.output == "ok" and len(requests) == 2
+    records = [json.loads(line) for line in recorder.path.read_text().splitlines()]
+    assert len(records) == 1 and records[0]["call"]["seq"] == 1
+    if enabled:
+        headers = [request.headers["x-arktor-context"] for request in requests]
+        assert headers[0] == headers[1]
+        assert json.loads(headers[1])["call"] == records[0]["call"]
+    else:
+        assert all("x-arktor-context" not in request.headers for request in requests)
 
 
 @pytest.mark.asyncio
