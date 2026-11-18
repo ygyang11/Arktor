@@ -249,11 +249,12 @@ class ContextCompressor:
             older_msgs, recent_msgs, extra_instructions
         )
 
-        self._compression_count += 1
+        next_round = self._compression_count + 1
         archive_path: str | None = None
         if self._session_id:
-            archive_path = str(self._archive(older_msgs, self._compression_count))
+            archive_path = str(self._archive(older_msgs, next_round))
             self._archive_paths.append(archive_path)
+        self._compression_count = next_round
 
         summary_content = self._build_summary_content(summary_text, archive_path)
         summary_msg = Message.system(

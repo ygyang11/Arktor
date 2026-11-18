@@ -1,6 +1,7 @@
 """Tests for agent_harness.memory.compressor — ContextCompressor."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -8,6 +9,7 @@ import pytest
 
 from agent_harness.core.message import Attachment, Message, Role, ToolCall, ToolResult
 from agent_harness.memory.compressor import ContextCompressor
+from tests.conftest import MockLLM
 
 
 @pytest.fixture
@@ -726,3 +728,76 @@ class TestPruneToolOutputsHardening:
         assert msgs[1].tool_result.content == big
         # Suppress unused import warning in case logging is removed later.
         _ = logging
+
+
+def make_compressor(session="test", scope="main"):
+    llm = MockLLM()
+    return ContextCompressor(llm, model="test", session_id=session, scope=scope, retain_count=2)
+
+
+def messages():
+    return [msg for i in range(8) for msg in (Message.user(f"q{i}"), Message.assistant(f"a{i}"))]
+
+
+def test_archive_real_collisions_and_restart(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    first = make_compressor(scope="a/b")
+    second = make_compressor(scope="a_b")
+    old = first._archive([Message.user("old")], 1)
+    content = old.read_text()
+    new = second._archive([Message.user("new")], 1)
+    restarted = make_compressor(scope="a/b")._archive([Message.user("restart")], 1)
+    assert len({old,new,restarted}) == 3
+    assert old.read_text() == content
+    a = first._archive_pruned(ToolResult(tool_call_id="same", content="first"))
+    b = second._archive_pruned(ToolResult(tool_call_id="same", content="second"))
+    assert a != b and "first" in a.read_text() and "second" in b.read_text()
+
+
+def test_archive_concurrent_collision(tmp_path):
+    target = tmp_path / "a.md"
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        paths = list(pool.map(lambda i: ContextCompressor._write_archive(target, str(i)), range(24)))
+    assert len(set(paths)) == 24
+    assert {p.read_text() for p in paths} == {str(i) for i in range(24)}
+
+
+@pytest.mark.parametrize("when", ["write", "close"])
+async def test_archive_failure_is_transactional(tmp_path, monkeypatch, when):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    c = make_compressor()
+    original = Path.open
+    class Broken:
+        def __init__(self, path, *args, **kwargs):
+            self.inner = original(path, *args, **kwargs)
+        def __enter__(self):
+            return self
+        def write(self, text):
+            self.inner.write(text[:3] if when == "write" else text)
+            if when == "write":
+                raise OSError("failed write")
+        def __exit__(self, *args):
+            self.inner.close()
+            if when == "close":
+                raise OSError("failed close")
+    original_messages = messages()
+    snapshot = [m.model_dump() for m in original_messages]
+    with monkeypatch.context() as m:
+        m.setattr(Path, "open", lambda path,*a,**kw: Broken(path,*a,**kw))
+        with pytest.raises(OSError):
+            await c.compress(original_messages)
+        assert c._compression_count == 0 and c._archive_paths == []
+        assert [m.model_dump() for m in original_messages] == snapshot
+    assert not list(tmp_path.rglob("*.md"))
+    result = await c.compress(original_messages)
+    assert c._compression_count == 1
+    actual = c._archive_paths[0]
+    assert Path(actual).exists()
+    assert any(actual in (m.content or "") for m in result)
+
+
+async def test_no_session_counter_still_increments():
+    c = make_compressor(session=None)
+    await c.compress(messages())
+    assert c._compression_count == 1
+    assert c._archive_paths == []
