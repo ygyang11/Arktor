@@ -37,6 +37,13 @@ from agent_harness.core.message import Message, Role, ToolCall, ToolResult
 from agent_harness.hooks import DefaultHooks, resolve_hooks
 from agent_harness.llm import create_llm, create_sub_llm
 from agent_harness.llm.base import BaseLLM
+from agent_harness.llm.call_context import (
+    AgentIdentity,
+    CallKind,
+    ModelCallContext,
+    ModelSource,
+    with_request_context,
+)
 from agent_harness.llm.types import LLMResponse, LLMRetryInfo, StreamDelta, Usage, UsageSource
 from agent_harness.memory.short_term import CallSnapshot, SectionWeights
 from agent_harness.tool.base import BaseTool, ToolSchema
@@ -115,6 +122,10 @@ class BaseAgent(ABC, EventEmitter):
         from agent_harness.prompt.sections import create_default_builder, make_intro_section
 
         self.name = name
+        self._parent_name: str | None = None
+        self._agent_type = "main"
+        self._llm_source: ModelSource = "main"
+        self._llm_call_seq = 0
         if context is not None:
             self.context = context
         else:
@@ -813,6 +824,24 @@ class BaseAgent(ABC, EventEmitter):
         """
         ...
 
+    def _next_call_context(
+        self,
+        kind: CallKind,
+        runtime_llm: BaseLLM,
+    ) -> ModelCallContext:
+        self._llm_call_seq += 1
+        source: ModelSource = self._llm_source if runtime_llm is self.llm else "sub"
+        return ModelCallContext(
+            agent=AgentIdentity(
+                name=self.name,
+                parent=self._parent_name,
+                type=self._agent_type,
+            ),
+            seq=self._llm_call_seq,
+            kind=kind,
+            llm=source,
+        )
+
     async def call_llm(
         self,
         messages: list[Message] | None = None,
@@ -891,6 +920,12 @@ class BaseAgent(ABC, EventEmitter):
         async def _on_retry(info: LLMRetryInfo) -> None:
             await self.hooks.on_llm_retry(self.name, info)
 
+        call_context = self._next_call_context("agent", self.llm)
+        request_kwargs = with_request_context(
+            kwargs,
+            call_context,
+            enabled=self.context.config.llm.send_request_context,
+        )
         if self._stream:
 
             async def _on_delta(delta: StreamDelta) -> None:
@@ -901,14 +936,14 @@ class BaseAgent(ABC, EventEmitter):
                 tools=tools,
                 on_delta=_on_delta,
                 on_retry=_on_retry,
-                **kwargs,
+                **request_kwargs,
             )
         else:
             response = await self.llm.generate_with_events(
                 messages,
                 tools=tools,
                 on_retry=_on_retry,
-                **kwargs,
+                **request_kwargs,
             )
 
         self._run_usage = self._run_usage + response.usage
@@ -931,6 +966,13 @@ class BaseAgent(ABC, EventEmitter):
             message_count=len(stm._messages),
             section_weights=weights,
         ))
+        await self.hooks.on_llm_response(
+            self.name,
+            messages,
+            response,
+            call_context=call_context,
+            tools=tools,
+        )
         return response
 
     async def execute_tools(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
